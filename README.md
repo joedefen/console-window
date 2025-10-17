@@ -89,3 +89,15 @@ if __name__ == '__main__':
 ## License
 MIT
 
+## Projects Using console-window
+For more extensive examples, you can look at some projects using `console-window`:
+
+* [efibootdude](https://github.com/joedefen/efibootdude)
+  * simple wrapper for `efibootmgr`
+  * one of the smaller projects
+  * demonstrates a context sensitive available keys lines (i.e., first line) where the actions depend on current line.
+* [my-snaps](https://github.com/joedefen/my-snaps)
+  * special purpose BTRFS snap manager
+* [vappman](https://github.com/joedefen/vappman)
+  * convenince wrapper to mostly hide CLI of [AppMan](https://github.com/ivan-hc/AppMan), a life-cycle manager for 2000+ AppImages
+
