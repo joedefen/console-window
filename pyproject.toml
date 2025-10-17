@@ -1,0 +1,47 @@
+# pyproject.toml
+# TEST basic imports
+#    python -m venv test_venv
+#    source test_venv/bin/activate
+#    python3 -m venv test_venv
+#    source test_venv/bin/activate
+#    pip install dist/console_window-0.1.0-py3-none-any.whl
+#    python3 # within, from console_window import ConsoleWindow
+#    deactivate
+#    rm -rf test_venv/
+
+
+[build-system]
+requires = ["flit_core >=3.2,<4"]
+build-backend = "flit_core.buildapi"
+
+# ----------------------------------------------------------------------
+# FLIT MODULE CONFIGURATION
+[tool.flit.module]
+name = "console_window"
+
+# ----------------------------------------------------------------------
+# UNIFIED PROJECT METADATA (Replaces [tool.flit.metadata])
+[project]
+name = "console-window" 
+version = "1.0.0"
+description = "A robust curses wrapper for creating Text User Interfaces (TUIs)."
+readme = "README.md"
+requires-python = ">=3.8"
+license = {file = "LICENSE"}
+
+dependencies = [
+    # "dependency-name >= version", 
+]
+
+authors = [
+    {name = "Joe Defen", email = "joedef@duck.com"},
+]
+
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: Terminals",
+    "Topic :: Software Development :: User Interfaces",
+]
