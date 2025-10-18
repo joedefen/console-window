@@ -102,7 +102,24 @@ class OptionSpinner:
             self._register(ns)
 
     def add_key(self, attr, descr, obj=None, vals=None, prompt=None, keys=None, comments=None):
-        """ Standard method"""
+        """ 
+        Add key to the list of handled keys.
+        * attr - the name of the attribute for the value;
+                the value will be referenced as obj.attr
+        * descr - the description of the key (for help screen).
+                if no keys are given, then the keys are just
+                the first letter of the description
+        * comments: additional line(s) in help screen for item
+                when the descr is not enough. It may be a single
+                string or a list of strings
+        * obj: the object of the value.  If not given, the object
+                will be self.default_obj which is a SimpleNamespace
+                keyed by 'attr'
+        * vals: a list of values if a spinner
+        * prompt: a prompt for the value in a dialog box;
+                you must provide 'vals' OR 'prompt'
+
+        """
         ns = self._make_option_ns()
         if keys:
             ns.keys = list(keys) if isinstance(keys, (list, tuple, set)) else [keys]
@@ -759,7 +776,7 @@ if __name__ == '__main__':
                 win.set_pick_mode(opts.pick_mode, opts.pick_size)
                 win.add_header(f'Header: {loop} "{opts.name}"')
                 for idx, line in enumerate(range(body_size//opts.pick_size)):
-                    win.add_body(f'Main pick: {loop}.{line}')
+                    win.put_body(f'Main pick: {loop}.{line}')
                     for num in range(1, opts.pick_size):
                         win.draw(num+idx*opts.pick_size, 0, f'  addon: {loop}.{line}')
             win.render()
