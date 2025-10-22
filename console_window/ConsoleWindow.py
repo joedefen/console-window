@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Custom Wrapper for python curses.
+Custom Wrapper for python curses, providing structured window management
+and an interactive option/key handler.
+
+This module provides two main classes: :py:class:`ConsoleWindow` for handling
+the screen, scrolling, and input; and :py:class:`OptionSpinner` for managing
+a set of key-driven application settings.
 """
 # pylint: disable=too-many-instance-attributes,too-many-arguments
 # pylint: disable=invalid-name,broad-except,too-many-branches,global-statement
@@ -17,26 +22,31 @@ from curses.textpad import rectangle, Textbox
 dump_str = None
 
 def ignore_ctrl_c():
-    """" Ignore SIGINT """
+    """
+    Ignores the **SIGINT** signal (Ctrl-C) to prevent immediate termination.
+    Used during curses operation.
+    """
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 def restore_ctrl_c():
-    """" Handle SIGINT """
+    """
+    Restores the default signal handler for **SIGINT** (Ctrl-C).
+    Called upon curses shutdown.
+    """
     signal.signal(signal.SIGINT, signal.default_int_handler)
 
 class OptionSpinner:
-    """Manage a bunch of options where the value is rotate thru
-    a fixed set of values pressing a key."""
-    def __init__(self):
-        """Give the object with the attribute to change its
-        value (e.g., options from argparse or "self" from
-        the object managing the window).
+    """
+    Manages a set of application options where the value can be rotated through
+    a fixed set of values (spinner) or requested via a dialog box (prompt) by
+    pressing a single key.
 
-        And array of specs like:
-            ['a - allow auto suggestions', 'allow_auto', True, False],
-            ['/ - filter pattern', 'filter_str', self.filter_str],
-        A spec can have a trailing None + more comments shown after
-        the value.
+    It also generates a formatted help screen based on the registered options.
+    """
+    def __init__(self):
+        """
+        Initializes the OptionSpinner, setting up internal mappings for options
+        and keys.
         """
         self.options, self.keys = [], []
         self.margin = 4 # + actual width (1st column right pos)
@@ -48,6 +58,7 @@ class OptionSpinner:
 
     @staticmethod
     def _make_option_ns():
+        """Internal helper to create a default namespace for an option."""
         return SimpleNamespace(
             keys=[],
             descr='',
@@ -59,7 +70,17 @@ class OptionSpinner:
         )
 
     def get_value(self, attr, coerce=False):
-        """Get the value of the given attribute."""
+        """
+        Get the current value of the given attribute.
+
+        :param attr: The name of the attribute (e.g., 'help_mode').
+        :param coerce: If True, ensures the value is one of the valid 'vals'
+                       or an empty string for prompted options.
+        :type attr: str
+        :type coerce: bool
+        :returns: The current value of the option attribute.
+        :rtype: Any
+        """
         ns = self.attr_to_option.get(attr, None)
         obj = ns.obj if ns else None
         value = getattr(obj, attr, None) if obj else None
@@ -75,7 +96,7 @@ class OptionSpinner:
         return value
 
     def _register(self, ns):
-        """ Create the mappings needed"""
+        """Create the internal mappings needed for a new option namespace."""
         assert ns.attr not in self.attr_to_option
         self.attr_to_option[ns.attr] = ns
         for key in ns.keys:
@@ -87,7 +108,22 @@ class OptionSpinner:
         self.get_value(ns.attr, coerce=True)
 
     def add(self, obj, specs):
-        """ Compatibility Method."""
+        """
+        **Compatibility Method.** Adds options using an older array-of-specs format.
+
+        A spec is a list or tuple like::
+
+            ['a - allow auto suggestions', 'allow_auto', True, False],
+            ['/ - filter pattern', 'filter_str', self.filter_str],
+
+        The key is derived from the first character of the description string.
+        It is recommended to use :py:meth:`add_key` for new code.
+
+        :param obj: The object holding the option attributes (e.g., an argparse namespace).
+        :param specs: An iterable of option specifications.
+        :type obj: Any
+        :type specs: list
+        """
         for spec in specs:
             ns = self._make_option_ns()
             ns.descr = spec[0]
@@ -102,23 +138,31 @@ class OptionSpinner:
             self._register(ns)
 
     def add_key(self, attr, descr, obj=None, vals=None, prompt=None, keys=None, comments=None):
-        """ 
-        Add key to the list of handled keys.
-        * attr - the name of the attribute for the value;
-                the value will be referenced as obj.attr
-        * descr - the description of the key (for help screen).
-                if no keys are given, then the keys are just
-                the first letter of the description
-        * comments: additional line(s) in help screen for item
-                when the descr is not enough. It may be a single
-                string or a list of strings
-        * obj: the object of the value.  If not given, the object
-                will be self.default_obj which is a SimpleNamespace
-                keyed by 'attr'
-        * vals: a list of values if a spinner
-        * prompt: a prompt for the value in a dialog box;
-                you must provide 'vals' OR 'prompt'
+        """
+        Adds an option that is toggled by a key press.
 
+        The option can be a **spinner** (rotates through a list of ``vals``) or
+        a **prompt** (requests string input via a dialog).
+
+        :param attr: The name of the attribute for the value; referenced as ``obj.attr``.
+        :param descr: The description of the key (for help screen).
+        :param obj: The object holding the value. If None, uses ``self.default_obj``.
+        :param vals: A list of values. If provided, the option is a spinner.
+        :param prompt: A prompt string. If provided instead of ``vals``, the key press
+                       will call :py:meth:`ConsoleWindow.answer`.
+        :param keys: A single key code or a list of key codes (integers or characters)
+                     that will trigger this option. If None, uses the first letter of
+                     ``descr``.
+        :param comments: Additional line(s) for the help screen item (string or list of strings).
+        :type attr: str
+        :type descr: str
+        :type obj: Any
+        :type vals: list or None
+        :type prompt: str or None
+        :type keys: int or list or tuple or None
+        :type comments: str or list or tuple or None
+        :raises AssertionError: If both ``vals`` and ``prompt`` are provided, or neither is.
+        :raises AssertionError: If a key is already registered.
         """
         ns = self._make_option_ns()
         if keys:
@@ -133,18 +177,29 @@ class OptionSpinner:
         ns.attr = attr
         ns.obj = obj if obj else self.default_obj
         ns.vals, ns.prompt = vals, prompt
-        assert bool(ns.vals) ^ bool(ns.prompt)
+        assert bool(ns.vals) ^ bool(ns.prompt) # Must be EITHER vals OR prompt
         self._register(ns)
 
     @staticmethod
     def show_help_nav_keys(win):
-        """For help screens, show the navigation keys. """
+        """
+        Displays the standard navigation keys blurb in the provided ConsoleWindow.
+
+        :param win: The :py:class:`ConsoleWindow` instance to write to.
+        :type win: ConsoleWindow
+        """
         for line in ConsoleWindow.get_nav_keys_blurb().splitlines():
             if line:
                 win.add_header(line)
 
     def show_help_body(self, win):
-        """ Write the help page section."""
+        """
+        Writes the formatted list of all registered options and their current
+        values to the body of the provided :py:class:`ConsoleWindow`.
+
+        :param win: The :py:class:`ConsoleWindow` instance to write to.
+        :type win: ConsoleWindow
+        """
         win.add_body('Type keys to alter choice:', curses.A_UNDERLINE)
 
         for ns in self.options:
@@ -167,7 +222,19 @@ class OptionSpinner:
                 win.add_body(f'{"":>{self.align}}:  {comment}')
 
     def do_key(self, key, win):
-        """Do the automated processing of a key."""
+        """
+        Processes a registered key press.
+
+        If the option is a spinner, it rotates to the next value. If it
+        requires a prompt, it calls ``win.answer()`` to get user input.
+
+        :param key: The key code received from :py:meth:`ConsoleWindow.prompt`.
+        :param win: The :py:class:`ConsoleWindow` instance for dialogs.
+        :type key: int
+        :type win: ConsoleWindow
+        :returns: The new value of the option, or None if the key is unhandled.
+        :rtype: Any or None
+        """
         ns = self.key_to_option.get(key, None)
         if ns is None:
             return None
@@ -181,19 +248,49 @@ class OptionSpinner:
         return value
 
 class ConsoleWindow:
-    """ Layer above curses to encapsulate what we need """
+    """
+    A high-level wrapper around the curses library that provides a structured
+    interface for terminal applications.
+
+    The screen is divided into a fixed-size **Header** area and a scrollable
+    **Body** area, separated by an optional line. It manages screen
+    initialization, cleanup, rendering, and user input including scrolling
+    and an optional item selection (pick) mode.
+    """
     timeout_ms = 200
     static_scr = None
     nav_keys = """
-        Navigation:    H/M/L:   top/middle/end-of-page
-            k, UP:  up one row               0, HOME:  first row
-          j, DOWN:  down one row              $, END:  last row
-           Ctrl-u:  half-page up       Ctrl-b, PPAGE:  page up
-           Ctrl-d:  half-page down     Ctrl-f, NPAGE:  page down
+        Navigation:      H/M/L:      top/middle/end-of-page
+          k, UP:  up one row             0, HOME:  first row
+        j, DOWN:  down one row           $, END:  last row
+          Ctrl-u:  half-page up     Ctrl-b, PPAGE:  page up
+          Ctrl-d:  half-page down     Ctrl-f, NPAGE:  page down
     """
     def __init__(self, head_line=True, head_rows=50, body_rows=200,
                  body_cols=200, keys=None, pick_mode=False, pick_size=1,
                  mod_pick=None, ctrl_c_terminates=True):
+        """
+        Initializes the ConsoleWindow, sets up internal pads, and starts curses mode.
+
+        :param head_line: If True, draws a horizontal line between header and body.
+        :param head_rows: The maximum capacity of the internal header pad.
+        :param body_rows: The maximum capacity of the internal body pad (scroll history).
+        :param body_cols: The maximum width for content pads.
+        :param keys: A collection of key codes to be explicitly returned by :py:meth:`prompt`.
+        :param pick_mode: If True, enables item highlighting/selection mode in the body.
+        :param pick_size: The number of rows to be highlighted as a single 'pick' unit.
+        :param mod_pick: An optional callable to modify the highlighted text before drawing.
+        :param ctrl_c_terminates: If True, Ctrl-C terminates the application (defeating signal handling).
+        :type head_line: bool
+        :type head_rows: int
+        :type body_rows: int
+        :type body_cols: int
+        :type keys: list or set or None
+        :type pick_mode: bool
+        :type pick_size: int
+        :type mod_pick: callable or None
+        :type ctrl_c_terminates: bool
+        """
         if ctrl_c_terminates:
             # then never want to ignore_ctrl_c (so defeat the ignorer/restorer)
             global ignore_ctrl_c, restore_ctrl_c
@@ -234,16 +331,27 @@ class ConsoleWindow:
         self.calc()
 
     def get_pad_width(self):
-        """ how much space to actually draw chars? """
+        """
+        Returns the maximum usable column width for content drawing.
+
+        :returns: The width in columns.
+        :rtype: int
+        """
         return min(self.cols-1, self.body_cols)
 
     @staticmethod
     def get_nav_keys_blurb():
-        """For a help screen, describe the nav keys"""
+        """
+        Returns a multiline string describing the default navigation key bindings
+        for use in help screens.
+
+        :returns: String of navigation keys.
+        :rtype: str
+        """
         return textwrap.dedent(ConsoleWindow.nav_keys)
 
     def _set_screen_dims(self):
-        """Recalculate dimensions ... return True if geometry changed."""
+        """Recalculate dimensions based on current terminal size."""
         rows, cols = self.scr.getmaxyx()
         same = bool(rows == self.rows and cols == self.cols)
         self.rows, self.cols = rows, cols
@@ -251,8 +359,13 @@ class ConsoleWindow:
 
     @staticmethod
     def _start_curses():
-        """ Curses initial setup.  Note: not using curses.wrapper because we
-        don't wish to change the colors. """
+        """
+        Performs the Curses initial setup: initscr, noecho, cbreak, curs_set(0),
+        keypad(1), and sets up the timeout.
+
+        :returns: The main screen object.
+        :rtype: _curses.window
+        """
         atexit.register(ConsoleWindow.stop_curses)
         ignore_ctrl_c()
         ConsoleWindow.static_scr = scr = curses.initscr()
@@ -265,7 +378,17 @@ class ConsoleWindow:
         return scr
 
     def set_pick_mode(self, on=True, pick_size=1):
-        """Set whether in highlight mode."""
+        """
+        Toggles the item highlighting/selection mode for the body area.
+
+        If pick mode is enabled or the pick size changes, it forces a redraw
+        of all body lines to clear any previous highlighting attributes.
+
+        :param on: If True, enables pick mode.
+        :param pick_size: The number of consecutive rows to highlight as one unit.
+        :type on: bool
+        :type pick_size: int
+        """
         was_on, was_size = self.pick_mode, self.pick_size
         self.pick_mode = bool(on)
         self.pick_size = max(pick_size, 1)
@@ -274,7 +397,10 @@ class ConsoleWindow:
 
     @staticmethod
     def stop_curses():
-        """ Curses shutdown (registered to be called on exit). """
+        """
+        Curses shutdown (registered to be called on exit). Restores the terminal
+        to its pre-curses state.
+        """
         if ConsoleWindow.static_scr:
             curses.nocbreak()
             curses.echo()
@@ -284,7 +410,12 @@ class ConsoleWindow:
             restore_ctrl_c()
 
     def calc(self):
-        """Recalculate dimensions ... return True if geometry changed."""
+        """
+        Recalculates the screen geometry, viewable areas, and maximum scroll position.
+
+        :returns: True if the screen geometry has changed, False otherwise.
+        :rtype: bool
+        """
         same = self._set_screen_dims()
         self.head.view_cnt = min(self.rows - self.hor_line_cnt, self.head.row_cnt)
         self.scroll_view_size = self.rows - self.head.view_cnt - self.hor_line_cnt
@@ -293,11 +424,11 @@ class ConsoleWindow:
         return not same
 
     def _put(self, ns, *args):
-        """ Add text to head/body pad using its namespace. args:
-            - bytes (converted to str/unicode)
-            - str (unicode)
-            - None (same as curses.A_NORMAL)
-            - int (curses attribute)
+        """
+        Adds text to the head/body pad using a mixed argument list.
+
+        Allows interleaving of text (str/bytes) and curses attributes (int).
+        Text segments before an attribute are flushed with that attribute.
         """
         def flush(attr=None):
             nonlocal self, is_body, row, text, seg, first
@@ -330,15 +461,25 @@ class ConsoleWindow:
             ns.row_cnt += 1
 
     def put_head(self, *args):
-        """ Put a line above the line."""
+        """
+        Adds a line of text to the header pad, supporting mixed text and attributes.
+
+        :param args: Mixed arguments of str/bytes (text) and int (curses attributes).
+        :type args: Any
+        """
         self._put(self.head, *args)
 
     def put_body(self, *args):
-        """ Put a line below the line."""
+        """
+        Adds a line of text to the body pad, supporting mixed text and attributes.
+
+        :param args: Mixed arguments of str/bytes (text) and int (curses attributes).
+        :type args: Any
+        """
         self._put(self.body, *args)
 
     def _add(self, ns, text, attr=None, resume=False):
-        """ Add text to head/body pad using its namespace"""
+        """Internal method to add text to pad using its namespace (simpler version of _put)."""
         is_body = bool(id(ns) == id(self.body))
         if ns.row_cnt < ns.rows:
             row = max(ns.row_cnt - (1 if resume else 0), 0)
@@ -356,17 +497,52 @@ class ConsoleWindow:
                 ns.row_cnt += 1
 
     def add_header(self, text, attr=None, resume=False):
-        """Add text to header"""
+        """
+        Adds a line of text to the header pad.
+
+        :param text: The text to add.
+        :param attr: Curses attribute (e.g., curses.A_BOLD).
+        :param resume: If True, adds the text to the current, incomplete line.
+        :type text: str
+        :type attr: int or None
+        :type resume: bool
+        """
         self._add(self.head, text, attr, resume)
 
     def add_body(self, text, attr=None, resume=False):
-        """ Add text to body (below header and header line)"""
+        """
+        Adds a line of text to the body pad.
+
+        :param text: The text to add.
+        :param attr: Curses attribute (e.g., curses.A_BOLD).
+        :param resume: If True, adds the text to the current, incomplete line.
+        :type text: str
+        :type attr: int or None
+        :type resume: bool
+        """
         self._add(self.body, text, attr, resume)
 
     def draw(self, y, x, text, text_attr=None, width=None, leftpad=False, header=False):
-        """Draws the given text (as utf-8 or unicode) at position (row=y,col=x)
-        with optional text attributes and width.
-        This is more compatible with my older, simpler Window class.
+        """
+        Draws the given text at a specific position (row=y, col=x) on a pad.
+
+        This method is useful for structured or overlay drawing, but is less
+        efficient than the standard add/put methods.
+
+        :param y: The row index on the pad.
+        :param x: The column index on the pad.
+        :param text: The text to draw (str or bytes).
+        :param text_attr: Optional curses attribute.
+        :param width: Optional fixed width for the drawn text (pads/truncates).
+        :param leftpad: If True and ``width`` is used, left-pads with spaces.
+        :param header: If True, draws to the header pad, otherwise to the body pad.
+        :type y: int
+        :type x: int
+        :type text: str or bytes
+        :type text_attr: int or None
+        :type width: int or None
+        :type leftpad: bool
+        :type header: bool
         """
         ns = self.head if header else self.body
         text_attr = text_attr if text_attr else curses.A_NORMAL
@@ -396,15 +572,15 @@ class ConsoleWindow:
             ns.texts[y] = ns.texts[y][:x].ljust(x) + uni + ns.texts[y][x+len(uni):]
             ns.pad.addstr(y, x, text, text_attr)
         except curses.error:
-            # this sucks, but curses returns an error if drawing the last character
-            # on the screen always.  this can happen if resizing screen even if
-            # special care is taken.  So, we just ignore errors.  Anyhow, you cannot
-            # get decent error handling.
+            # curses errors on drawing the last character on the screen; ignore
             pass
 
 
     def highlight_picked(self):
-        """Highlight the current pick and un-highlight the previous pick."""
+        """
+        Highlights the current selection and un-highlights the previous one.
+        Called internally during :py:meth:`render_once` when in pick mode.
+        """
         def get_text(pos):
             nonlocal self
             return self.body.texts[pos][0:self.cols] if pos < len(self.body.texts) else ''
@@ -431,10 +607,7 @@ class ConsoleWindow:
                 self.last_pick_pos = pos1
 
     def _scroll_indicator_row(self):
-        """ Compute the absolute scroll indicator row:
-        - We want the top to be only when scroll_pos==0
-        - We want the bottom to be only when scroll_pos=max_scroll_pos-1
-        """
+        """Internal helper to compute the scroll indicator row position."""
         if self.max_scroll_pos <= 1:
             return self.body_base
         y2, y1 = self.scroll_view_size-1, 1
@@ -444,10 +617,7 @@ class ConsoleWindow:
         return min(self.body_base + int(max(pos, 0)), self.rows-1)
 
     def _scroll_indicator_col(self):
-        """ Compute the absolute scroll indicator col:
-        - We want the left to be only when scroll_pos==0
-        - We want the right to be only when scroll_pos=max_scroll_pos-1
-        """
+        """Internal helper to compute the scroll indicator column position."""
         if self.pick_mode:
             return self._calc_indicator(
                 self.pick_pos, 0, self.body.row_cnt-1, 0, self.cols-1)
@@ -455,6 +625,7 @@ class ConsoleWindow:
             self.scroll_pos, 0, self.max_scroll_pos, 0, self.cols-1)
 
     def _calc_indicator(self, pos, pos0, pos9, ind0, ind9):
+        """Internal helper to calculate indicator position based on content position."""
         if self.max_scroll_pos <= 0:
             return -1 # not scrollable
         if pos9 - pos0 <= 0:
@@ -467,8 +638,12 @@ class ConsoleWindow:
         return min(max(ind, ind0+1), ind9-1)
 
     def render(self):
-        """Draw everything added. In a loop cuz curses is a
-        piece of shit."""
+        """
+        Draws the content of the pads to the visible screen.
+
+        This method wraps :py:meth:`render_once` in a loop to handle spurious
+        ``curses.error`` exceptions that can occur during screen resizing.
+        """
         for _ in range(128):
             try:
                 self.render_once()
@@ -499,10 +674,16 @@ class ConsoleWindow:
 
 
     def fix_positions(self, delta=0):
-        """ Ensure the vertical positions are on the playing field """
+        """
+        Ensures the vertical scroll and pick positions are within valid boundaries,
+        adjusting the scroll position to keep the pick cursor visible.
+
+        :param delta: An optional change in position (e.g., from key presses).
+        :type delta: int
+        :returns: The indent amount for the body content (1 if pick mode is active, 0 otherwise).
+        :rtype: int
+        """
         self.calc()
-        # if self.scroll_view_size <= 0:
-            # self.scr.refresh()
         if self.pick_mode:
             self.pick_pos += delta
         else:
@@ -536,7 +717,10 @@ class ConsoleWindow:
         return indent
 
     def render_once(self):
-        """Draw everything added."""
+        """
+        Performs the actual rendering of header, horizontal line, and body pads.
+        Handles pick highlighting and scroll bar drawing.
+        """
 
         indent = self.fix_positions()
 
@@ -578,10 +762,20 @@ class ConsoleWindow:
 
     def answer(self, prompt='Type string [then Enter]', seed='', width=80):
         """
-        Popup with manual text input handling for unlimited length.
-        
-        This function replaces the curses.textpad.Textbox to handle arbitrarily
-        long strings by managing a separate input buffer and display window.
+        Presents a modal dialog box for manual text input, handling arbitrarily
+        long strings.
+
+        This custom function replaces ``curses.textpad.Textbox`` to manage
+        a separate input buffer and display window with horizontal scrolling.
+
+        :param prompt: The text prompt displayed above the input field.
+        :param seed: The initial string value in the input field.
+        :param width: The maximum visible width of the input box.
+        :type prompt: str
+        :type seed: str
+        :type width: int
+        :returns: The string entered by the user upon pressing Enter.
+        :rtype: str
         """
         input_string = list(seed)
         cursor_pos = len(input_string)
@@ -620,6 +814,7 @@ class ConsoleWindow:
             key = self.scr.getch()
             
             if key in [10, 13]:  # Enter key
+                curses.curs_set(0) # Restore cursor visibility
                 return "".join(input_string)
             elif key in [curses.KEY_BACKSPACE, 127, 8]:  # Backspace
                 if cursor_pos > 0:
@@ -641,16 +836,24 @@ class ConsoleWindow:
                 cursor_pos += 1
 
     def alert(self, title='ALERT', message='', height=1, width=80):
-        """Alert box"""
+        """
+        Displays a blocking, modal alert box with a title and message.
+
+        Waits for the user to press **ENTER** to acknowledge and dismiss the box.
+
+        :param title: The title text for the alert box.
+        :param message: The message body content.
+        :param height: The height of the message area (number of lines).
+        :param width: The visible width of the message area.
+        :type title: str
+        :type message: str
+        :type height: int
+        :type width: int
+        """
         def mod_key(key):
+            """Internal function to map Enter/Key_Enter to an arbitrary key code 7 for Textbox.edit to exit."""
             return  7 if key in (10, curses.KEY_ENTER) else key
 
-        # need 3 extra cols for rectangle (so we don't draw in southeast corner)
-        # and 3 rows (top/prompt/bottom)
-        #      +Prompt---    -----------------+
-        #      | First line for message...    |
-        #      | Last line for message.       |
-        #      +-----------Press ENTER  to ack+
         if self.rows < 2+height or self.cols < 30:
             return
         width = min(width, self.cols-3) # max text width
@@ -663,7 +866,7 @@ class ConsoleWindow:
         for row in range(self.rows):
             self.scr.insstr(row, 0, ' '*self.cols, curses.A_REVERSE)
         pad = curses.newpad(20, 200)
-        win = curses.newwin(1, 1, row9-1, col9-2) # input window
+        win = curses.newwin(1, 1, row9-1, col9-2) # input window (dummy for Textbox)
         rectangle(self.scr, row0, col0, row9, col9)
         self.scr.addstr(row0, col0+1, title[0:width], curses.A_REVERSE)
         pad.addstr(message)
@@ -671,11 +874,17 @@ class ConsoleWindow:
         self.scr.addstr(row9, col0+1+width-len(ending), ending)
         self.scr.refresh()
         pad.refresh(0, 0, row0+1, col0+1, row9-1, col9-1)
+        
+        # Use a dummy Textbox with a dummy window to block until Enter is pressed
+        curses.curs_set(0) # ensure cursor is off
         Textbox(win).edit(mod_key).strip()
         return
 
     def clear(self):
-        """Clear in prep for new screen"""
+        """
+        Clears all content from both the header and body pads and resets internal
+        counters in preparation for adding new screen content.
+        """
         self.scr.clear()
         self.head.pad.clear()
         self.body.pad.clear()
@@ -683,7 +892,18 @@ class ConsoleWindow:
         self.head.row_cnt = self.body.row_cnt = 0
 
     def prompt(self, seconds=1.0):
-        """Here is where we sleep waiting for commands or timeout"""
+        """
+        Waits for user input for up to ``seconds``.
+
+        Handles terminal resize events and built-in navigation keys, updating
+        scroll/pick position as needed.
+
+        :param seconds: The maximum time (float) to wait for input.
+        :type seconds: float
+        :returns: The key code if it is one of the application-defined ``keys``,
+                  or None on timeout or if a navigation key was pressed.
+        :rtype: int or None
+        """
         ctl_b, ctl_d, ctl_f, ctl_u = 2, 4, 6, 21
         elapsed = 0.0
         while elapsed < seconds:
@@ -692,9 +912,7 @@ class ConsoleWindow:
                 elapsed += self.timeout_ms / 1000
                 continue
             if key in (curses.KEY_RESIZE, ) or curses.is_term_resized(self.rows, self.cols):
-                # self.scr.erase()
                 self._set_screen_dims()
-                # self.render()
                 break
 
             # App keys...
