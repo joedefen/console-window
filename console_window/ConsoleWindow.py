@@ -21,6 +21,16 @@ from types import SimpleNamespace
 from curses.textpad import rectangle, Textbox
 dump_str = None
 
+ctrl_c_flag = False
+
+def ctrl_c_handler(sig, frame):
+    """
+    Custom handler for SIGINT (Ctrl-C).
+    Sets a global flag to be checked by the main input loop.
+    """
+    global ctrl_c_flag
+    ctrl_c_flag = True
+
 def ignore_ctrl_c():
     """
     Ignores the **SIGINT** signal (Ctrl-C) to prevent immediate termination.
@@ -280,7 +290,9 @@ class ConsoleWindow:
         :param pick_mode: If True, enables item highlighting/selection mode in the body.
         :param pick_size: The number of rows to be highlighted as a single 'pick' unit.
         :param mod_pick: An optional callable to modify the highlighted text before drawing.
-        :param ctrl_c_terminates: If True, Ctrl-C terminates the application (defeating signal handling).
+        :param ctrl_c_terminates: If True (default), Ctrl-C terminates the application 
+                                  (SIGINT is ignored). If False, Ctrl-C is caught by 
+                                  a signal handler and reported as key code 3.
         :type head_line: bool
         :type head_rows: int
         :type body_rows: int
@@ -291,12 +303,23 @@ class ConsoleWindow:
         :type mod_pick: callable or None
         :type ctrl_c_terminates: bool
         """
+        # Modify signal handlers based on user choice
+        global ignore_ctrl_c, restore_ctrl_c
         if ctrl_c_terminates:
             # then never want to ignore_ctrl_c (so defeat the ignorer/restorer)
-            global ignore_ctrl_c, restore_ctrl_c
             def noop():
                 return
             ignore_ctrl_c = restore_ctrl_c = noop
+            self.ctrl_c_terminates = ctrl_c_terminates
+        else:
+            # If not terminating, override the original signal functions
+            # to set the custom handler, which will pass key 3 via the flag.
+            def _setup_ctrl_c():
+                signal.signal(signal.SIGINT, ctrl_c_handler)
+            def _restore_ctrl_c():
+                signal.signal(signal.SIGINT, signal.default_int_handler)
+            ignore_ctrl_c = _setup_ctrl_c
+            restore_ctrl_c = _restore_ctrl_c
 
         self.scr = self._start_curses()
 
@@ -327,6 +350,7 @@ class ConsoleWindow:
         self.body_cols, self.body_rows = body_cols, body_rows
         self.scroll_view_size = 0  # no. viewable lines of the body
         self.handled_keys = set(keys) if isinstance(keys, (set, list)) else []
+        self.pending_keys = set()
         self._set_screen_dims()
         self.calc()
 
@@ -366,6 +390,7 @@ class ConsoleWindow:
         :returns: The main screen object.
         :rtype: _curses.window
         """
+        # The signal setup is handled in __init__ (via ignore_ctrl_c call below)
         atexit.register(ConsoleWindow.stop_curses)
         ignore_ctrl_c()
         ConsoleWindow.static_scr = scr = curses.initscr()
@@ -904,13 +929,30 @@ class ConsoleWindow:
                   or None on timeout or if a navigation key was pressed.
         :rtype: int or None
         """
+        global ctrl_c_flag
         ctl_b, ctl_d, ctl_f, ctl_u = 2, 4, 6, 21
-        elapsed = 0.0
-        while elapsed < seconds:
+        begin_mono = time.monotonic()
+        while True:
+            if time.monotonic() - begin_mono >= seconds:
+                break
+            while self.pending_keys:
+                key = self.pending_keys.pop()
+                if key in self.handled_keys:
+                    return key
+
             key = self.scr.getch()
-            if key == curses.ERR:
-                elapsed += self.timeout_ms / 1000
+            if ctrl_c_flag:
+                if key in self.handled_keys:
+                    self.pending_keys.add(key)
+                ctrl_c_flag = False # Reset flag
+                if 0x3 in self.handled_keys:
+                    return 0x3 # Return the ETX key code
                 continue
+
+            if key == curses.ERR:
+                continue
+
+
             if key in (curses.KEY_RESIZE, ) or curses.is_term_resized(self.rows, self.cols):
                 self._set_screen_dims()
                 break
@@ -956,7 +998,6 @@ class ConsoleWindow:
 
             if pos != was_pos:
                 self.render()
-            # ignore unhandled keys
         return None
 
 def no_runner():
@@ -964,37 +1005,53 @@ def no_runner():
 
 if __name__ == '__main__':
     def main():
+        import sys
         """Test program"""
         def do_key(key):
-            nonlocal spin, win, opts
+            nonlocal spin, win, opts, pick_values
             value = spin.do_key(key, win)
             if key in (ord('p'), ord('s')):
                 win.set_pick_mode(on=opts.pick_mode, pick_size=opts.pick_size)
+                if not opts.pick_mode:
+                    opts.prev_pick = pick_values[win.pick_pos//win.pick_size]
             elif key == ord('n'):
                 win.alert(title='Info', message=f'got: {value}')
+            elif key in (ord('q'), 0x3):
+                sys.exit(key)
             return value
 
         spin = OptionSpinner()
         spin.add_key('help_mode', '? - toggle help screen', vals=[False, True])
-        spin.add_key('pick_mode', 'p - toggle pick mode', vals=[False, True])
+        spin.add_key('pick_mode', 'p - oggle pick mode, turn off to pick current line', vals=[False, True])
         spin.add_key('pick_size', 's - #rows in pick', vals=[1, 2, 3])
         spin.add_key('name', 'n - select name', prompt='Provide Your Name:')
         spin.add_key('mult', 'm - row multiplier', vals=[0.5, 0.9, 1.0, 1.1, 2, 4, 16])
         opts = spin.default_obj
+        other_keys = {0x3, ord('q')}
 
-        win = ConsoleWindow(head_line=True, keys=spin.keys)
-        opts.name = "[hit 'n' to enter name]"
+        win = ConsoleWindow(head_line=True, keys=spin.keys^other_keys,
+                            ctrl_c_terminates=False)
+        opts.name = ""
+        opts.prev_pick = 'n/a'
+        pick_values = []
         for loop in range(100000000000):
             body_size = int(round(win.scroll_view_size*opts.mult))
             if opts.help_mode:
                 win.set_pick_mode(False)
                 spin.show_help_nav_keys(win)
                 spin.show_help_body(win)
+                win.put_body('Other Keys:', curses.A_UNDERLINE)
+                win.put_body('  q, CTRL-C:  quit program')
             else:
                 win.set_pick_mode(opts.pick_mode, opts.pick_size)
-                win.add_header(f'Header: {loop} "{opts.name}"')
+                win.add_header(f'{time.monotonic():.3f} [p]ick={opts.pick_mode}'
+                                  + f' s:#rowsInPick={opts.pick_size} [n]ame [m]ult={opts.pick_size} [q]uit')
+                win.add_header(f'Header: {loop} name="{opts.name}"  {opts.prev_pick=}')
+                pick_values = []
                 for idx, line in enumerate(range(body_size//opts.pick_size)):
-                    win.put_body(f'Main pick: {loop}.{line}')
+                    value = f'{loop}.{line}'
+                    win.put_body(f'Main pick: {value}')
+                    pick_values.append(value)
                     for num in range(1, opts.pick_size):
                         win.draw(num+idx*opts.pick_size, 0, f'  addon: {loop}.{line}')
             win.render()

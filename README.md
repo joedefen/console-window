@@ -19,7 +19,9 @@ The wrapper handles several advanced terminal interaction patterns automatically
 
   * **Padded Content Management:** Uses separate `head` and `body` pads, allowing for a static header area while the main content area can be scrolled independently.
   * **Seamless Resizing:** Automatically detects terminal size changes (`KEY_RESIZE`) and recalculates layout dimensions, with robust error handling to prevent common `curses.error` crashes during resizing.
-  * **Scroll & Pick Synchronization:** The `Window` class manages **scroll position** and a separate **pick position** (highlighted row) simultaneously. When using pick mode, scrolling automatically tracks the highlighted element to keep it visible.
+  * **Scroll & Pick Synchronization:** The `Window` class manages **scroll position** and a separate **pick position** (highlighted row) simultaneously.
+    * When using pick mode, scrolling automatically tracks the highlighted element to keep it visible in `.pick_pos`.
+    * To use that value, you must separately be able to associate `.pick_pos` to its value by, say, keeping an array of values for every added line to the `body`. 
   * **Intuitive Navigation:** Provides built-in handling for common navigation keys (`j`/`k`, `UP`/`DOWN`, Page Up/Down, `H`/`M`/`L` for home/middle/last viewable line, etc.).
   * **Dynamic Options Management (`OptionSpinner`):** The companion class simplifies creation of application settings, allowing users to **toggle options** or input strings using single keypresses (e.g., `p` to toggle pick mode).
   * **Blocking Popups:** Includes fully implemented, blocking pop-up methods for user input (`.answer()`) and alerts (`.alert()`), handling the necessary temporary screen takeover and cursor management.
@@ -43,8 +45,10 @@ def main_app_loop(stdscr):
     spin.add_key('pick_size', 's - #rows in pick', vals=[1, 2, 3])
     spin.add_key('name', 'n - select name', prompt='Provide Your Name:')
 
+    other_keys = {ord('q'), ord('Q')}
+
     # 2. Initialize Window
-    win = Window(head_line=True, keys=spin.keys)
+    win = Window(head_line=True, keys=spin.keys^other_keys)
     opts.name = "[hit 'n' to enter name]"
     loop_count = 0
 
