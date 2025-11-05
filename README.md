@@ -48,7 +48,7 @@ def main_app_loop(stdscr):
     other_keys = {ord('q'), ord('Q')}
 
     # 2. Initialize Window
-    win = Window(head_line=True, keys=spin.keys^other_keys)
+    win = ConsoleWindow(head_line=True, keys=spin.keys^other_keys)
     opts.name = "[hit 'n' to enter name]"
     loop_count = 0
 
