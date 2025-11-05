@@ -32,7 +32,7 @@ This example demonstrates setting up the window, using the `OptionSpinner` for c
 
 ```python
 import curses
-from ConsoleWindow import Window, OptionSpinner, SimpleNamespace
+from ConsoleWindow import Window, OptionSpinner
 
 def main_app_loop(stdscr):
     # 1. Setup Options Manager
