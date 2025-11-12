@@ -764,7 +764,7 @@ class ConsoleWindow:
                     width = self.scroll_view_size/self.body.row_cnt*self.cols
                     bot = max(int(round(ind_pos-width/2)), 1)
                     top = min(int(round(ind_pos+width/2)), self.cols-1)
-                    cnt = top - bot
+                    cnt = max(top - bot, 1)
                 # self.scr.addstr(self.head.view_cnt, bot, '-'*cnt, curses.A_REVERSE)
                 # self.scr.hline(self.head.view_cnt, bot, curses.ACS_HLINE, curses.A_REVERSE, cnt)
                 for idx in range(bot, bot+cnt):
@@ -1030,12 +1030,13 @@ if __name__ == '__main__':
         other_keys = {0x3, ord('q')}
 
         win = ConsoleWindow(head_line=True, keys=spin.keys^other_keys,
-                            ctrl_c_terminates=False)
+                            ctrl_c_terminates=False, body_rows=4000)
         opts.name = ""
         opts.prev_pick = 'n/a'
         pick_values = []
         for loop in range(100000000000):
             body_size = int(round(win.scroll_view_size*opts.mult))
+            # body_size = 4000 # temp to test scroll pos indicator when big
             if opts.help_mode:
                 win.set_pick_mode(False)
                 spin.show_help_nav_keys(win)
