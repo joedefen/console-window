@@ -227,18 +227,19 @@ class OptionSpinner:
             # get / coerce the current value
             value = self.get_value(ns.attr)
             assert value is not None, f'cannot get value of {repr(ns.attr)}'
-            choices = ns.vals if ns.vals else [value]
 
             colon = '' if ns.category == 'action' else ':'
             win.add_body(f'{ns.descr:>{self.align}}{colon} ')
 
-            for choice in choices:
-                shown = f'{choice}'
-                if isinstance(choice, bool):
-                    shown = "ON" if choice else "off"
-                win.add_body(' ', resume=True)
-                win.add_body(shown, resume=True,
-                    attr=curses.A_REVERSE if choice == value else None)
+            if ns.category in ('cycle', 'prompt'):
+                choices = ns.vals if ns.vals else [value]
+                for choice in choices:
+                    shown = f'{choice}'
+                    if isinstance(choice, bool):
+                        shown = "ON" if choice else "off"
+                    win.add_body(' ', resume=True)
+                    win.add_body(shown, resume=True,
+                        attr=curses.A_REVERSE if choice == value else None)
 
             for comment in ns.comments:
                 win.add_body(f'{"":>{self.align}}:  {comment}')
