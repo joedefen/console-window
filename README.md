@@ -44,8 +44,7 @@ def main_app_loop(stdscr):
     spin.add_key('pick_mode', 'p - toggle pick mode', vals=[False, True])
     spin.add_key('pick_size', 's - #rows in pick', vals=[1, 2, 3])
     spin.add_key('name', 'n - select name', prompt='Provide Your Name:')
-
-    other_keys = {ord('q'), ord('Q')}
+    spin.add_key('quit', 'q,Q - quit the app', category='action', keys={ord('Q'), ord('q')})
 
     # 2. Initialize Window
     win = ConsoleWindow(head_line=True, keys=spin.keys^other_keys)
@@ -77,7 +76,8 @@ def main_app_loop(stdscr):
             # Check if OptionSpinner can handle the key (p, s, n, ?)
             spin.do_key(key, win) 
             
-            if key in (ord('q'), ord('Q')):
+            if opts.quit:
+                opts.quit = False
                 break # Exit the loop
         
         win.clear()

@@ -10,7 +10,9 @@ a set of key-driven application settings.
 """
 # pylint: disable=too-many-instance-attributes,too-many-arguments
 # pylint: disable=invalid-name,broad-except,too-many-branches,global-statement
+# pylint: disable=line-too-long,too-many-statements,too-many-locals
 
+import sys
 import traceback
 import atexit
 import signal
@@ -77,6 +79,7 @@ class OptionSpinner:
             vals=None,
             prompt=None,
             comments=[],
+            category=None,
         )
 
     def get_value(self, attr, coerce=False):
@@ -147,7 +150,8 @@ class OptionSpinner:
             ns.keys = [ord(ns.descr[0])]
             self._register(ns)
 
-    def add_key(self, attr, descr, obj=None, vals=None, prompt=None, keys=None, comments=None):
+    def add_key(self, attr, descr, obj=None, vals=None, prompt=None,
+                keys=None, comments=None, category=None):
         """
         Adds an option that is toggled by a key press.
 
@@ -164,6 +168,7 @@ class OptionSpinner:
                      that will trigger this option. If None, uses the first letter of
                      ``descr``.
         :param comments: Additional line(s) for the help screen item (string or list of strings).
+        :param category: (action, cycle, prompt)
         :type attr: str
         :type descr: str
         :type obj: Any
@@ -171,9 +176,11 @@ class OptionSpinner:
         :type prompt: str or None
         :type keys: int or list or tuple or None
         :type comments: str or list or tuple or None
+        :type category: str or None
         :raises AssertionError: If both ``vals`` and ``prompt`` are provided, or neither is.
         :raises AssertionError: If a key is already registered.
         """
+
         ns = self._make_option_ns()
         if keys:
             ns.keys = list(keys) if isinstance(keys, (list, tuple, set)) else [keys]
@@ -186,8 +193,12 @@ class OptionSpinner:
         ns.descr = descr
         ns.attr = attr
         ns.obj = obj if obj else self.default_obj
-        ns.vals, ns.prompt = vals, prompt
-        assert bool(ns.vals) ^ bool(ns.prompt) # Must be EITHER vals OR prompt
+        if vals:
+            ns.vals, ns.category = vals, 'cycle'
+        elif prompt:
+            ns.prompt, ns.category = prompt, 'prompt'
+        else:
+            ns.category = 'action'
         self._register(ns)
 
     @staticmethod
@@ -218,7 +229,8 @@ class OptionSpinner:
             assert value is not None, f'cannot get value of {repr(ns.attr)}'
             choices = ns.vals if ns.vals else [value]
 
-            win.add_body(f'{ns.descr:>{self.align}}: ')
+            colon = '' if ns.category == 'action' else ':'
+            win.add_body(f'{ns.descr:>{self.align}}{colon} ')
 
             for choice in choices:
                 shown = f'{choice}'
@@ -249,11 +261,14 @@ class OptionSpinner:
         if ns is None:
             return None
         value = self.get_value(ns.attr)
-        if ns.vals:
+        if ns.category == 'cycle':
             idx = ns.vals.index(value) if value in ns.vals else -1
             value = ns.vals[(idx+1) % len(ns.vals)] # choose next
-        else:
+        elif ns.category == 'prompt':
             value = win.answer(prompt=ns.prompt, seed=str(value))
+        elif ns.category == 'action':
+            value = True
+
         setattr(ns.obj, ns.attr, value)
         return value
 
@@ -290,8 +305,8 @@ class ConsoleWindow:
         :param pick_mode: If True, enables item highlighting/selection mode in the body.
         :param pick_size: The number of rows to be highlighted as a single 'pick' unit.
         :param mod_pick: An optional callable to modify the highlighted text before drawing.
-        :param ctrl_c_terminates: If True (default), Ctrl-C terminates the application 
-                                  (SIGINT is ignored). If False, Ctrl-C is caught by 
+        :param ctrl_c_terminates: If True (default), Ctrl-C terminates the application
+                                  (SIGINT is ignored). If False, Ctrl-C is caught by
                                   a signal handler and reported as key code 3.
         :type head_line: bool
         :type head_rows: int
@@ -804,7 +819,7 @@ class ConsoleWindow:
         """
         input_string = list(seed)
         cursor_pos = len(input_string)
-        
+
         if self.rows < 3 or self.cols < 30:
             return seed
 
@@ -819,29 +834,29 @@ class ConsoleWindow:
             self.scr.clear()
             rectangle(self.scr, row0, col0, row9, col0 + text_win_width + 1)
             self.scr.addstr(row0, col0 + 1, prompt[:text_win_width])
-            
+
             # Calculate the visible portion of the string
             start_pos = max(0, cursor_pos - text_win_width + 1)
             end_pos = start_pos + text_win_width
             display_str = "".join(input_string[start_pos:end_pos])
-            
+
             self.scr.addstr(row0 + 1, col0 + 1, display_str)
-            
+
             # Position the cursor
             display_cursor_pos = cursor_pos - start_pos
             self.scr.move(row0 + 1, col0 + 1 + display_cursor_pos)
-            
+
             ending = 'Press ENTER to submit'[:text_win_width]
             self.scr.addstr(row9, col0 + 1 + text_win_width - len(ending), ending)
             self.scr.refresh()
             curses.curs_set(2)
-            
+
             key = self.scr.getch()
-            
+
             if key in [10, 13]:  # Enter key
                 curses.curs_set(0) # Restore cursor visibility
                 return "".join(input_string)
-            elif key in [curses.KEY_BACKSPACE, 127, 8]:  # Backspace
+            if key in [curses.KEY_BACKSPACE, 127, 8]:  # Backspace
                 if cursor_pos > 0:
                     input_string.pop(cursor_pos - 1)
                     cursor_pos -= 1
@@ -899,7 +914,7 @@ class ConsoleWindow:
         self.scr.addstr(row9, col0+1+width-len(ending), ending)
         self.scr.refresh()
         pad.refresh(0, 0, row0+1, col0+1, row9-1, col9-1)
-        
+
         # Use a dummy Textbox with a dummy window to block until Enter is pressed
         curses.curs_set(0) # ensure cursor is off
         Textbox(win).edit(mod_key).strip()
@@ -1005,7 +1020,6 @@ def no_runner():
 
 if __name__ == '__main__':
     def main():
-        import sys
         """Test program"""
         def do_key(key):
             nonlocal spin, win, opts, pick_values
@@ -1016,20 +1030,21 @@ if __name__ == '__main__':
                     opts.prev_pick = pick_values[win.pick_pos//win.pick_size]
             elif key == ord('n'):
                 win.alert(title='Info', message=f'got: {value}')
-            elif key in (ord('q'), 0x3):
+            elif opts.quit:
+                opts.quit = False
                 sys.exit(key)
             return value
 
         spin = OptionSpinner()
         spin.add_key('help_mode', '? - toggle help screen', vals=[False, True])
-        spin.add_key('pick_mode', 'p - oggle pick mode, turn off to pick current line', vals=[False, True])
+        spin.add_key('pick_mode', 'p - toggle pick mode, turn off to pick current line', vals=[False, True])
         spin.add_key('pick_size', 's - #rows in pick', vals=[1, 2, 3])
         spin.add_key('name', 'n - select name', prompt='Provide Your Name:')
         spin.add_key('mult', 'm - row multiplier', vals=[0.5, 0.9, 1.0, 1.1, 2, 4, 16])
+        spin.add_key('quit', 'q,CTL-C - quit the app', category='action', keys={0x3, ord('q')})
         opts = spin.default_obj
-        other_keys = {0x3, ord('q')}
 
-        win = ConsoleWindow(head_line=True, keys=spin.keys^other_keys,
+        win = ConsoleWindow(head_line=True, keys=spin.keys,
                             ctrl_c_terminates=False, body_rows=4000)
         opts.name = ""
         opts.prev_pick = 'n/a'
@@ -1041,12 +1056,10 @@ if __name__ == '__main__':
                 win.set_pick_mode(False)
                 spin.show_help_nav_keys(win)
                 spin.show_help_body(win)
-                win.put_body('Other Keys:', curses.A_UNDERLINE)
-                win.put_body('  q, CTRL-C:  quit program')
             else:
                 win.set_pick_mode(opts.pick_mode, opts.pick_size)
                 win.add_header(f'{time.monotonic():.3f} [p]ick={opts.pick_mode}'
-                                  + f' s:#rowsInPick={opts.pick_size} [n]ame [m]ult={opts.pick_size} [q]uit')
+                            + f' s:#rowsInPick={opts.pick_size} [n]ame [m]ult={opts.pick_size} ?=help [q]uit')
                 win.add_header(f'Header: {loop} name="{opts.name}"  {opts.prev_pick=}')
                 pick_values = []
                 for idx, line in enumerate(range(body_size//opts.pick_size)):
