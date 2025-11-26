@@ -678,23 +678,26 @@ class ConsoleWindow:
         ind = int(round(ind0 + (ind9-ind0+1)*(pos-pos0)/(pos9-pos0+1)))
         return min(max(ind, ind0+1), ind9-1)
 
-    def render(self):
+    def render(self, redraw=False):
         """
         Draws the content of the pads to the visible screen.
+
+        :param redraw: If True, forces a complete redraw of all pads and the screen
+                    to clear terminal corruption.
 
         This method wraps :py:meth:`render_once` in a loop to handle spurious
         ``curses.error`` exceptions that can occur during screen resizing.
         """
         for _ in range(128):
             try:
-                self.render_once()
+                self.render_once(redraw)
                 return
             except curses.error:
                 time.sleep(0.16)
                 self._set_screen_dims()
                 continue
         try:
-            self.render_once()
+            self.render_once(redraw)
         except Exception:
             ConsoleWindow.stop_curses()
             print(f"""curses err:
@@ -757,13 +760,29 @@ class ConsoleWindow:
                 # indent = 1 if self.body.row_cnt > self.scroll_view_size else 0
         return indent
 
-    def render_once(self):
+
+    # Assuming this function is part of a class with attributes like self.scr, self.head, self.body, etc.
+
+    def render_once(self, redraw: bool = False):
         """
         Performs the actual rendering of header, horizontal line, and body pads.
         Handles pick highlighting and scroll bar drawing.
+
+        :param redraw: If True, forces a complete redraw of all pads and the screen
+                    to clear terminal corruption.
         """
 
+        # --- 1. Preparation and Conditional Redrawwin ---
+
+        if redraw:
+            # Mark the main screen and all pads as requiring a full repaint.
+            self.scr.redrawwin()
+            self.head.pad.redrawwin()
+            self.body.pad.redrawwin()
+
         indent = self.fix_positions()
+
+        # --- 2. Screen Drawing (Highlighting, Scrollbar, Separator) ---
 
         if indent > 0 and self.pick_mode:
             self.scr.vline(self.body_base, 0, ' ', self.scroll_view_size)
@@ -781,25 +800,35 @@ class ConsoleWindow:
                     bot = max(int(round(ind_pos-width/2)), 1)
                     top = min(int(round(ind_pos+width/2)), self.cols-1)
                     cnt = max(top - bot, 1)
-                # self.scr.addstr(self.head.view_cnt, bot, '-'*cnt, curses.A_REVERSE)
-                # self.scr.hline(self.head.view_cnt, bot, curses.ACS_HLINE, curses.A_REVERSE, cnt)
+
                 for idx in range(bot, bot+cnt):
                     self.scr.addch(self.head.view_cnt, idx, curses.ACS_HLINE, curses.A_REVERSE)
 
-        self.scr.refresh()
+        # Instead of self.scr.refresh(), use pnoutrefresh/doupdate for efficiency.
+        # The 'redrawwin' above handles the forced repaint, so we just call 'noutrefresh'.
+        self.scr.noutrefresh()
+
+        # --- 3. Pad Drawing (Body and Head) ---
 
         if self.body_base < self.rows:
             if self.pick_mode:
                 self.highlight_picked()
-            self.body.pad.refresh(self.scroll_pos, 0,
-                  self.body_base, indent, self.rows-1, self.cols-1)
+
+            self.body.pad.noutrefresh(
+                self.scroll_pos, 0,
+                self.body_base, indent, self.rows-1, self.cols-1
+            )
 
         if self.rows > 0:
             last_row = min(self.head.view_cnt, self.rows)-1
             if last_row >= 0:
-                self.head.pad.refresh(0, 0, 0, indent, last_row, self.cols-1)
+                self.head.pad.noutrefresh(
+                    0, 0,
+                    0, indent, last_row, self.cols-1
+                )
 
-
+        # --- 4. Final Update (Only one physical screen update) ---
+        curses.doupdate()
 
     def answer(self, prompt='Type string [then Enter]', seed='', width=80):
         """
@@ -1069,7 +1098,7 @@ if __name__ == '__main__':
                     pick_values.append(value)
                     for num in range(1, opts.pick_size):
                         win.draw(num+idx*opts.pick_size, 0, f'  addon: {loop}.{line}')
-            win.render()
+            win.render(redraw=bool(loop%2))
             _ = do_key(win.prompt(seconds=5))
             win.clear()
 
