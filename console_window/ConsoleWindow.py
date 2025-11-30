@@ -870,10 +870,19 @@ class ConsoleWindow:
             end_pos = start_pos + text_win_width
             display_str = "".join(input_string[start_pos:end_pos])
 
-            self.scr.addstr(row0 + 1, col0 + 1, display_str)
+            # Display the string with reversed cursor position
+            display_cursor_pos = cursor_pos - start_pos
+            for i, char in enumerate(display_str):
+                if i == display_cursor_pos:
+                    self.scr.addstr(row0 + 1, col0 + 1 + i, char, curses.A_REVERSE)
+                else:
+                    self.scr.addstr(row0 + 1, col0 + 1 + i, char)
+
+            # If cursor is at the end, show reversed space
+            if display_cursor_pos == len(display_str) and display_cursor_pos < text_win_width:
+                self.scr.addstr(row0 + 1, col0 + 1 + display_cursor_pos, " ", curses.A_REVERSE)
 
             # Position the cursor
-            display_cursor_pos = cursor_pos - start_pos
             self.scr.move(row0 + 1, col0 + 1 + display_cursor_pos)
 
             ending = 'Press ENTER to submit'[:text_win_width]
