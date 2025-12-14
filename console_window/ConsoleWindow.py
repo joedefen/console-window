@@ -25,6 +25,59 @@ dump_str = None
 
 ctrl_c_flag = False
 
+
+class ConsoleWindowOpts:
+    """
+    Options class for ConsoleWindow with enforced valid members using __slots__.
+    All options have sensible defaults.
+    """
+    __slots__ = ['head_line', 'head_rows', 'body_rows', 'body_cols', 'keys',
+                 'pick_mode', 'pick_size', 'mod_pick', 'ctrl_c_terminates',
+                 'return_if_pos_change', 'min_cols_rows', 'dialog_abort', 'dialog_return',
+                 'single_cell_scroll_indicator']
+
+    def __init__(self, **kwargs):
+        """
+        Initialize ConsoleWindowOpts with defaults. All parameters are optional.
+
+        :param head_line: If True, draws a horizontal line between header and body (default: True)
+        :param head_rows: Maximum capacity of internal header pad (default: 50)
+        :param body_rows: Maximum capacity of internal body pad (default: 200)
+        :param body_cols: Maximum width for content pads (default: 200)
+        :param keys: Collection of key codes explicitly returned by prompt (default: None)
+        :param pick_mode: If True, enables item highlighting/selection (default: False)
+        :param pick_size: Number of rows highlighted as single 'pick' unit (default: 1)
+        :param mod_pick: Optional callable to modify highlighted text (default: None)
+        :param ctrl_c_terminates: If True, Ctrl-C terminates; if False, returns key 3 (default: True)
+        :param return_if_pos_change: If True, prompt returns when pick position changes (default: False)
+        :param min_cols_rows: Minimum terminal size as (cols, rows) tuple (default: (70, 20))
+        :param dialog_abort: How ESC aborts dialogs: None, "ESC", "ESC-ESC" (default: "ESC")
+        :param dialog_return: Which key submits dialogs: "ENTER", "TAB" (default: "ENTER")
+        :param single_cell_scroll_indicator: If True, shows single-cell position dot; if False, shows proportional range (default: False)
+        """
+        self.head_line = kwargs.get('head_line', True)
+        self.head_rows = kwargs.get('head_rows', 50)
+        self.body_rows = kwargs.get('body_rows', 200)
+        self.body_cols = kwargs.get('body_cols', 200)
+        self.keys = kwargs.get('keys', None)
+        self.pick_mode = kwargs.get('pick_mode', False)
+        self.pick_size = kwargs.get('pick_size', 1)
+        self.mod_pick = kwargs.get('mod_pick', None)
+        self.ctrl_c_terminates = kwargs.get('ctrl_c_terminates', True)
+        self.return_if_pos_change = kwargs.get('return_if_pos_change', False)
+        self.min_cols_rows = kwargs.get('min_cols_rows', (70, 20))
+        self.dialog_abort = kwargs.get('dialog_abort', 'ESC')
+        self.dialog_return = kwargs.get('dialog_return', 'ENTER')
+        self.single_cell_scroll_indicator = kwargs.get('single_cell_scroll_indicator', False)
+
+        # Validate dialog_abort
+        if self.dialog_abort not in [None, 'ESC', 'ESC-ESC']:
+            raise ValueError(f"dialog_abort must be None, 'ESC', or 'ESC-ESC', got {self.dialog_abort!r}")
+
+        # Validate dialog_return
+        if self.dialog_return not in ['ENTER', 'TAB']:
+            raise ValueError(f"dialog_return must be 'ENTER' or 'TAB', got {self.dialog_return!r}")
+
 def ctrl_c_handler(sig, frame):
     """
     Custom handler for SIGINT (Ctrl-C).
@@ -292,41 +345,60 @@ class ConsoleWindow:
           Ctrl-u:  half-page up     Ctrl-b, PPAGE:  page up
           Ctrl-d:  half-page down     Ctrl-f, NPAGE:  page down
     """
-    def __init__(self, head_line=True, head_rows=50, body_rows=200,
-                 body_cols=200, keys=None, pick_mode=False, pick_size=1,
-                 mod_pick=None, ctrl_c_terminates=True):
+    def __init__(self, opts=None, head_line=None, head_rows=None, body_rows=None,
+                 body_cols=None, keys=None, pick_mode=None, pick_size=None,
+                 mod_pick=None, ctrl_c_terminates=None):
         """
         Initializes the ConsoleWindow, sets up internal pads, and starts curses mode.
 
-        :param head_line: If True, draws a horizontal line between header and body.
-        :param head_rows: The maximum capacity of the internal header pad.
-        :param body_rows: The maximum capacity of the internal body pad (scroll history).
-        :param body_cols: The maximum width for content pads.
-        :param keys: A collection of key codes to be explicitly returned by :py:meth:`prompt`.
-        :param pick_mode: If True, enables item highlighting/selection mode in the body.
-        :param pick_size: The number of rows to be highlighted as a single 'pick' unit.
-        :param mod_pick: An optional callable to modify the highlighted text before drawing.
-        :param ctrl_c_terminates: If True (default), Ctrl-C terminates the application
-                                  (SIGINT is ignored). If False, Ctrl-C is caught by
-                                  a signal handler and reported as key code 3.
-        :type head_line: bool
-        :type head_rows: int
-        :type body_rows: int
-        :type body_cols: int
-        :type keys: list or set or None
-        :type pick_mode: bool
-        :type pick_size: int
-        :type mod_pick: callable or None
-        :type ctrl_c_terminates: bool
+        :param opts: ConsoleWindowOpts instance with all options (recommended)
+        :param head_line: DEPRECATED - use opts. If True, draws a horizontal line between header and body.
+        :param head_rows: DEPRECATED - use opts. Maximum capacity of internal header pad.
+        :param body_rows: DEPRECATED - use opts. Maximum capacity of internal body pad.
+        :param body_cols: DEPRECATED - use opts. Maximum width for content pads.
+        :param keys: DEPRECATED - use opts. Collection of key codes returned by prompt.
+        :param pick_mode: DEPRECATED - use opts. If True, enables item highlighting/selection.
+        :param pick_size: DEPRECATED - use opts. Number of rows highlighted as single pick unit.
+        :param mod_pick: DEPRECATED - use opts. Optional callable to modify highlighted text.
+        :param ctrl_c_terminates: DEPRECATED - use opts. If True, Ctrl-C terminates; if False, returns key 3.
+        :type opts: ConsoleWindowOpts or None
         """
+        # Enforce either opts OR deprecated parameters, not both
+        has_opts = opts is not None
+        has_deprecated = any(p is not None for p in [head_line, head_rows, body_rows, body_cols,
+                                                       keys, pick_mode, pick_size, mod_pick, ctrl_c_terminates])
+
+        if has_opts and has_deprecated:
+            raise ValueError("Cannot use both 'opts' and deprecated parameters. Use opts only.")
+
+        # Use opts or create default
+        if has_opts:
+            self.opts = opts
+        elif has_deprecated:
+            # Backward compatibility: create opts from deprecated parameters
+            self.opts = ConsoleWindowOpts(
+                head_line=head_line if head_line is not None else True,
+                head_rows=head_rows if head_rows is not None else 50,
+                body_rows=body_rows if body_rows is not None else 200,
+                body_cols=body_cols if body_cols is not None else 200,
+                keys=keys,
+                pick_mode=pick_mode if pick_mode is not None else False,
+                pick_size=pick_size if pick_size is not None else 1,
+                mod_pick=mod_pick,
+                ctrl_c_terminates=ctrl_c_terminates if ctrl_c_terminates is not None else True
+            )
+        else:
+            # No parameters provided - use all defaults
+            self.opts = ConsoleWindowOpts()
+
         # Modify signal handlers based on user choice
         global ignore_ctrl_c, restore_ctrl_c
-        if ctrl_c_terminates:
+        if self.opts.ctrl_c_terminates:
             # then never want to ignore_ctrl_c (so defeat the ignorer/restorer)
             def noop():
                 return
             ignore_ctrl_c = restore_ctrl_c = noop
-            self.ctrl_c_terminates = ctrl_c_terminates
+            self.ctrl_c_terminates = self.opts.ctrl_c_terminates
         else:
             # If not terminating, override the original signal functions
             # to set the custom handler, which will pass key 3 via the flag.
@@ -340,32 +412,32 @@ class ConsoleWindow:
         self.scr = self._start_curses()
 
         self.head = SimpleNamespace(
-            pad=curses.newpad(head_rows, body_cols),
-            rows=head_rows,
-            cols=body_cols,
+            pad=curses.newpad(self.opts.head_rows, self.opts.body_cols),
+            rows=self.opts.head_rows,
+            cols=self.opts.body_cols,
             row_cnt=0,  # no. head rows added
             texts = [],
             view_cnt=0,  # no. head rows viewable (NOT in body)
         )
         self.body = SimpleNamespace(
-            pad = curses.newpad(body_rows, body_cols),
-            rows= body_rows,
-            cols=body_cols,
+            pad = curses.newpad(self.opts.body_rows, self.opts.body_cols),
+            rows= self.opts.body_rows,
+            cols=self.opts.body_cols,
             row_cnt = 0,
             texts = []
         )
-        self.mod_pick = mod_pick # call back to modify highlighted row
-        self.hor_line_cnt = 1 if head_line else 0 # no. h-lines in header
+        self.mod_pick = self.opts.mod_pick # call back to modify highlighted row
+        self.hor_line_cnt = 1 if self.opts.head_line else 0 # no. h-lines in header
         self.scroll_pos = 0  # how far down into body are we?
         self.max_scroll_pos = 0
         self.pick_pos = 0 # in highlight mode, where are we?
         self.last_pick_pos = -1 # last highlighted position
-        self.pick_mode = pick_mode # whether in highlight mode
-        self.pick_size = pick_size # whether in highlight mode
+        self.pick_mode = self.opts.pick_mode # whether in highlight mode
+        self.pick_size = self.opts.pick_size # whether in highlight mode
         self.rows, self.cols = 0, 0
-        self.body_cols, self.body_rows = body_cols, body_rows
+        self.body_cols, self.body_rows = self.opts.body_cols, self.opts.body_rows
         self.scroll_view_size = 0  # no. viewable lines of the body
-        self.handled_keys = set(keys) if isinstance(keys, (set, list)) else []
+        self.handled_keys = set(self.opts.keys) if isinstance(self.opts.keys, (set, list)) else []
         self.pending_keys = set()
         self._set_screen_dims()
         self.calc()
@@ -397,8 +469,46 @@ class ConsoleWindow:
         self.rows, self.cols = rows, cols
         return same
 
+    def _check_min_size(self):
+        """
+        Checks if current terminal size meets minimum requirements.
+        Blocks with a message if too small, waiting for resize or ESC.
+
+        :returns: True if size is acceptable, False if user pressed ESC to abort
+        :rtype: bool
+        """
+        min_cols, min_rows = self.opts.min_cols_rows
+
+        while self.rows < min_rows or self.cols < min_cols:
+            self.scr.clear()
+            msg1 = f"Min size: {min_cols}x{min_rows}"
+            msg2 = f"Current: {self.cols}x{self.rows}"
+            try:
+                self.scr.addstr(0, 0, msg1, curses.A_REVERSE)
+                self.scr.addstr(1, 0, msg2, curses.A_REVERSE)
+            except curses.error:
+                pass  # Terminal too small even for message
+            self.scr.refresh()
+
+            # Wait for key
+            key = self.scr.getch()
+            if key == 27:  # ESC to abort
+                return False
+            if key == curses.KEY_RESIZE:
+                curses.update_lines_cols()
+                self._set_screen_dims()
+
+        return True
+
     @staticmethod
     def _start_curses():
+        """
+        For compatibility only. Used to be private, but that was annoying.
+        """
+        return ConsoleWindow.start_curses()
+
+    @staticmethod
+    def start_curses():
         """
         Performs the Curses initial setup: initscr, noecho, cbreak, curs_set(0),
         keypad(1), and sets up the timeout.
@@ -410,6 +520,7 @@ class ConsoleWindow:
         atexit.register(ConsoleWindow.stop_curses)
         ignore_ctrl_c()
         ConsoleWindow.static_scr = scr = curses.initscr()
+        curses.set_escdelay(25)  # Reduce ESC key delay from 1000ms to 25ms
         curses.noecho()
         curses.cbreak()
         curses.curs_set(0)
@@ -795,7 +906,8 @@ class ConsoleWindow:
             ind_pos = self._scroll_indicator_col()
             if ind_pos >= 0:
                 bot, cnt = ind_pos, 1
-                if 0 < ind_pos < self.cols-1:
+                if not self.opts.single_cell_scroll_indicator and 0 < ind_pos < self.cols-1:
+                    # Proportional range indicator
                     width = self.scroll_view_size/self.body.row_cnt*self.cols
                     bot = max(int(round(ind_pos-width/2)), 1)
                     top = min(int(round(ind_pos+width/2)), self.cols-1)
@@ -830,132 +942,411 @@ class ConsoleWindow:
         # --- 4. Final Update (Only one physical screen update) ---
         curses.doupdate()
 
-    def answer(self, prompt='Type string [then Enter]', seed='', width=80):
-        """
-        Presents a modal dialog box for manual text input, handling arbitrarily
-        long strings.
 
-        This custom function replaces ``curses.textpad.Textbox`` to manage
-        a separate input buffer and display window with horizontal scrolling.
-
-        :param prompt: The text prompt displayed above the input field.
-        :param seed: The initial string value in the input field.
-        :param width: The maximum visible width of the input box.
-        :type prompt: str
-        :type seed: str
-        :type width: int
-        :returns: The string entered by the user upon pressing Enter.
-        :rtype: str
+    def answer(self, prompt='Type string [then Enter]', seed='', width=80, height=5, esc_abort=None):
         """
+        Presents a modal dialog box with working horizontal scroll indicators.
+        Uses opts.dialog_abort to determine ESC behavior and opts.dialog_return for submit key.
+
+        :param esc_abort: DEPRECATED. Use opts.dialog_abort instead. If provided, overrides opts.dialog_abort.
+        """
+        # Handle deprecated esc_abort parameter for backward compatibility
+        if esc_abort is not None:
+            dialog_abort = 'ESC' if esc_abort else None
+        else:
+            dialog_abort = self.opts.dialog_abort
+        def draw_rectangle(scr, r1, c1, r2, c2):
+            """Draws a box using standard curses characters."""
+            scr.border(0)
+            for r in range(r1, r2 + 1):
+                if r == r1 or r == r2:
+                    # Draw horizontal lines
+                    for c in range(c1 + 1, c2):
+                        scr.addch(r, c, curses.ACS_HLINE)
+                if r > r1 and r < r2:
+                    # Draw vertical lines
+                    scr.addch(r, c1, curses.ACS_VLINE)
+                    scr.addch(r, c2, curses.ACS_VLINE)
+            # Draw corners
+            scr.addch(r1, c1, curses.ACS_ULCORNER)
+            scr.addch(r1, c2, curses.ACS_URCORNER)
+            scr.addch(r2, c1, curses.ACS_LLCORNER)
+            scr.addch(r2, c2, curses.ACS_LRCORNER)
+
         input_string = list(seed)
         cursor_pos = len(input_string)
+        v_scroll_top = 0
+        last_esc_time = None  # For ESC-ESC tracking 
 
-        if self.rows < 3 or self.cols < 30:
+        def calculate_geometry(self):
+            # ... (Geometry calculation logic remains the same) ...
+            self.rows, self.cols = self.scr.getmaxyx()
+            min_cols, min_rows = self.opts.min_cols_rows
+            min_height_needed = max(height + 4, min_rows)
+            min_cols_needed = max(30, min_cols)
+            if self.rows < min_height_needed or self.cols < min_cols_needed:
+                return False, None, None, None, None
+
+            max_display_width = self.cols - 6
+            text_win_width = min(width, max_display_width)
+            row0 = self.rows // 2 - (height // 2 + 1)
+            row9 = row0 + height + 1
+            col0 = (self.cols - (text_win_width + 2)) // 2
+
+            return True, row0, row9, col0, text_win_width
+
+        success, row0, row9, col0, text_win_width = calculate_geometry(self)
+        if not success:
             return seed
 
-        # Define the display window properties
-        max_display_width = self.cols - 6
-        text_win_width = min(width, max_display_width)
-
-        row0, row9 = self.rows // 2 - 1, self.rows // 2 + 1
-        col0 = (self.cols - (text_win_width + 2)) // 2
-
         while True:
-            self.scr.clear()
-            rectangle(self.scr, row0, col0, row9, col0 + text_win_width + 1)
-            self.scr.addstr(row0, col0 + 1, prompt[:text_win_width])
+            try:
+                success, row0, row9, col0, text_win_width = calculate_geometry(self)
+                
+                # --- RESIZE/TOO SMALL CHECK ---
+                if not success:
+                    min_cols, min_rows = self.opts.min_cols_rows
+                    min_height_needed = max(height + 4, min_rows)
+                    min_cols_needed = max(30, min_cols)
+                    self.scr.clear()
+                    msg = f"Min size: {min_cols_needed}x{min_height_needed}"
+                    try:
+                        self.scr.addstr(0, 0, msg, curses.A_REVERSE)
+                    except curses.error:
+                        pass  # Terminal too small even for message
+                    self.scr.refresh()
+                    key = self.scr.getch()
+                    if key in [27]: return None
+                    if key == curses.KEY_RESIZE: curses.update_lines_cols()
+                    continue
 
-            # Calculate the visible portion of the string
-            start_pos = max(0, cursor_pos - text_win_width + 1)
-            end_pos = start_pos + text_win_width
-            display_str = "".join(input_string[start_pos:end_pos])
+                self.scr.clear()
+                
+                # Draw the box using the imported rectangle function
+                draw_rectangle(self.scr, row0, col0, row9, col0 + text_win_width + 1)
+                self.scr.addstr(row0, col0 + 1, prompt[:text_win_width])
 
-            # Display the string with reversed cursor position
-            display_cursor_pos = cursor_pos - start_pos
-            for i, char in enumerate(display_str):
-                if i == display_cursor_pos:
-                    self.scr.addstr(row0 + 1, col0 + 1 + i, char, curses.A_REVERSE)
-                else:
-                    self.scr.addstr(row0 + 1, col0 + 1 + i, char)
+                # --- Core Display and Scroll Indicator Logic ---
 
-            # If cursor is at the end, show reversed space
-            if display_cursor_pos == len(display_str) and display_cursor_pos < text_win_width:
-                self.scr.addstr(row0 + 1, col0 + 1 + display_cursor_pos, " ", curses.A_REVERSE)
+                wrapped_line_idx = cursor_pos // text_win_width
+                cursor_offset_on_wrapped_line = cursor_pos % text_win_width
 
-            # Position the cursor
-            self.scr.move(row0 + 1, col0 + 1 + display_cursor_pos)
+                # Vertical scroll adjustment
+                if wrapped_line_idx < v_scroll_top:
+                    v_scroll_top = wrapped_line_idx
+                elif wrapped_line_idx >= v_scroll_top + height:
+                    v_scroll_top = wrapped_line_idx - height + 1
 
-            ending = 'Press ENTER to submit'[:text_win_width]
-            self.scr.addstr(row9, col0 + 1 + text_win_width - len(ending), ending)
-            self.scr.refresh()
-            curses.curs_set(2)
+                # Horizontal scroll start calculation
+                h_scroll_start = max(0, cursor_offset_on_wrapped_line - text_win_width + 1)
 
-            key = self.scr.getch()
+                # Calculate total wrapped lines for overflow detection
+                total_wrapped_lines = (len(input_string) + text_win_width - 1) // text_win_width
+                if len(input_string) == 0:
+                    total_wrapped_lines = 1
+                
+                # Display the visible lines
+                for r in range(height):
+                    current_wrapped_line_idx = v_scroll_top + r
+                    
+                    start_char_idx = current_wrapped_line_idx * text_win_width
+                    end_char_idx = start_char_idx + text_win_width
+                    
+                    if start_char_idx > len(input_string) and r > 0:
+                        break
 
-            if key in [10, 13]:  # Enter key
-                curses.curs_set(0) # Restore cursor visibility
-                return "".join(input_string)
-            if key in [curses.KEY_BACKSPACE, 127, 8]:  # Backspace
-                if cursor_pos > 0:
-                    input_string.pop(cursor_pos - 1)
-                    cursor_pos -= 1
-            elif key == curses.KEY_LEFT:
-                cursor_pos = max(0, cursor_pos - 1)
-            elif key == curses.KEY_RIGHT:
-                cursor_pos = min(len(input_string), cursor_pos + 1)
-            elif key == curses.KEY_DC:  # Delete
-                if cursor_pos < len(input_string):
-                    input_string.pop(cursor_pos)
-            elif key == curses.KEY_HOME:
-                cursor_pos = 0
-            elif key == curses.KEY_END:
-                cursor_pos = len(input_string)
-            elif 32 <= key <= 126:  # Printable ASCII characters
-                input_string.insert(cursor_pos, chr(key))
-                cursor_pos += 1
+                    raw_wrapped_line = "".join(input_string[start_char_idx:end_char_idx])
+                    line_to_display = raw_wrapped_line
+                    current_h_scroll_start = 0
 
-    def alert(self, title='ALERT', message='', height=1, width=80):
+                    is_cursor_line = (current_wrapped_line_idx == wrapped_line_idx)
+                    
+                    if is_cursor_line:
+                        line_to_display = raw_wrapped_line[h_scroll_start:]
+                        current_h_scroll_start = h_scroll_start
+                        
+                    # 1. Clear the content area (important for redraw integrity)
+                    self.scr.addstr(row0 + 1 + r, col0 + 1, ' ' * text_win_width)
+                    # 2. Display the text
+                    self.scr.addstr(row0 + 1 + r, col0 + 1, line_to_display[:text_win_width])
+                    
+                    # --- SCROLL INDICATOR LOGIC ---
+                    if is_cursor_line:
+                        left_indicator = curses.ACS_VLINE 
+                        right_indicator = curses.ACS_VLINE
+                        
+                        # Left Indicator Check
+                        if current_h_scroll_start > 0:
+                            # If content is scrolled right, show '<'
+                            left_indicator = ord('<') 
+
+                        # Right Indicator Check
+                        full_line_len = len(raw_wrapped_line)
+                        if full_line_len > current_h_scroll_start + text_win_width:
+                            # If there's more content to the right, show '>'
+                            right_indicator = ord('>') 
+                        
+                        # Draw Indicators (overwrite the border's vertical line)
+                        self.scr.addch(row0 + 1 + r, col0, left_indicator)
+                        self.scr.addch(row0 + 1 + r, col0 + text_win_width + 1, right_indicator)
+
+                        # Highlight the cursor position
+                        display_cursor_pos = cursor_pos - start_char_idx - current_h_scroll_start
+                        char_at_cursor = line_to_display[display_cursor_pos] if display_cursor_pos < len(line_to_display) else " "
+
+                        self.scr.addstr(row0 + 1 + r, col0 + 1 + display_cursor_pos,
+                                        char_at_cursor, curses.A_REVERSE)
+
+                        # Set the actual hardware cursor
+                        self.scr.move(row0 + 1 + r, col0 + 1 + display_cursor_pos)
+
+                # --- CORNER OVERFLOW INDICATORS ---
+                # Upper left (one line down): show if scrolled down or scrolled right
+                has_content_above = v_scroll_top > 0
+                has_content_left = h_scroll_start > 0
+                if has_content_above or has_content_left:
+                    self.scr.addch(row0 + 1, col0, '◀', curses.A_BOLD)
+
+                # Lower right (one line up): show if there's content below or to the right
+                has_content_below = (v_scroll_top + height) < total_wrapped_lines
+                # Check if cursor line has content beyond the visible window
+                cursor_line_start = wrapped_line_idx * text_win_width
+                cursor_line_end = cursor_line_start + text_win_width
+                cursor_line_full_len = min(len(input_string), cursor_line_end) - cursor_line_start
+                has_content_right = cursor_line_full_len > (h_scroll_start + text_win_width)
+                if has_content_below or has_content_right:
+                    self.scr.addch(row9 - 1, col0 + text_win_width + 1, '▶', curses.A_BOLD)
+
+                # Footer and refresh
+                submit_key = self.opts.dialog_return
+                abort = ''
+                if dialog_abort == 'ESC':
+                    abort = ' or ESC to abort'
+                elif dialog_abort == 'ESC-ESC':
+                    abort = ' or ESC-ESC to abort'
+                ending = f'{submit_key} to submit{abort}'
+                self.scr.addstr(row9, col0 + 1 + text_win_width - len(ending), ending[:text_win_width])
+                self.scr.refresh()
+                curses.curs_set(0)  # Hide hardware cursor; reverse video shows position
+
+                key = self.scr.getch()
+
+                # --- Key Handling Logic ---
+                # Handle dialog_return (submit)
+                if self.opts.dialog_return == 'ENTER' and key in [10, 13]:
+                    curses.curs_set(0)
+                    return "".join(input_string)
+                elif self.opts.dialog_return == 'TAB' and key == 9:
+                    curses.curs_set(0)
+                    return "".join(input_string)
+
+                # Handle dialog_abort (ESC and ESC-ESC)
+                if key == 27:
+                    if dialog_abort == 'ESC':
+                        return None
+                    elif dialog_abort == 'ESC-ESC':
+                        current_time = time.time()
+                        if last_esc_time is not None and (current_time - last_esc_time) <= 1.0:
+                            return None  # Double ESC within timeout
+                        last_esc_time = current_time
+                        # Single ESC - just update time and continue
+                
+                elif key == curses.KEY_UP:
+                    target_pos = cursor_pos - text_win_width
+                    cursor_pos = max(0, target_pos)
+
+                elif key == curses.KEY_DOWN:
+                    target_pos = cursor_pos + text_win_width
+                    cursor_pos = min(len(input_string), target_pos)
+                        
+                # ... [KEY_LEFT, KEY_RIGHT, HOME, END, edits, ASCII] ...
+                elif key == curses.KEY_LEFT: cursor_pos = max(0, cursor_pos - 1)
+                elif key == curses.KEY_RIGHT: cursor_pos = min(len(input_string), cursor_pos + 1)
+                elif key == curses.KEY_HOME: cursor_pos = 0
+                elif key == curses.KEY_END: cursor_pos = len(input_string)
+                elif key in [curses.KEY_BACKSPACE, 127, 8]:
+                    if cursor_pos > 0:
+                        input_string.pop(cursor_pos - 1)
+                        cursor_pos -= 1
+                elif key == curses.KEY_DC:
+                    if cursor_pos < len(input_string):
+                        input_string.pop(cursor_pos)
+
+                # Map special characters to space unless they're the dialog_return key
+                elif key in [9, 10, 13]:
+                    # Check if this is the dialog_return key
+                    is_return_key = False
+                    if self.opts.dialog_return == 'TAB' and key == 9:
+                        is_return_key = True
+                    elif self.opts.dialog_return == 'ENTER' and key in [10, 13]:
+                        is_return_key = True
+
+                    if not is_return_key:
+                        # Convert to space
+                        input_string.insert(cursor_pos, ' ')
+                        cursor_pos += 1
+
+                elif 32 <= key <= 126:
+                    input_string.insert(cursor_pos, chr(key))
+                    cursor_pos += 1
+                
+                # --- Explicit Resize Handler ---
+                elif key == curses.KEY_RESIZE:
+                    curses.update_lines_cols()
+                    continue
+                    
+            except curses.error:
+                # Catch exceptions from drawing outside bounds during resize
+                self.scr.clear()
+                curses.update_lines_cols()
+                self.rows, self.cols = self.scr.getmaxyx()
+                # Drain any pending resize events to prevent infinite loop
+                self.scr.nodelay(True)  # Make getch() non-blocking
+                while True:
+                    key = self.scr.getch()
+                    if key == -1:  # No more keys in queue
+                        break
+                self.scr.nodelay(False)  # Restore blocking mode
+                continue
+
+
+    def flash(self, message='', duration=2.0):
+        """
+        Displays a brief flash message in the center of the screen.
+        Auto-dismisses after duration seconds without requiring user input.
+
+        :param message: The message to display
+        :param duration: How long to show the message in seconds (default 0.5)
+        """
+
+        if self.rows < 3 or self.cols < len(message) + 4:
+            return
+
+        # Calculate centered position
+        msg_len = min(len(message), self.cols - 4)
+        row = self.rows // 2
+        col = (self.cols - msg_len - 2) // 2
+
+        # Draw a simple box with the message
+        self.scr.clear()
+        try:
+            # Top border
+            self.scr.addstr(row - 1, col, '┌' + '─' * msg_len + '┐', curses.A_BOLD | curses.A_REVERSE)
+            # Message
+            self.scr.addstr(row, col, '│' + message[:msg_len] + '│', curses.A_BOLD | curses.A_REVERSE)
+            # Bottom border
+            self.scr.addstr(row + 1, col, '└' + '─' * msg_len + '┘', curses.A_BOLD | curses.A_REVERSE)
+        except curses.error:
+            pass  # Ignore if terminal too small
+
+        self.scr.refresh()
+        time.sleep(duration)
+
+
+    def alert(self, message='', title='ALERT', _height=None, _width=None):
         """
         Displays a blocking, modal alert box with a title and message.
+        Auto-sizes based on content and terminal size with 1-cell border.
 
         Waits for the user to press **ENTER** to acknowledge and dismiss the box.
 
-        :param title: The title text for the alert box.
         :param message: The message body content.
-        :param height: The height of the message area (number of lines).
-        :param width: The visible width of the message area.
+        :param title: The title text for the alert box (defaults to 'ALERT')
+        :param height: DEPRECATED - ignored
+        :param width: DEPRECATED - ignored
         :type title: str
         :type message: str
-        :type height: int
-        :type width: int
         """
         def mod_key(key):
             """Internal function to map Enter/Key_Enter to an arbitrary key code 7 for Textbox.edit to exit."""
             return  7 if key in (10, curses.KEY_ENTER) else key
 
-        if self.rows < 2+height or self.cols < 30:
-            return
-        width = min(width, self.cols-3) # max text width
-        row0 = (self.rows+height-1)//2 - 1
-        row9 = row0 + height + 1
-        col0 = (self.cols - (width+2)) // 2
-        col9 = col0 + width + 2 - 1
+        # Auto-calculate dimensions with 1-cell border on all sides
+        # Leave 1 cell on each side for reverse video border
+        max_box_width = self.cols - 2  # 1 cell left, 1 cell right
+        max_box_height = self.rows - 2  # 1 cell top, 1 cell bottom
 
+        if max_box_width < 20 or max_box_height < 5:
+            return  # Terminal too small
+
+        # Calculate content width (box interior minus borders)
+        content_width = max_box_width - 2  # Subtract box borders
+
+        # Determine if title fits on box border, or needs to go inside
+        footer_text = 'Press ENTER to ack'
+        title_available_width = content_width - len(footer_text) - 2
+
+        lines = []
+        if len(title) > title_available_width:
+            # Title too long - use "alert" as box title, put real title inside
+            box_title = 'alert'
+            # Wrap the actual title
+            title_lines = textwrap.wrap(title, width=content_width)
+            lines.extend(title_lines)
+            lines.append('')  # Blank line separator
+        else:
+            # Title fits on box border
+            box_title = title
+
+        # Wrap message content
+        if message:
+            message_lines = textwrap.wrap(message, width=content_width)
+            lines.extend(message_lines)
+
+        # Calculate box dimensions - use full height with 1-cell border
+        content_height = len(lines)
+        box_height = max_box_height  # Use full available height
+
+        # Calculate box position - 1 cell border on all sides
+        row0 = 1  # 1 cell from top
+        row9 = self.rows - 2  # 1 cell from bottom
+        col0 = 1  # 1 cell from left
+        col9 = self.cols - 2  # 1 cell from right
+
+        # Clear screen normally (no reverse video)
         self.scr.clear()
-        for row in range(self.rows):
-            self.scr.insstr(row, 0, ' '*self.cols, curses.A_REVERSE)
-        pad = curses.newpad(20, 200)
-        win = curses.newwin(1, 1, row9-1, col9-2) # input window (dummy for Textbox)
-        rectangle(self.scr, row0, col0, row9, col9)
-        self.scr.addstr(row0, col0+1, title[0:width], curses.A_REVERSE)
-        pad.addstr(message)
-        ending = 'Press ENTER to ack'[:width]
-        self.scr.addstr(row9, col0+1+width-len(ending), ending)
-        self.scr.refresh()
-        pad.refresh(0, 0, row0+1, col0+1, row9-1, col9-1)
 
-        # Use a dummy Textbox with a dummy window to block until Enter is pressed
-        curses.curs_set(0) # ensure cursor is off
+        # Draw 1-cell reverse video border around the box area
+        # Top and bottom borders (full width)
+        self.scr.insstr(0, 0, ' '*self.cols, curses.A_REVERSE)
+        self.scr.insstr(self.rows-1, 0, ' '*self.cols, curses.A_REVERSE)
+        # Left and right borders
+        for row in range(1, self.rows-1):
+            self.scr.addch(row, 0, ' ', curses.A_REVERSE)
+            self.scr.addch(row, self.cols-1, ' ', curses.A_REVERSE)
+
+        # Draw box
+        rectangle(self.scr, row0, col0, row9, col9)
+
+        # Fill box interior with normal background (to override any reverse video)
+        for row in range(row0+1, row9):
+            self.scr.addstr(row, col0+1, ' '*(col9-col0-1))
+
+        # Add title on top border
+        self.scr.addstr(row0, col0+1, box_title[:content_width], curses.A_REVERSE)
+
+        # Add footer on bottom border
+        footer_pos = col0 + 1 + content_width - len(footer_text)
+        self.scr.addstr(row9, footer_pos, footer_text[:content_width])
+
+        # Create pad for scrollable content
+        pad = curses.newpad(max(content_height, 1), content_width + 1)
+
+        # Add lines to pad
+        for idx, line in enumerate(lines):
+            if idx < content_height:
+                pad.addstr(idx, 0, line[:content_width])
+
+        # Refresh screen
+        self.scr.refresh()
+
+        # Display content (scrollable if needed)
+        visible_rows = box_height - 2  # Subtract top and bottom borders
+        pad.refresh(0, 0, row0+1, col0+1, row0+visible_rows, col9-1)
+
+        # Wait for ENTER using dummy Textbox
+        win = curses.newwin(1, 1, row9-1, col9-2)
+        curses.curs_set(0)  # Ensure cursor is off
         Textbox(win).edit(mod_key).strip()
         return
 
@@ -1009,6 +1400,10 @@ class ConsoleWindow:
 
             if key in (curses.KEY_RESIZE, ) or curses.is_term_resized(self.rows, self.cols):
                 self._set_screen_dims()
+                if not self._check_min_size():
+                    # User pressed ESC to abort during size check
+                    if 27 in self.handled_keys:
+                        return 27
                 break
 
             # App keys...
@@ -1052,6 +1447,8 @@ class ConsoleWindow:
 
             if pos != was_pos:
                 self.render()
+                if self.opts.return_if_pos_change:
+                    return None
         return None
 
 def no_runner():

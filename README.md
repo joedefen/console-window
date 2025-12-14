@@ -107,8 +107,13 @@ For more extensive examples, you can look at some projects using `console-window
   * simple wrapper for `efibootmgr`
   * one of the smaller projects
   * demonstrates a context sensitive available keys lines (i.e., first line) where the actions depend on current line.
-* [my-snaps](https://github.com/joedefen/my-snaps)
-  * special purpose BTRFS snap manager
+* [dwipe](https://github.com/joedefen/dwipe)
+  * disk cleaner with parallel jobs and stamps wiped partitions
+* [pmemstat](https://github.com/joedefen/pmemstat)
+  * system/process memory monitor with rollups and hooks for zRAM
+* [memfo](https://github.com/joedefen/memfo)
+  * viewer of /proc/meminfo that shows historical values
 * [vappman](https://github.com/joedefen/vappman)
   * convenince wrapper to mostly hide CLI of [AppMan](https://github.com/ivan-hc/AppMan), a life-cycle manager for 2000+ AppImages
-
+* [my-snaps](https://github.com/joedefen/my-snaps)
+  * special purpose BTRFS snap manager
