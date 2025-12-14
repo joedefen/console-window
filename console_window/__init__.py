@@ -1,1 +1,1 @@
-from .ConsoleWindow import ConsoleWindow, OptionSpinner
+from .ConsoleWindow import ConsoleWindow, OptionSpinner, ConsoleWindowOpts
