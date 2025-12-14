@@ -30,14 +30,14 @@ The wrapper handles several advanced terminal interaction patterns automatically
 
 This example demonstrates setting up the window, using the `OptionSpinner` for control, and running the main render/prompt loop.
 
-```python
+```
 import curses
-from console_window import ConsoleWindow, OptionSpinner
+from console_window import ConsoleWindow, ConsoleWindowOpts, OptionSpinner
 
 def main_app_loop(stdscr):
     # 1. Setup Options Manager
     spin = OptionSpinner()
-    opts = spin.default_obj # Access options via this namespace
+    opts = spin.default_obj  # Access options via this namespace
 
     # Add features controlled by keypresses
     spin.add_key('help_mode', '? - toggle help screen', vals=[False, True])
@@ -46,8 +46,14 @@ def main_app_loop(stdscr):
     spin.add_key('name', 'n - select name', prompt='Provide Your Name:')
     spin.add_key('quit', 'q,Q - quit the app', category='action', keys={ord('Q'), ord('q')})
 
-    # 2. Initialize Window
-    win = ConsoleWindow(head_line=True, keys=spin.keys^other_keys)
+    # 2. Initialize Window with ConsoleWindowOpts
+    win_opts = ConsoleWindowOpts(
+        head_line=True,
+        keys=spin.keys,
+        min_cols_rows=(60, 20),
+        single_cell_scroll_indicator=True
+    )
+    win = ConsoleWindow(opts=win_opts)
     opts.name = "[hit 'n' to enter name]"
     loop_count = 0
 
@@ -69,16 +75,16 @@ def main_app_loop(stdscr):
 
         # 4. Render and Prompt for Input
         win.render()
-        key = win.prompt(seconds=0.5) # Wait for half a second or a keypress
+        key = win.prompt(seconds=0.5)  # Wait for half a second or a keypress
 
         # 5. Handle Keys (App-specific logic)
         if key is not None:
             # Check if OptionSpinner can handle the key (p, s, n, ?)
-            spin.do_key(key, win) 
+            spin.do_key(key, win)
             
             if opts.quit:
                 opts.quit = False
-                break # Exit the loop
+                break  # Exit the loop
         
         win.clear()
 
@@ -89,6 +95,7 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         pass
 ```
+
 
 ## License
 MIT
