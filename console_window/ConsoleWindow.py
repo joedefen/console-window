@@ -999,6 +999,14 @@ class ConsoleWindow:
         if not success:
             return seed
 
+        # Set longer timeout for dialog - redraw every 5s for screen recovery
+        # This prevents flicker (was 200ms) while recovering from corruption
+        self.scr.timeout(5000)  # 5 second timeout for auto-refresh
+
+        # DEBUG: Set to True to show redraw indicator in upper-left corner
+        debug_show_redraws = False
+        debug_redraw_toggle = False
+
         while True:
             try:
                 success, row0, row9, col0, text_win_width = calculate_geometry(self)
@@ -1014,16 +1022,26 @@ class ConsoleWindow:
                         self.scr.addstr(0, 0, msg, curses.A_REVERSE)
                     except curses.error:
                         pass  # Terminal too small even for message
-                    self.scr.refresh()
+                    self.scr.noutrefresh()
+                    curses.doupdate()
                     key = self.scr.getch()
-                    if key in [27]: return None
+                    if key in [27]:
+                        self.scr.timeout(ConsoleWindow.timeout_ms)
+                        return None
                     if key == curses.KEY_RESIZE: curses.update_lines_cols()
                     continue
 
                 self.scr.clear()
-                
+
                 # Draw the box using the imported rectangle function
                 draw_rectangle(self.scr, row0, col0, row9, col0 + text_win_width + 1)
+
+                # DEBUG: Toggle indicator to visualize redraws
+                if debug_show_redraws:
+                    debug_redraw_toggle = not debug_redraw_toggle
+                    indicator = '*' if debug_redraw_toggle else '+'
+                    self.scr.addstr(row0, col0, indicator)
+
                 self.scr.addstr(row0, col0 + 1, prompt[:text_win_width])
 
                 # --- Core Display and Scroll Indicator Logic ---
@@ -1126,7 +1144,8 @@ class ConsoleWindow:
                     abort = ' or ESC-ESC to abort'
                 ending = f'{submit_key} to submit{abort}'
                 self.scr.addstr(row9, col0 + 1 + text_win_width - len(ending), ending[:text_win_width])
-                self.scr.refresh()
+                self.scr.noutrefresh()
+                curses.doupdate()
                 curses.curs_set(0)  # Hide hardware cursor; reverse video shows position
 
                 key = self.scr.getch()
@@ -1135,18 +1154,22 @@ class ConsoleWindow:
                 # Handle dialog_return (submit)
                 if self.opts.dialog_return == 'ENTER' and key in [10, 13]:
                     curses.curs_set(0)
+                    self.scr.timeout(ConsoleWindow.timeout_ms)
                     return "".join(input_string)
                 elif self.opts.dialog_return == 'TAB' and key == 9:
                     curses.curs_set(0)
+                    self.scr.timeout(ConsoleWindow.timeout_ms)
                     return "".join(input_string)
 
                 # Handle dialog_abort (ESC and ESC-ESC)
                 if key == 27:
                     if dialog_abort == 'ESC':
+                        self.scr.timeout(ConsoleWindow.timeout_ms)
                         return None
                     elif dialog_abort == 'ESC-ESC':
                         current_time = time.time()
                         if last_esc_time is not None and (current_time - last_esc_time) <= 1.0:
+                            self.scr.timeout(ConsoleWindow.timeout_ms)
                             return None  # Double ESC within timeout
                         last_esc_time = current_time
                         # Single ESC - just update time and continue
@@ -1239,7 +1262,8 @@ class ConsoleWindow:
         except curses.error:
             pass  # Ignore if terminal too small
 
-        self.scr.refresh()
+        self.scr.noutrefresh()
+        curses.doupdate()
         time.sleep(duration)
 
 
