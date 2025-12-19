@@ -336,7 +336,7 @@ class ConsoleWindow:
     initialization, cleanup, rendering, and user input including scrolling
     and an optional item selection (pick) mode.
     """
-    timeout_ms = 200
+    timeout_ms = 2000
     static_scr = None
     nav_keys = """
         Navigation:      H/M/L:      top/middle/end-of-page
