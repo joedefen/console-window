@@ -34,7 +34,7 @@ class ConsoleWindowOpts:
     __slots__ = ['head_line', 'head_rows', 'body_rows', 'body_cols', 'keys',
                  'pick_mode', 'pick_size', 'mod_pick', 'ctrl_c_terminates',
                  'return_if_pos_change', 'min_cols_rows', 'dialog_abort', 'dialog_return',
-                 'single_cell_scroll_indicator']
+                 'single_cell_scroll_indicator', 'answer_show_redraws']
 
     def __init__(self, **kwargs):
         """
@@ -69,6 +69,7 @@ class ConsoleWindowOpts:
         self.dialog_abort = kwargs.get('dialog_abort', 'ESC')
         self.dialog_return = kwargs.get('dialog_return', 'ENTER')
         self.single_cell_scroll_indicator = kwargs.get('single_cell_scroll_indicator', False)
+        self.answer_show_redraws = kwargs.get('answer_show_redraws', False)
 
         # Validate dialog_abort
         if self.dialog_abort not in [None, 'ESC', 'ESC-ESC']:
@@ -1004,7 +1005,7 @@ class ConsoleWindow:
         self.scr.timeout(5000)  # 5 second timeout for auto-refresh
 
         # DEBUG: Set to True to show redraw indicator in upper-left corner
-        debug_show_redraws = False
+        debug_show_redraws = self.opts.answer_show_redraws
         debug_redraw_toggle = False
 
         while True:
@@ -1504,8 +1505,14 @@ if __name__ == '__main__':
         spin.add_key('quit', 'q,CTL-C - quit the app', category='action', keys={0x3, ord('q')})
         opts = spin.default_obj
 
-        win = ConsoleWindow(head_line=True, keys=spin.keys,
-                            ctrl_c_terminates=False, body_rows=4000)
+        console_opts = ConsoleWindowOpts()
+        console_opts.head_line = True
+        console_opts.keys = spin.keys
+        console_opts.ctrl_c_terminates = False
+        console_opts.body_rows = 4000
+        console_opts.answer_show_redraws = True
+        win = ConsoleWindow(opts=console_opts)
+
         opts.name = ""
         opts.prev_pick = 'n/a'
         pick_values = []
