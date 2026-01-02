@@ -60,7 +60,10 @@ Example usage:
 # pylint: disable=too-many-instance-attributes,too-many-arguments
 # pylint: disable=invalid-name,broad-except,too-many-branches,global-statement
 # pylint: disable=line-too-long,too-many-statements,too-many-locals
+# pylint: disable=too-many-return-statements,too-many-nested-blocks
+# pylint: disable=multiple-statements,no-else-return
 
+import os
 import sys
 import re
 import traceback
@@ -86,6 +89,181 @@ NAVIGATION_KEYS = {
     ord('\x02'),  # Ctrl-B (page up)
     ord('\x06'),  # Ctrl-F (page down)
 }
+
+# Theme configuration - encapsulates all color/theme management
+class Theme:
+    """Theme and color management for ConsoleWindow"""
+
+    # Semantic color pair constants (initialized in start_curses based on theme)
+    DEFAULT = 0      # Default terminal colors
+    DANGER = 1       # For destructive operations (wipe prompts)
+    SUCCESS = 2      # For completed operations
+    WARNING = 3      # For caution/stopped states
+    INFO = 4         # For informational states
+    EMPHASIS = 5     # For emphasized text
+    ERROR = 6        # For errors
+    PROGRESS = 7     # For progress indicators
+    HOTSWAP = 9      # For newly inserted devices (hot-swapped)
+    OLD_SUCCESS = 10 # For completed operations (dimmer)
+
+    # Current theme name (set in start_curses)
+    _current = None
+
+    # Available themes
+    THEMES = {
+        'dark-mono': {
+            'name': 'Dark Mono',
+            'default_fg': 253,
+            'default_bg': 232,
+            1: (196, 232),  # DANGER
+            2: (46, 232),   # SUCCESS - Bright green
+            10: (28, 232),  # OLD_SUCCESS - Medium green, darker than SUCCESS but not too dark
+            3: (226, 232),  # WARNING
+            4: (51, 232),   # INFO
+            5: (255, 232),  # EMPHASIS
+            6: (196, 232),  # ERROR
+            7: (39, 232),   # PROGRESS
+            9: (208, 232),  # HOTSWAP
+        },
+        'light-mono': {
+            'name': 'Light Mono',
+            'default_fg': 233,
+            'default_bg': 253,
+            1: (196, 253),  # DANGER
+            2: (34, 253),   # SUCCESS - Bright visible green on light background
+            10: (22, 253),  # OLD_SUCCESS - Darker muted green, clearly darker than SUCCESS
+            3: (208, 253),  # WARNING
+            4: (25, 253),   # INFO
+            5: (232, 253),  # EMPHASIS
+            6: (196, 253),  # ERROR
+            7: (27, 253),   # PROGRESS
+            9: (166, 253),  # HOTSWAP
+        },
+        'default': {
+            'name': 'Terminal Default',
+            'default_fg': -1,
+            'default_bg': -1,
+            1: (1, -1),   # DANGER
+            2: (2, -1),   # SUCCESS - Standard green
+            10: (28, -1), # OLD_SUCCESS - Medium green, dimmer than bright SUCCESS
+            3: (3, -1),   # WARNING
+            4: (6, -1),   # INFO
+            5: (7, -1),   # EMPHASIS
+            6: (9, -1),   # ERROR
+            7: (4, -1),   # PROGRESS
+            9: (208, -1), # HOTSWAP
+        },
+        'solarized-dark': {
+            'name': 'Solarized Dark',
+            'default_fg': 244,
+            'default_bg': 234,
+            1: (160, 234),  # DANGER
+            2: (70, 234),   # SUCCESS - Brighter solarized green, clearly bright
+            10: (28, 234),  # OLD_SUCCESS - Darker muted green, clearly dimmer than SUCCESS
+            3: (136, 234),  # WARNING
+            4: (37, 234),   # INFO
+            5: (230, 234),  # EMPHASIS
+            6: (196, 234),  # ERROR
+            7: (33, 234),   # PROGRESS
+            9: (166, 234),  # HOTSWAP
+        },
+        'solarized-light': {
+            'name': 'Solarized Light',
+            'default_fg': 240,
+            'default_bg': 230,
+            1: (160, 230),  # DANGER
+            2: (70, 230),   # SUCCESS - Brighter solarized green, clearly bright
+            10: (28, 230),  # OLD_SUCCESS - Darker muted green, clearly dimmer than SUCCESS
+            3: (166, 230),  # WARNING
+            4: (37, 230),   # INFO
+            5: (235, 230),  # EMPHASIS
+            6: (196, 230),  # ERROR
+            7: (33, 230),   # PROGRESS
+            9: (208, 230),  # HOTSWAP
+        },
+        'gruvbox': {
+            'name': 'Gruvbox Dark',
+            'default_fg': 223,
+            'default_bg': 235,
+            1: (167, 235),  # DANGER
+            2: (142, 235),  # SUCCESS - Gruvbox green
+            10: (106, 235), # OLD_SUCCESS - Gruvbox medium green (dimmer)
+            3: (214, 235),  # WARNING
+            4: (109, 235),  # INFO
+            5: (229, 235),  # EMPHASIS
+            6: (203, 235),  # ERROR
+            7: (109, 235),  # PROGRESS
+            9: (208, 235),  # HOTSWAP
+        },
+        'nord': {
+            'name': 'Nord',
+            'default_fg': 252,
+            'default_bg': 236,
+            1: (203, 236),  # DANGER
+            2: (150, 236),  # SUCCESS - Nord aurora green, bright
+            10: (114, 236), # OLD_SUCCESS - Nord frost green (dimmer), darker but not too dark
+            3: (220, 236),  # WARNING
+            4: (116, 236),  # INFO
+            5: (231, 236),  # EMPHASIS
+            6: (203, 236),  # ERROR
+            7: (136, 236),  # PROGRESS
+            9: (208, 236),  # HOTSWAP
+        },
+    }
+
+    @classmethod
+    def get_current(cls):
+        """Get the name of the currently active color theme."""
+        return cls._current
+
+    @classmethod
+    def list_all(cls):
+        """List all available color themes."""
+        return list(cls.THEMES.keys())
+
+    @classmethod
+    def set(cls, theme_name):
+        """Change the current theme and reinitialize color pairs.
+
+        Args:
+            theme_name: Name of theme from THEMES dict
+
+        Returns:
+            bool: True if theme was set, False if invalid theme or colors not supported
+        """
+        if theme_name not in cls.THEMES:
+            return False
+
+        if not curses.has_colors():
+            return False
+
+        cls._current = theme_name
+        # Update environment variable so it persists for session
+        os.environ['DWIPE_THEME'] = theme_name
+        theme = cls.THEMES[theme_name]
+
+        # Set terminal background and foreground from theme
+        if 'default_fg' in theme and 'default_bg' in theme:
+            default_fg = theme['default_fg']
+            default_bg = theme['default_bg']
+            # Always update the default color pair and screen background
+            # (even when -1, -1 to reset to terminal defaults)
+            curses.init_pair(8, default_fg, default_bg)
+            if ConsoleWindow.static_scr:
+                ConsoleWindow.static_scr.bkgd(' ', curses.color_pair(8))
+            # Also update pads if window exists
+            if ConsoleWindow.static_win:
+                ConsoleWindow.static_win.head.pad.bkgd(' ', curses.color_pair(8))
+                ConsoleWindow.static_win.body.pad.bkgd(' ', curses.color_pair(8))
+
+        # Reinitialize color pairs with new theme
+        for color_id in [cls.DANGER, cls.SUCCESS, cls.OLD_SUCCESS, cls.WARNING,
+                       cls.INFO, cls.EMPHASIS, cls.ERROR, cls.PROGRESS, cls.HOTSWAP]:
+            if color_id in theme:
+                fg, bg = theme[color_id]
+                curses.init_pair(color_id, fg, bg)
+
+        return True
 
 
 class Context:
@@ -156,7 +334,7 @@ class ConsoleWindowOpts:
     All options have sensible defaults.
     """
     __slots__ = ['head_line', 'head_rows', 'body_rows', 'body_cols', 'keys',
-                 'pick_mode', 'pick_size', 'mod_pick', 'pick_attr', 'ctrl_c_terminates',
+                 'pick_mode', 'pick_size', 'mod_pick', 'pick_attr', 'pick_range', 'ctrl_c_terminates',
                  'return_if_pos_change', 'min_cols_rows', 'dialog_abort', 'dialog_return',
                  'single_cell_scroll_indicator', 'answer_show_redraws', 'strip_attrs_in_pick_mode',
                  'demo_mode']
@@ -174,6 +352,7 @@ class ConsoleWindowOpts:
         :param pick_size: Number of rows highlighted as single 'pick' unit (default: 1)
         :param mod_pick: Optional callable to modify highlighted text (default: None)
         :param pick_attr: Curses attribute for highlighting picked items (default: curses.A_REVERSE)
+        :param pick_range: Column range [start, end] for pick highlighting; None highlights entire line (default: None)
         :param ctrl_c_terminates: If True, Ctrl-C terminates; if False, returns key 3 (default: True)
         :param return_if_pos_change: If True, prompt returns when pick position changes for immediate redraw (default: True)
         :param min_cols_rows: Minimum terminal size as (cols, rows) tuple (default: (70, 20))
@@ -191,6 +370,7 @@ class ConsoleWindowOpts:
         self.pick_size = kwargs.get('pick_size', 1)
         self.mod_pick = kwargs.get('mod_pick', None)
         self.pick_attr = kwargs.get('pick_attr', curses.A_REVERSE)
+        self.pick_range = kwargs.get('pick_range', None)  # [start_col, end_col] or None
         self.ctrl_c_terminates = kwargs.get('ctrl_c_terminates', True)
         self.return_if_pos_change = kwargs.get('return_if_pos_change', True)
         self.min_cols_rows = kwargs.get('min_cols_rows', (70, 20))
@@ -230,6 +410,72 @@ def restore_ctrl_c():
     Called upon curses shutdown.
     """
     signal.signal(signal.SIGINT, signal.default_int_handler)
+
+
+class InlineConfirmation:
+    """Manages inline confirmation prompts for wipe/verify operations"""
+
+    def __init__(self):
+        self.active = False
+        self.confirm_type = None  # 'wipe' or 'verify'
+        self.partition_name = None
+        self.input_buffer = ''
+        self.mode = None  # 'Y', 'y', 'YES', 'yes', 'device'
+
+    def start(self, confirm_type, partition_name, mode):
+        """Start a confirmation prompt"""
+        self.active = True
+        self.confirm_type = confirm_type
+        self.partition_name = partition_name
+        self.input_buffer = ''
+        self.mode = mode
+
+    def cancel(self):
+        """Cancel the confirmation"""
+        self.active = False
+        self.confirm_type = None
+        self.partition_name = None
+        self.input_buffer = ''
+
+    def get_expected(self):
+        """Get the expected input string"""
+        if self.mode == 'device':
+            return self.partition_name
+        return self.mode
+
+    def is_single_key(self):
+        """Check if this mode uses single key confirmation"""
+        return self.mode in ('Y', 'y')
+
+    def handle_key(self, key):
+        """Handle a key press during confirmation.
+
+        Returns:
+            'confirmed' - user confirmed
+            'cancelled' - user cancelled (ESC)
+            'continue' - still gathering input
+        """
+        if key == 27:  # ESC
+            return 'cancelled'
+
+        if self.is_single_key():
+            # Single key confirmation
+            expected = self.get_expected()
+            if key == ord(expected):
+                return 'confirmed'
+            return 'continue'
+
+        # Typed confirmation
+        if 32 <= key <= 126:  # Printable ASCII
+            self.input_buffer += chr(key)
+        elif key in (curses.KEY_BACKSPACE, 127, 8):  # Backspace
+            self.input_buffer = self.input_buffer[:-1]
+        elif key in (curses.KEY_ENTER, 10):  # ENTER
+            if self.input_buffer == self.get_expected():
+                return 'confirmed'
+            # Wrong input - reset
+            self.input_buffer = ''
+        return 'continue'
 
 
 class IncrementalSearchBar:
@@ -817,6 +1063,7 @@ class ConsoleWindow:
     """
     timeout_ms = 2000
     static_scr = None
+    static_win = None  # Reference to active ConsoleWindow instance for theme updates
     nav_keys = """
         Navigation:      H/M/L:      top/middle/end-of-page
           k, UP:  up one row             0, HOME:  first row
@@ -909,6 +1156,20 @@ class ConsoleWindow:
             text_attrs = [],  # run-length encoded: [(attr, count), ...] per line
             contexts = []  # Context object per line (or None)
         )
+
+        # Apply theme background to pads
+        if curses.has_colors():
+            theme = Theme.THEMES.get(Theme.CURRENT_THEME, Theme.THEMES['default'])
+            if 'default_fg' in theme and 'default_bg' in theme:
+                default_fg = theme['default_fg']
+                default_bg = theme['default_bg']
+                if default_fg != -1 or default_bg != -1:
+                    self.head.pad.bkgd(' ', curses.color_pair(8))
+                    self.body.pad.bkgd(' ', curses.color_pair(8))
+
+        # Store reference for theme updates
+        ConsoleWindow.static_win = self
+
         self.mod_pick = self.opts.mod_pick # call back to modify highlighted row
         self.hor_line_cnt = 1 if self.opts.head_line else 0 # no. h-lines in header
         self.scroll_pos = 0  # how far down into body are we?
@@ -1176,7 +1437,7 @@ class ConsoleWindow:
     def start_curses():
         """
         Performs the Curses initial setup: initscr, noecho, cbreak, curs_set(0),
-        keypad(1), and sets up the timeout.
+        keypad(1), sets up the timeout, and initializes color pairs.
 
         :returns: The main screen object.
         :rtype: _curses.window
@@ -1192,6 +1453,38 @@ class ConsoleWindow:
         scr.keypad(1)
         scr.timeout(ConsoleWindow.timeout_ms)
         scr.clear()
+
+        # Initialize color support with theme
+        if curses.has_colors():
+            # global Theme.CURRENT_THEME
+            curses.start_color()
+            curses.use_default_colors()  # Allow -1 for default terminal colors
+
+            # Select theme from environment variable or default
+            theme_name = os.environ.get('DWIPE_THEME', 'default')
+            if theme_name not in Theme.THEMES:
+                theme_name = 'default'
+            Theme.CURRENT_THEME = theme_name
+            theme = Theme.THEMES[theme_name]
+
+            # Set terminal background and foreground from theme
+            if 'default_fg' in theme and 'default_bg' in theme:
+                default_fg = theme['default_fg']
+                default_bg = theme['default_bg']
+                # Initialize pair 0 equivalent for default colors
+                # Note: Can't change pair 0, so we set screen background directly
+                if default_fg != -1 or default_bg != -1:
+                    # Create a color pair for default colors and set screen background
+                    curses.init_pair(8, default_fg, default_bg)
+                    scr.bkgd(' ', curses.color_pair(8))
+
+            # Initialize semantic color pairs based on selected theme
+            for color_id in [Theme.DANGER, Theme.SUCCESS, Theme.WARNING,
+                           Theme.INFO, Theme.EMPHASIS, Theme.ERROR, Theme.PROGRESS, Theme.HOTSWAP]:
+                if color_id in theme:
+                    fg, bg = theme[color_id]
+                    curses.init_pair(color_id, fg, bg)
+
         return scr
 
     def set_pick_mode(self, on=True, pick_size=1):
@@ -1212,6 +1505,23 @@ class ConsoleWindow:
         if self.pick_mode and (not was_on or was_size != self.pick_size):
             self.last_pick_pos = -2 # indicates need to clear them all
 
+    def set_pick_range(self, start_col=None, end_col=None):
+        """
+        Set the column range for pick highlighting.
+
+        :param start_col: Starting column (inclusive), None for full line
+        :param end_col: Ending column (exclusive), None for full line
+        :type start_col: int or None
+        :type end_col: int or None
+        """
+        if start_col is None or end_col is None:
+            self.opts.pick_range = None
+        else:
+            self.opts.pick_range = [start_col, end_col]
+        # Force redraw of pick line
+        if self.pick_mode:
+            self.last_pick_pos = -2
+
     @staticmethod
     def stop_curses():
         """
@@ -1224,6 +1534,7 @@ class ConsoleWindow:
             ConsoleWindow.static_scr.keypad(0)
             curses.endwin()
             ConsoleWindow.static_scr = None
+            ConsoleWindow.static_win = None
             restore_ctrl_c()
 
     def calc(self):
@@ -1587,10 +1898,12 @@ class ConsoleWindow:
                         text = text.ljust(self.get_pad_width())
                         attrs = get_attrs(row_idx)
 
-                        self._draw_line_with_attrs(self.body.pad, row_idx, 0, text, attrs, extra_attr=self.opts.pick_attr)
+                        self._draw_line_with_attrs(self.body.pad, row_idx, 0, text, attrs,
+                                                  extra_attr=self.opts.pick_attr,
+                                                  extra_attr_range=self.opts.pick_range)
                 self.last_pick_pos = pos1
 
-    def _draw_line_with_attrs(self, pad, row, col_offset, text, attrs, extra_attr=None):
+    def _draw_line_with_attrs(self, pad, row, col_offset, text, attrs, extra_attr=None, extra_attr_range=None):
         """
         Draw a line using run-length encoded attributes.
 
@@ -1600,31 +1913,88 @@ class ConsoleWindow:
         :param text: The text to draw
         :param attrs: Run-length encoded attributes [(attr, count), ...] or None
         :param extra_attr: Additional attribute to OR with each segment (e.g., A_REVERSE for highlighting)
+        :param extra_attr_range: [start_col, end_col] range to apply extra_attr; None applies to entire line
         """
         if not attrs:
             # No stored attributes - draw with normal or extra_attr
-            final_attr = extra_attr if extra_attr is not None else curses.A_NORMAL
-            pad.addstr(row, col_offset, text[0:self.get_pad_width()-col_offset], final_attr)
+            if extra_attr is not None and extra_attr_range:
+                # Apply extra_attr only to the specified range
+                start_col, end_col = extra_attr_range
+                max_width = self.get_pad_width() - col_offset
+                text = text[0:max_width]
+
+                # Before range
+                if start_col > 0:
+                    pad.addstr(row, col_offset, text[0:start_col], curses.A_NORMAL)
+                # Inside range
+                range_text = text[start_col:end_col]
+                if range_text:
+                    pad.addstr(row, col_offset + start_col, range_text, extra_attr)
+                # After range
+                if end_col < len(text):
+                    pad.addstr(row, col_offset + end_col, text[end_col:], curses.A_NORMAL)
+            else:
+                final_attr = extra_attr if extra_attr is not None else curses.A_NORMAL
+                pad.addstr(row, col_offset, text[0:self.get_pad_width()-col_offset], final_attr)
             return
+
+        # Handle run-length encoded attributes with optional range highlighting
+        if extra_attr_range:
+            range_start, range_end = extra_attr_range
+        else:
+            range_start, range_end = 0, len(text)
 
         col = col_offset
         pos = 0
         for attr, count in attrs:
             if pos >= len(text):
                 break
+
+            # Get the segment for this attribute run
             segment = text[pos:pos+count]
-            final_attr = attr
-            if extra_attr is not None:
-                final_attr = attr | extra_attr
+            segment_start = pos
+            segment_end = pos + len(segment)
 
-            # Ensure we don't exceed pad width
-            max_len = self.get_pad_width() - col
-            if max_len <= 0:
-                break
-            segment = segment[0:max_len]
+            # Split segment into parts: before range, in range, after range
+            parts = []
 
-            pad.addstr(row, col, segment, final_attr)
-            col += len(segment)
+            # Part before highlight range
+            if segment_start < range_start and segment_end > segment_start:
+                before_end = min(segment_end, range_start)
+                before_text = text[segment_start:before_end]
+                parts.append((before_text, attr, False))
+
+            # Part inside highlight range
+            in_range_start = max(segment_start, range_start)
+            in_range_end = min(segment_end, range_end)
+            if in_range_start < in_range_end:
+                in_range_text = text[in_range_start:in_range_end]
+                parts.append((in_range_text, attr, True))
+
+            # Part after highlight range
+            if segment_end > range_end and segment_start < segment_end:
+                after_start = max(segment_start, range_end)
+                after_text = text[after_start:segment_end]
+                parts.append((after_text, attr, False))
+
+            # Draw each part
+            for part_text, part_attr, in_highlight in parts:
+                if not part_text:
+                    continue
+
+                final_attr = part_attr
+                if extra_attr is not None and in_highlight:
+                    final_attr = part_attr | extra_attr
+
+                # Ensure we don't exceed pad width
+                max_len = self.get_pad_width() - col
+                if max_len <= 0:
+                    break
+                part_text = part_text[0:max_len]
+
+                pad.addstr(row, col, part_text, final_attr)
+                col += len(part_text)
+
             pos += count
 
     def _scroll_indicator_row(self):
@@ -1922,12 +2292,13 @@ class ConsoleWindow:
         curses.doupdate()
 
 
-    def answer(self, prompt='Type string [then Enter]', seed='', width=80, height=5, esc_abort=None):
+    def answer(self, prompt='Type string [then Enter]', seed='', width=80, height=5, esc_abort=None, prompt_attr=None):
         """
         Presents a modal dialog box with working horizontal scroll indicators.
         Uses opts.dialog_abort to determine ESC behavior and opts.dialog_return for submit key.
 
         :param esc_abort: DEPRECATED. Use opts.dialog_abort instead. If provided, overrides opts.dialog_abort.
+        :param prompt_attr: Optional curses attribute for the prompt text (e.g., curses.color_pair(COLOR_RED))
         """
         # Handle deprecated esc_abort parameter for backward compatibility
         if esc_abort is not None:
@@ -1955,7 +2326,7 @@ class ConsoleWindow:
         input_string = list(seed)
         cursor_pos = len(input_string)
         v_scroll_top = 0
-        last_esc_time = None  # For ESC-ESC tracking 
+        last_esc_time = None  # For ESC-ESC tracking
 
         def calculate_geometry(self):
             # ... (Geometry calculation logic remains the same) ...
@@ -1991,7 +2362,7 @@ class ConsoleWindow:
         while True:
             try:
                 success, row0, row9, col0, text_win_width = calculate_geometry(self)
-                
+
                 # --- RESIZE/TOO SMALL CHECK ---
                 if not success:
                     min_cols, min_rows = self.opts.min_cols_rows
@@ -2023,7 +2394,10 @@ class ConsoleWindow:
                     indicator = '*' if debug_redraw_toggle else '+'
                     self.scr.addstr(row0, col0, indicator)
 
-                self.scr.addstr(row0, col0 + 1, prompt[:text_win_width])
+                if prompt_attr is not None:
+                    self.scr.addstr(row0, col0 + 1, prompt[:text_win_width], prompt_attr | curses.A_BOLD)
+                else:
+                    self.scr.addstr(row0, col0 + 1, prompt[:text_win_width])
 
                 # --- Core Display and Scroll Indicator Logic ---
 
@@ -2043,14 +2417,14 @@ class ConsoleWindow:
                 total_wrapped_lines = (len(input_string) + text_win_width - 1) // text_win_width
                 if len(input_string) == 0:
                     total_wrapped_lines = 1
-                
+
                 # Display the visible lines
                 for r in range(height):
                     current_wrapped_line_idx = v_scroll_top + r
-                    
+
                     start_char_idx = current_wrapped_line_idx * text_win_width
                     end_char_idx = start_char_idx + text_win_width
-                    
+
                     if start_char_idx > len(input_string) and r > 0:
                         break
 
@@ -2059,32 +2433,32 @@ class ConsoleWindow:
                     current_h_scroll_start = 0
 
                     is_cursor_line = (current_wrapped_line_idx == wrapped_line_idx)
-                    
+
                     if is_cursor_line:
                         line_to_display = raw_wrapped_line[h_scroll_start:]
                         current_h_scroll_start = h_scroll_start
-                        
+
                     # 1. Clear the content area (important for redraw integrity)
                     self.scr.addstr(row0 + 1 + r, col0 + 1, ' ' * text_win_width)
                     # 2. Display the text
                     self.scr.addstr(row0 + 1 + r, col0 + 1, line_to_display[:text_win_width])
-                    
+
                     # --- SCROLL INDICATOR LOGIC ---
                     if is_cursor_line:
-                        left_indicator = curses.ACS_VLINE 
+                        left_indicator = curses.ACS_VLINE
                         right_indicator = curses.ACS_VLINE
-                        
+
                         # Left Indicator Check
                         if current_h_scroll_start > 0:
                             # If content is scrolled right, show '<'
-                            left_indicator = ord('<') 
+                            left_indicator = ord('<')
 
                         # Right Indicator Check
                         full_line_len = len(raw_wrapped_line)
                         if full_line_len > current_h_scroll_start + text_win_width:
                             # If there's more content to the right, show '>'
-                            right_indicator = ord('>') 
-                        
+                            right_indicator = ord('>')
+
                         # Draw Indicators (overwrite the border's vertical line)
                         self.scr.addch(row0 + 1 + r, col0, left_indicator)
                         self.scr.addch(row0 + 1 + r, col0 + text_win_width + 1, right_indicator)
@@ -2154,7 +2528,7 @@ class ConsoleWindow:
                             return None  # Double ESC within timeout
                         last_esc_time = current_time
                         # Single ESC - just update time and continue
-                
+
                 elif key == curses.KEY_UP:
                     target_pos = cursor_pos - text_win_width
                     cursor_pos = max(0, target_pos)
@@ -2162,7 +2536,7 @@ class ConsoleWindow:
                 elif key == curses.KEY_DOWN:
                     target_pos = cursor_pos + text_win_width
                     cursor_pos = min(len(input_string), target_pos)
-                        
+
                 # ... [KEY_LEFT, KEY_RIGHT, HOME, END, edits, ASCII] ...
                 elif key == curses.KEY_LEFT: cursor_pos = max(0, cursor_pos - 1)
                 elif key == curses.KEY_RIGHT: cursor_pos = min(len(input_string), cursor_pos + 1)
@@ -2193,12 +2567,12 @@ class ConsoleWindow:
                 elif 32 <= key <= 126:
                     input_string.insert(cursor_pos, chr(key))
                     cursor_pos += 1
-                
+
                 # --- Explicit Resize Handler ---
                 elif key == curses.KEY_RESIZE:
                     curses.update_lines_cols()
                     continue
-                    
+
             except curses.error:
                 # Catch exceptions from drawing outside bounds during resize
                 self.scr.clear()
@@ -2679,6 +3053,7 @@ class Screen:
         """
         self.app = app  # Reference to main application instance
         self.win = app.win
+        self._cached_spinner = None  # Lazy-loaded spinner reference
 
     def draw_screen(self):
         """
@@ -2738,8 +3113,8 @@ class Screen:
             if spinner:
                 spinner.show_help_nav_keys(self.win)
         """
-        # Check if we've already cached the spinner
-        if hasattr(self, '_cached_spinner'):
+        # Return cached spinner if already found
+        if self._cached_spinner is not None:
             return self._cached_spinner
 
         # Search through app's attributes for an OptionSpinner instance
@@ -2753,8 +3128,7 @@ class Screen:
                 except (AttributeError, TypeError):
                     continue
 
-        # Cache None if not found to avoid repeated searches
-        self._cached_spinner = None
+        # Not found - return None (don't cache to allow retry)
         return None
 
     def handle_action(self, action_name):
