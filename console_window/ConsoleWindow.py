@@ -707,20 +707,52 @@ class OptionSpinner:
         :param stack: Optional ScreenStack reference for scope-aware key bindings.
                       If stack.obj is None, it will be set to this spinner's default_obj.
         :type stack: ScreenStack or None
+
+        .. warning::
+            If you plan to set a custom default_obj, either:
+
+            1. Pass it via ScreenStack: ``ScreenStack(win, my_opts, ...)`` then
+               ``OptionSpinner(stack=stack)`` (recommended)
+            2. Set it immediately after creation before calling add_key():
+               ``spin = OptionSpinner(stack=stack); spin.default_obj = my_opts``
+
+            The default_obj property automatically syncs with stack.obj when set.
         """
         self.options, self.keys = [], []
         self.margin = 4 # + actual width (1st column right pos)
         self.align = self.margin # + actual width (1st column right pos)
-        self.default_obj = SimpleNamespace() # if not given one
+        self._default_obj = SimpleNamespace() # if not given one (private)
         self.attr_to_option = {} # given an attribute, find its option ns
         self.key_to_option = {} # given key, options namespace
         self.keys = set()
         self.stack = stack  # Optional ScreenStack for scope-aware bindings
         self.key_scopes = {}  # Maps (key, screen) -> option_ns for scope tracking
 
-        # If stack has None obj, give it our default_obj
-        if self.stack and self.stack.obj is None:
-            self.stack.obj = self.default_obj
+        # Sync with stack.obj: use stack's obj if available, otherwise provide ours
+        if self.stack:
+            if self.stack.obj is not None:
+                # Stack already has an obj - use it as our default_obj
+                self._default_obj = self.stack.obj
+            else:
+                # Stack has no obj - give it ours
+                self.stack.obj = self._default_obj
+
+    @property
+    def default_obj(self):
+        """
+        The default object for storing option values.
+
+        When set, automatically synchronizes with stack.obj to prevent
+        object reference fragmentation.
+        """
+        return self._default_obj
+
+    @default_obj.setter
+    def default_obj(self, value):
+        """Set default_obj and keep stack.obj synchronized."""
+        self._default_obj = value
+        if self.stack:
+            self.stack.obj = value  # Keep in sync!
 
     @staticmethod
     def _make_option_ns():
@@ -787,7 +819,7 @@ class OptionSpinner:
                 # Find all screens that implement this action (have method with name = attr)
                 effective_scope = set()
                 for screen_num, screen_obj in self.stack.screen_objects.items():
-                    if hasattr(screen_obj, ns.attr):
+                    if hasattr(screen_obj, f'{ns.attr}_ACTION'):
                         effective_scope.add(screen_num)
                 # If no screens found, default to all screens
                 if not effective_scope:
@@ -3214,8 +3246,31 @@ class ScreenStack:
         Args:
             win (ConsoleWindow): The console window instance
             spins_obj: Application object (typically holds OptionSpinner and state)
+                      IMPORTANT: If using OptionSpinner, pass your options namespace here
+                      to ensure proper object linking. See warning below.
             screens (tuple): Tuple of screen names (e.g., ['HOME', 'SETTINGS', 'HELP'])
             screen_objects (dict): Dict mapping screen numbers to Screen instances
+
+        .. warning::
+            **Initialization Order Matters!**
+
+            When using ScreenStack with OptionSpinner, follow this pattern:
+
+            .. code-block:: python
+
+                # CORRECT - Pass opts to ScreenStack
+                opts = SimpleNamespace()
+                stack = ScreenStack(win, opts, SCREENS, screen_objects)
+                spinner = OptionSpinner(stack=stack)
+                # spinner.default_obj now points to opts via stack.obj
+
+                # INCORRECT - Don't pass None then reassign
+                stack = ScreenStack(win, None, SCREENS, screen_objects)
+                spinner = OptionSpinner(stack=stack)
+                spinner.default_obj = opts  # Creates object fragmentation!
+
+            The OptionSpinner syncs with stack.obj, so they must use the same object
+            from the start to avoid different parts of the code using different namespaces.
         """
         self.win = win
         self.obj = spins_obj
@@ -3226,7 +3281,7 @@ class ScreenStack:
         # Push home screen (HOME_ST=0) as the initial screen
         self.push(HOME_ST, 0)
 
-    def push(self, screen, prev_pos, force=False):
+    def push(self, screen, prev_pos=None, force=False):
         """
         Push a new screen onto the stack with validation and loop prevention.
 
@@ -3238,6 +3293,8 @@ class ScreenStack:
         Returns:
             Previous position if successful, None if blocked by validation
         """
+        if prev_pos is None:
+            prev_pos = self.win.pick_pos
         # Loop prevention: Check if screen is already on the stack
         if not force and self.curr and screen == self.curr.num:
             # Trying to push the current screen again - ignore
