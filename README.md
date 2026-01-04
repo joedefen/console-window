@@ -115,5 +115,3 @@ For more extensive examples, you can look at some projects using `console-window
   * viewer of /proc/meminfo that shows historical values
 * [vappman](https://github.com/joedefen/vappman)
   * convenince wrapper to mostly hide CLI of [AppMan](https://github.com/ivan-hc/AppMan), a life-cycle manager for 2000+ AppImages
-* [my-snaps](https://github.com/joedefen/my-snaps)
-  * special purpose BTRFS snap manager
