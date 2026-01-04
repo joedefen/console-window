@@ -74,6 +74,9 @@ class DemoApp:
             on_accept=self._on_filter_accept,
             on_cancel=self._on_filter_cancel
         )
+
+        # IMPORTANT: Create opts BEFORE ScreenStack to ensure proper object linking
+        # The OptionSpinner will use stack.obj, so it must be set correctly from the start
         self.opts = SimpleNamespace()
 
         # Create screen instances
@@ -95,11 +98,11 @@ class DemoApp:
         )
 
         self.win = ConsoleWindow(opts=win_opts,)
-        self.stack = ScreenStack(self.win, None, SCREEN_NAMES, screens)
+        # Pass self.opts as spins_obj so stack.obj points to the right object
+        self.stack = ScreenStack(self.win, self.opts, SCREEN_NAMES, screens)
 
-        # Setup option spinner with add_key
+        # Setup option spinner - it will inherit stack.obj (self.opts)
         spin = self.spin = OptionSpinner(stack=self.stack)
-        spin.default_obj = self.opts
         themes = Theme.list_all()
 
         # Add view mode and sort options
@@ -343,21 +346,22 @@ class MainScreen(DemoScreen):
 
     def _draw_header(self):
         app = self.app
-        # Build header with filter display
-        filter_display = app.filter_bar.get_display_string(prefix='/')
-        if not filter_display:
-            filter_display = '/'
-        app.win.add_header(filter_display, attr=cs.A_BOLD)
+        # Build header with filter display using fancy_header for compact formatting
+        line = app.filter_bar.get_display_string(prefix='/')
+        if not line:
+            line = '/'
+        # Use fancy_header to show filter with bold/underline formatting
 
         # Show spinner keys
-        line = f'[v]iew={app.opts.view_mode}'
+        line += f' [v]iew={app.opts.view_mode}'
         line += f' [s]ort={app.opts.sort_by}'
         line += ' [a]nsDemo'
         line += ' l:alrtDemo'
+        line += ' SPC:process'
         line += ' [t]hemes'
         line += ' [h]ist'
         line += ' ?:help'
-        app.win.add_header(f'  {line}', attr=cs.A_DIM, resume=True)
+        app.win.add_fancy_header(f'  {line}', mode="Underline")
 
         # Column headers
         view_mode = app.opts.view_mode
