@@ -3342,6 +3342,12 @@ class ScreenStack:
         self.win.pick_pos = self.win.scroll_pos = 0
         return 0
 
+    def get_curr_obj(self):
+        """ get the current screen object """
+        if self.curr:
+            return self.screen_objects.get(self.curr.num, None)
+        return None
+
     def pop(self, force=False):
         """
         Pop the top screen from the stack.
