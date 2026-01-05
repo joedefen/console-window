@@ -479,9 +479,9 @@ class HistoryScreen(DemoScreen):
                           attr=cs.A_DIM, resume=True)
 
         if app.selected_items:
-            app.win.put_body('')
-            app.win.put_body(f'Total processed items: {len(app.selected_items)}')
-            app.win.put_body('')
+            app.win.add_body('')
+            app.win.add_body(f'Total processed items: {len(app.selected_items)}')
+            app.win.add_body('')
             for username in sorted(app.selected_items):
                 # Find the item details
                 item = next((i for i in app.items
@@ -490,10 +490,10 @@ class HistoryScreen(DemoScreen):
                     line = f'  ✓ {username:<16} uid={item["uid"]:<8} {item["home"]}'
                     app.win.add_body(line, attr=cs.color_pair(Theme.SUCCESS))
         else:
-            app.win.put_body('')
-            app.win.put_body('No items have been processed yet.')
-            app.win.put_body('')
-            app.win.put_body('Go back to the main screen and press '
+            app.win.add_body('')
+            app.win.add_body('No items have been processed yet.')
+            app.win.add_body('')
+            app.win.add_body('Go back to the main screen and press '
                            'SPACE on an item to process it.')
 
 
@@ -516,8 +516,8 @@ class ThemeScreen(DemoScreen):
                           attr=cs.A_BOLD)
         win.add_header('  ESC:return', attr=cs.A_DIM, resume=True)
 
-        win.put_body('Color samples:')
-        win.put_body('')
+        win.add_body('Color samples:')
+        win.add_body('')
 
         # Color samples
         color_samples = [

@@ -265,6 +265,70 @@ class Theme:
 
         return True
 
+    @classmethod
+    def create_picker_screen(cls, base_class):
+        """
+        Create a theme picker screen class dynamically.
+
+        Args:
+            base_class: The Screen base class to inherit from
+
+        Returns:
+            A new class that displays all themes and allows cycling through them
+
+        Usage:
+            ThemeScreen = Theme.create_picker_screen(Screen)
+            screens[THEME_ST] = ThemeScreen(app)
+        """
+        class ThemePickerScreen(base_class):
+            """Theme preview screen showing all available themes with color examples"""
+
+            def draw_screen(self):
+                """Draw the theme screen with color examples for all themes"""
+                app = self.app
+                win = app.win
+
+                win.set_pick_mode(False)
+
+                # Get current theme name (may be empty string for default)
+                current_theme = cls.get_current()
+                display_theme = current_theme if current_theme else '(default)'
+
+                # Add header showing current theme
+                win.add_header(f'COLOR THEME:  {display_theme:^18}', attr=curses.A_BOLD)
+                win.add_header('   Press [t] to cycle themes, ESC to return', resume=True)
+
+                # Color purpose labels
+                color_labels = [
+                    (cls.DANGER, 'DANGER', 'Destructive operations'),
+                    (cls.SUCCESS, 'SUCCESS', 'Completed operations'),
+                    (cls.OLD_SUCCESS, 'OLD_SUCCESS', 'Older completed operations'),
+                    (cls.WARNING, 'WARNING', 'Caution/stopped states'),
+                    (cls.INFO, 'INFO', 'Informational states'),
+                    (cls.EMPHASIS, 'EMPHASIS', 'Emphasized text'),
+                    (cls.ERROR, 'ERROR', 'Errors'),
+                    (cls.PROGRESS, 'PROGRESS', 'Progress indicators'),
+                    (cls.HOTSWAP, 'HOTSWAP', 'Recently added items'),
+                ]
+
+                # Show color examples for this theme
+                for color_id, label, description in color_labels:
+                    # Create line with colored block and description
+                    line = f'{label:12} ████████  {description}'
+                    attr = curses.color_pair(color_id)
+                    win.add_body(line, attr=attr)
+
+            def spin_theme_ACTION(self):
+                """Handle 't' key - cycle through themes"""
+                vals = cls.list_all()
+                value = cls.get_current()
+                idx = vals.index(value) if value in vals else -1
+                value = vals[(idx+1) % len(vals)]  # choose next
+                cls.set(value)
+                self.app.opts.theme = value
+
+        return ThemePickerScreen
+
 
 class Context:
     """
@@ -337,7 +401,7 @@ class ConsoleWindowOpts:
                  'pick_mode', 'pick_size', 'mod_pick', 'pick_attr', 'pick_range', 'ctrl_c_terminates',
                  'return_if_pos_change', 'min_cols_rows', 'dialog_abort', 'dialog_return',
                  'single_cell_scroll_indicator', 'answer_show_redraws', 'strip_attrs_in_pick_mode',
-                 'demo_mode']
+                 'demo_mode', 'relax_handled_keys']
 
     def __init__(self, **kwargs):
         """
@@ -360,6 +424,7 @@ class ConsoleWindowOpts:
         :param dialog_return: Which key submits dialogs: "ENTER", "TAB" (default: "ENTER")
         :param single_cell_scroll_indicator: If True, shows single-cell position dot; if False, shows proportional range (default: False)
         :param strip_attrs_in_pick_mode: If True, strips attributes in pick mode (old behavior); if False, preserves them (default: False)
+        :param relax_handled_keys: If True, passes all non-navigation keys to app without checking handled_keys list (default: True)
         """
         self.head_line = kwargs.get('head_line', True)
         self.head_rows = kwargs.get('head_rows', 50)
@@ -380,6 +445,7 @@ class ConsoleWindowOpts:
         self.answer_show_redraws = kwargs.get('answer_show_redraws', False)
         self.strip_attrs_in_pick_mode = kwargs.get('strip_attrs_in_pick_mode', False)
         self.demo_mode = kwargs.get('demo_mode', False)
+        self.relax_handled_keys = kwargs.get('relax_handled_keys', True)
 
         # Validate dialog_abort
         if self.dialog_abort not in [None, 'ESC', 'ESC-ESC']:
@@ -647,29 +713,30 @@ class IncrementalSearchBar:
 
         return False
 
-    def get_display_string(self, prefix='/', suffix=''):
+    def get_display_string(self, prefix='/', suffix='', cursor_char='█'):
         """
         Get formatted display string with cursor indicator.
 
-        When active (in search mode), shows cursor position with '|'.
+        When active (in search mode), shows cursor position with cursor_char (default: block).
         When inactive, just shows the text with prefix/suffix if text is non-empty.
 
         :param prefix: String to show before the search text (default: '/')
         :param suffix: String to show after the search text (default: '')
+        :param cursor_char: Character to use for cursor (default: '█' block)
         :returns: Formatted string for display
 
         Example:
-            Active with cursor: ' /hello| world'
-            Active at end: ' /hello world|'
+            Active with cursor: ' /hello█ world'
+            Active at end: ' /hello world█'
             Inactive with text: ' /hello world'
             Inactive without text: ''
         """
         if self._active:
-            # Show cursor position with |
+            # Show cursor position with cursor_char (block by default for visibility)
             before = self._text[:self._cursor_pos]
             after = self._text[self._cursor_pos:]
             # Add space after prefix to prevent pattern matching in fancy_header
-            return f'{prefix} {before}|{after}{suffix}'
+            return f'{prefix} {before}{cursor_char}{after}{suffix}'
         elif self._text:
             return f'{prefix}{self._text}{suffix}'
         else:
@@ -1218,6 +1285,7 @@ class ConsoleWindow:
         self.last_demo_key = ''  # Last key pressed in demo mode
         self.max_header_len = 0  # Max visible header length from previous render
         self.passthrough_mode = False  # When True, all printable keys pass through
+        self.relax_handled_keys = self.opts.relax_handled_keys  # When True, pass non-nav keys without checking handled_keys
         self._set_screen_dims()
         self.calc()
 
@@ -1583,78 +1651,6 @@ class ConsoleWindow:
         self.body_base = self.head.view_cnt + self.hor_line_cnt
         return not same
 
-    def _put(self, ns, *args, context=None):
-        """
-        Adds text to the head/body pad using a mixed argument list.
-
-        Allows interleaving of text (str/bytes) and curses attributes (int).
-        Text segments before an attribute are flushed with that attribute.
-
-        :param context: Optional Context object with metadata for this line.
-        :type context: Context or None
-        """
-        def flush(attr=None):
-            nonlocal self, is_body, row, text, seg, first, attrs_list
-            if attr is None:
-                attr = curses.A_NORMAL
-            # Apply stripping logic if needed
-            if is_body and self.pick_mode and self.opts.strip_attrs_in_pick_mode:
-                attr = curses.A_NORMAL
-
-            if seg and first:
-                ns.pad.addstr(row, 0, seg[0:self.get_pad_width()], attr)
-                attrs_list.append((attr, len(seg)))
-            elif seg:
-                _, x = ns.pad.getyx()
-                cols = self.get_pad_width() - x
-                if cols > 0:
-                    actual_seg = seg[0:cols]
-                    ns.pad.addstr(actual_seg, attr)
-                    attrs_list.append((attr, len(actual_seg)))
-            text += seg
-            seg, first, attr = '', False, None
-
-        is_body = bool(id(ns) == id(self.body))
-        if ns.row_cnt < ns.rows:
-            row = max(ns.row_cnt, 0)
-            text, seg, first = '', '', True
-            attrs_list = []  # run-length encoded attributes
-            for arg in args:
-                if isinstance(arg, bytes):
-                    arg = arg.decode('utf-8')
-                if isinstance(arg, str):
-                    seg += arg  # note: add w/o spacing
-                elif arg is None or isinstance(arg, (int)):
-                    # assume arg is attribute ... flushes text
-                    flush(attr=arg)
-            flush()
-            ns.texts.append(text)  # text only history
-            ns.text_attrs.append(attrs_list)  # run-length encoded attributes
-            ns.contexts.append(context)  # Context metadata (or None)
-            ns.row_cnt += 1
-
-    def put_head(self, *args, context=None):
-        """
-        Adds a line of text to the header pad, supporting mixed text and attributes.
-
-        :param args: Mixed arguments of str/bytes (text) and int (curses attributes).
-        :param context: Optional Context object with metadata for this line.
-        :type args: Any
-        :type context: Context or None
-        """
-        self._put(self.head, *args, context=context)
-
-    def put_body(self, *args, context=None):
-        """
-        Adds a line of text to the body pad, supporting mixed text and attributes.
-
-        :param args: Mixed arguments of str/bytes (text) and int (curses attributes).
-        :param context: Optional Context object with metadata for this line.
-        :type args: Any
-        :type context: Context or None
-        """
-        self._put(self.body, *args, context=context)
-
     def _add(self, ns, text, attr=None, resume=False, context=None):
         """Internal method to add text to pad using its namespace (simpler version of _put)."""
         is_body = bool(id(ns) == id(self.body))
@@ -1715,7 +1711,7 @@ class ConsoleWindow:
         """
         self._add(self.body, text, attr, resume, context)
 
-    def add_fancy_header(self, line, mode='Underline'):
+    def add_fancy_header(self, line, mode='Underline', search_pattern_attr=None):
         """
         Parses header line and adds it with fancy formatting.
 
@@ -1731,8 +1727,10 @@ class ConsoleWindow:
 
         :param line: The header text to add with formatting
         :param mode: Formatting mode ('Off', 'Underline', or 'Reverse')
+        :param search_pattern_attr: Optional custom attribute for /pattern highlighting
         :type line: str
         :type mode: str
+        :type search_pattern_attr: int or None
         """
         if mode == 'Off':
             # Fancy mode off, just add the line normally
@@ -1797,7 +1795,9 @@ class ConsoleWindow:
                             current_text = ""
 
                         full_pattern = match.group(0)  # includes the /
-                        result_sections.append((full_pattern, curses.A_BOLD | curses.A_REVERSE))
+                        # Use custom attr if provided, otherwise default bold+reverse
+                        pattern_attr = search_pattern_attr if search_pattern_attr is not None else (curses.A_BOLD | curses.A_REVERSE)
+                        result_sections.append((full_pattern, pattern_attr))
                         i += len(full_pattern)
                     else:
                         # Not a key pattern, just regular character
@@ -2831,7 +2831,10 @@ class ConsoleWindow:
                 if self.opts.demo_mode and key not in NAVIGATION_KEYS:
                     self.last_demo_key = self._format_key_for_demo(key)
                 return key
-            elif key in self.handled_keys:
+
+            # If relax_handled_keys is False, only pass keys explicitly in handled_keys
+            # (Navigation keys will still be handled below)
+            if not self.relax_handled_keys and key in self.handled_keys:
                 # Update demo mode tracking for non-navigation keys
                 if self.opts.demo_mode and key not in NAVIGATION_KEYS:
                     self.last_demo_key = self._format_key_for_demo(key)
@@ -2912,6 +2915,13 @@ class ConsoleWindow:
                 else:
                     # Only render here if we're not going to redraw immediately
                     self.render()
+            else:
+                # Navigation key didn't match - if relax_handled_keys is True, pass key to app
+                if self.relax_handled_keys:
+                    # Update demo mode tracking for non-navigation keys
+                    if self.opts.demo_mode and key not in NAVIGATION_KEYS:
+                        self.last_demo_key = self._format_key_for_demo(key)
+                    return key
         return None
 
 # =============================================================================
