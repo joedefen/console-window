@@ -1096,8 +1096,8 @@ class OptionSpinner:
             value = self.get_value(ns.attr)
             assert value is not None, f'cannot get value of {repr(ns.attr)}'
 
-            colon = '' if ns.genre == 'action' else ':'
-            win.add_body(f'{ns.descr:>{self.align}}{colon} ')
+            dot = ' ' if ns.genre == 'action' else '·'
+            win.add_body(f'{ns.descr:{dot}<{self.align}} ')
 
             if ns.genre in ('cycle', 'prompt'):
                 choices = ns.vals if ns.vals else [value]
