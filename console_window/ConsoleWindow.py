@@ -479,68 +479,114 @@ def restore_ctrl_c():
 
 
 class InlineConfirmation:
-    """Manages inline confirmation prompts for wipe/verify operations"""
+    """
+    Manages stateful inline confirmation prompts for destructive or critical operations.
+    
+    This class handles the transition from standard application input to a 
+    confirmation sub-state, supporting several verification modes. When a match 
+    is found in 'choices' mode, the input_buffer is updated to the full 
+    canonical string so the calling application can use it directly.
+    
+    Modes:
+    - 'Y'/'y': Single-key immediate confirmation.
+    - 'yes'/'YES': Explicit string confirmation (case-sensitive for 'YES').
+    - 'identity': Requires typing a specific string (e.g., a device node like 'sda1').
+    - 'choices': Flexible matching against a list of valid strings.
+    """
+    MODES = 'Y y YES yes identity choices'.split()
 
     def __init__(self):
         self.active = False
-        self.confirm_type = None  # 'wipe' or 'verify'
-        self.partition_name = None
+        self.action_type = None  # e.g., 'wipe' or 'verify'
+        self.identity = None     # e.g., 'sda1'
+        self.choices = None      
         self.input_buffer = ''
-        self.mode = None  # 'Y', 'y', 'YES', 'yes', 'device'
+        self.mode = None
 
-    def start(self, confirm_type, partition_name, mode):
-        """Start a confirmation prompt"""
+    def start(self, action_type=None, identity=None, choices=None, mode=None):
         self.active = True
-        self.confirm_type = confirm_type
-        self.partition_name = partition_name
+        self.action_type = action_type
+        self.identity = identity
+        self.choices = (choices if isinstance(choices, (list, tuple))
+                    else [choices] if isinstance(choices, str) else None)
         self.input_buffer = ''
-        self.mode = mode
+        
+        # Logic to determine mode based on provided arguments
+        self.mode = 'choices' if self.choices else mode if mode else 'yes'
+        if self.mode not in self.MODES:
+            self.mode = 'yes'
+        if self.mode == 'choices' and not self.choices:
+            self.mode = 'yes'
 
     def cancel(self):
         """Cancel the confirmation"""
         self.active = False
-        self.confirm_type = None
-        self.partition_name = None
+        self.action_type = None
+        self.choices = None
         self.input_buffer = ''
 
-    def get_expected(self):
-        """Get the expected input string"""
-        if self.mode == 'device':
-            return self.partition_name
-        return self.mode
+    def _resolve_choice(self):
+        """
+        Tiered matching logic for choices. Returns the full string if 
+        a unique match is found, otherwise None.
+        """
+        buf = self.input_buffer
+        if not buf: return None
+        buf_l = buf.lower()
 
-    def is_single_key(self):
-        """Check if this mode uses single key confirmation"""
-        return self.mode in ('Y', 'y')
+        # 1. Perfect matches
+        if buf in self.choices: return buf
+        
+        # 2. Case-insensitive matches
+        ci_matches = [c for c in self.choices if c.lower() == buf_l]
+        if len(ci_matches) == 1: return ci_matches[0]
+
+        # 3. Leading substring (4+ chars only)
+        if len(buf) >= 4:
+            # Case-sensitive substring
+            ss_matches = [c for c in self.choices if c.startswith(buf)]
+            if len(ss_matches) == 1: return ss_matches[0]
+            
+            # Case-insensitive substring
+            ss_ci_matches = [c for c in self.choices if c.lower().startswith(buf_l)]
+            if len(ss_ci_matches) == 1: return ss_ci_matches[0]
+
+        return None
 
     def handle_key(self, key):
-        """Handle a key press during confirmation.
+        if key == 27: return 'cancelled'
 
-        Returns:
-            'confirmed' - user confirmed
-            'cancelled' - user cancelled (ESC)
-            'continue' - still gathering input
-        """
-        if key == 27:  # ESC
-            return 'cancelled'
-
-        if self.is_single_key():
-            # Single key confirmation
-            expected = self.get_expected()
-            if key == ord(expected):
+        # Handle single-key modes
+        if self.mode in ('Y', 'y'):
+            expected = self.identity if self.mode == 'identity' else self.mode
+            if key == ord(expected[0]):
+                self.input_buffer = expected
                 return 'confirmed'
             return 'continue'
 
-        # Typed confirmation
-        if 32 <= key <= 126:  # Printable ASCII
+        # Handle buffered input
+        if 32 <= key <= 126:
             self.input_buffer += chr(key)
-        elif key in (curses.KEY_BACKSPACE, 127, 8):  # Backspace
+        elif key in (127, 8, curses.KEY_BACKSPACE, 263): # Backspace (all variants)
             self.input_buffer = self.input_buffer[:-1]
-        elif key in (curses.KEY_ENTER, 10):  # ENTER
-            if self.input_buffer == self.get_expected():
+        elif key in (10, 13): # Enter
+            match = None
+            
+            if self.mode == 'choices':
+                match = self._resolve_choice()
+            elif self.mode == 'identity':
+                if self.input_buffer == self.identity: match = self.identity
+            elif self.mode == 'YES':
+                if self.input_buffer == 'YES': match = 'YES'
+            else: # 'yes' or other permissive modes
+                if self.input_buffer.lower() == 'yes': match = self.input_buffer
+            
+            if match:
+                self.input_buffer = match # Canonicalize
                 return 'confirmed'
-            # Wrong input - reset
-            self.input_buffer = ''
+            
+            self.input_buffer = '' # Reset on failure
+            
         return 'continue'
 
 
@@ -1308,7 +1354,7 @@ class ConsoleWindow:
 
     def set_demo_mode(self, enabled):
         """
-        Enable or disable demo mode.
+        Enable or disable demo mode. Passing None will toggle it.
 
         When demo mode is enabled, the last non-navigation key pressed is shown
         in reverse video at the end of the first header line.
@@ -1316,9 +1362,13 @@ class ConsoleWindow:
         :param enabled: True to enable demo mode, False to disable
         :type enabled: bool
         """
-        self.opts.demo_mode = enabled
+        if enabled is None: # toggle if not explicit
+            self.opts.demo_mode = not (self.opts.demo_mode)
+        else:
+            self.opts.demo_mode = bool(enabled)
         if not enabled:
             self.last_demo_key = ''
+        return self.opts.demo_mode
 
     def _format_key_for_demo(self, key):
         """
@@ -2820,17 +2870,20 @@ class ConsoleWindow:
                 break
 
             # App keys...
-            # In passthrough mode, return all printable keys plus special editing keys
-            # Special editing keys: backspace, arrows, home, end
-            editing_keys = {curses.KEY_BACKSPACE, 127, 8, 263,  # backspace variants
-                          curses.KEY_LEFT, curses.KEY_RIGHT,
-                          curses.KEY_HOME, curses.KEY_END,
-                          1, 5}  # Ctrl-A, Ctrl-E
-            if self.passthrough_mode and (32 <= key <= 126 or key in editing_keys or key in self.handled_keys):
-                # Update demo mode tracking for non-navigation keys
-                if self.opts.demo_mode and key not in NAVIGATION_KEYS:
-                    self.last_demo_key = self._format_key_for_demo(key)
-                return key
+            # In passthrough mode, return all keys to the application (printable, editing, and navigation)
+            # This allows InlineConfirmation and IncrementalSearchBar to decide which keys to handle
+            if self.passthrough_mode:
+                # Return all printable chars, editing keys, navigation keys, and handled_keys
+                # Let the application decide what to do with each key
+                editing_keys = {curses.KEY_BACKSPACE, 127, 8, 263,  # backspace variants
+                              curses.KEY_LEFT, curses.KEY_RIGHT,
+                              curses.KEY_HOME, curses.KEY_END,
+                              1, 5}  # Ctrl-A, Ctrl-E
+                if (32 <= key <= 126 or key in editing_keys or key in NAVIGATION_KEYS or key in self.handled_keys):
+                    # Update demo mode tracking for non-navigation keys
+                    if self.opts.demo_mode and key not in NAVIGATION_KEYS:
+                        self.last_demo_key = self._format_key_for_demo(key)
+                    return key
 
             # If relax_handled_keys is False, only pass keys explicitly in handled_keys
             # (Navigation keys will still be handled below)
