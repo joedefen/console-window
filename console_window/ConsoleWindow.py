@@ -1030,6 +1030,14 @@ class OptionSpinner:
 
         # Process each key for scope subtraction
         for key in ns.keys:
+            # Check for conflicts with navigation keys
+            if key in NAVIGATION_KEYS:
+                key_char = chr(key) if 32 <= key < 127 else f'<{key}>'
+                raise ValueError(
+                    f'Key {key_char} ({key}) conflicts with a navigation key. '
+                    f'Navigation keys are reserved for cursor movement and scrolling.'
+                )
+
             # Perform subtraction FIRST: remove new scope from existing options with same key
             for existing_ns in self.options:
                 if key in existing_ns.keys and hasattr(existing_ns, 'effective_scope'):
