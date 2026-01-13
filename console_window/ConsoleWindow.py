@@ -481,36 +481,47 @@ def restore_ctrl_c():
 class InlineConfirmation:
     """
     Manages stateful inline confirmation prompts for destructive or critical operations.
-    
-    This class handles the transition from standard application input to a 
-    confirmation sub-state, supporting several verification modes. When a match 
-    is found in 'choices' mode, the input_buffer is updated to the full 
+
+    This class handles the transition from standard application input to a
+    confirmation sub-state, supporting several verification modes. When a match
+    is found in 'choices' mode, the input_buffer is updated to the full
     canonical string so the calling application can use it directly.
-    
+
     Modes:
     - 'Y'/'y': Single-key immediate confirmation.
     - 'yes'/'YES': Explicit string confirmation (case-sensitive for 'YES').
     - 'identity': Requires typing a specific string (e.g., a device node like 'sda1').
     - 'choices': Flexible matching against a list of valid strings.
+
+    :param min_abbrev_chars: Minimum characters required for abbreviated choice matching (default: 4)
+    :type min_abbrev_chars: int
+
+    Methods:
+    - get_hint(): Returns a hint string when input_buffer is empty (display in dimmed/italic style)
     """
     MODES = 'Y y YES yes identity choices'.split()
 
-    def __init__(self):
+    def __init__(self, min_abbrev_chars=4):
         self.active = False
         self.action_type = None  # e.g., 'wipe' or 'verify'
         self.identity = None     # e.g., 'sda1'
-        self.choices = None      
+        self.choices = None
         self.input_buffer = ''
         self.mode = None
+        self.min_abbrev_chars = min_abbrev_chars
 
-    def start(self, action_type=None, identity=None, choices=None, mode=None):
+    def start(self, action_type=None, identity=None, choices=None, mode=None, min_abbrev_chars=None):
         self.active = True
         self.action_type = action_type
         self.identity = identity
         self.choices = (choices if isinstance(choices, (list, tuple))
                     else [choices] if isinstance(choices, str) else None)
         self.input_buffer = ''
-        
+
+        # Override min_abbrev_chars if provided
+        if min_abbrev_chars is not None:
+            self.min_abbrev_chars = min_abbrev_chars
+
         # Logic to determine mode based on provided arguments
         self.mode = 'choices' if self.choices else mode if mode else 'yes'
         if self.mode not in self.MODES:
@@ -541,12 +552,12 @@ class InlineConfirmation:
         ci_matches = [c for c in self.choices if c.lower() == buf_l]
         if len(ci_matches) == 1: return ci_matches[0]
 
-        # 3. Leading substring (4+ chars only)
-        if len(buf) >= 4:
+        # 3. Leading substring (min_abbrev_chars+ chars only)
+        if len(buf) >= self.min_abbrev_chars:
             # Case-sensitive substring
             ss_matches = [c for c in self.choices if c.startswith(buf)]
             if len(ss_matches) == 1: return ss_matches[0]
-            
+
             # Case-insensitive substring
             ss_ci_matches = [c for c in self.choices if c.lower().startswith(buf_l)]
             if len(ss_ci_matches) == 1: return ss_ci_matches[0]
@@ -586,8 +597,35 @@ class InlineConfirmation:
                 return 'confirmed'
             
             self.input_buffer = '' # Reset on failure
-            
+
         return 'continue'
+
+    def get_hint(self):
+        """
+        Returns a hint string for display when input_buffer is empty.
+        Intended to be shown in dimmed/italic style.
+        """
+        if self.input_buffer:
+            return ''
+
+        if self.mode in ('Y', 'y'):
+            return f'Press {self.mode}'
+        elif self.mode == 'YES':
+            return 'Type YES + ENTER or ESC'
+        elif self.mode == 'yes':
+            return 'Type yes + ENTER or ESC'
+        elif self.mode == 'identity':
+            return f'Type {self.identity} + ENTER or ESC'
+        elif self.mode == 'choices':
+            if len(self.choices) == 1:
+                return f'Type {self.choices[0]} + ENTER or ESC'
+            else:
+                # Show abbreviated options
+                opts = '/'.join(self.choices[:3])
+                if len(self.choices) > 3:
+                    opts += '/...'
+                return f'{opts} ({self.min_abbrev_chars}+ chars) + ENTER or ESC'
+        return ''
 
 
 class IncrementalSearchBar:
