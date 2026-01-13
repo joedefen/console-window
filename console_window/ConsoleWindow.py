@@ -493,15 +493,17 @@ class InlineConfirmation:
     - 'identity': Requires typing a specific string (e.g., a device node like 'sda1').
     - 'choices': Flexible matching against a list of valid strings.
 
-    :param min_abbrev_chars: Minimum characters required for abbreviated choice matching (default: 4)
-    :type min_abbrev_chars: int
+    :param min_abbrev_chars: Minimum characters required for abbreviated choice matching.
+                             When None (default), automatically calculates based on choices:
+                             (min chars to disambiguate) + 1, capped at longest choice length.
+    :type min_abbrev_chars: int or None
 
     Methods:
     - get_hint(): Returns a hint string when input_buffer is empty (display in dimmed/italic style)
     """
     MODES = 'Y y YES yes identity choices'.split()
 
-    def __init__(self, min_abbrev_chars=4):
+    def __init__(self, min_abbrev_chars=None):
         self.active = False
         self.action_type = None  # e.g., 'wipe' or 'verify'
         self.identity = None     # e.g., 'sda1'
@@ -509,6 +511,7 @@ class InlineConfirmation:
         self.input_buffer = ''
         self.mode = None
         self.min_abbrev_chars = min_abbrev_chars
+        self._calculated_min_abbrev = None  # Cached calculated value
 
     def start(self, action_type=None, identity=None, choices=None, mode=None, min_abbrev_chars=None):
         self.active = True
@@ -521,6 +524,10 @@ class InlineConfirmation:
         # Override min_abbrev_chars if provided
         if min_abbrev_chars is not None:
             self.min_abbrev_chars = min_abbrev_chars
+            self._calculated_min_abbrev = None
+        else:
+            # Reset calculated value so it's recalculated for new choices
+            self._calculated_min_abbrev = None
 
         # Logic to determine mode based on provided arguments
         self.mode = 'choices' if self.choices else mode if mode else 'yes'
@@ -535,6 +542,45 @@ class InlineConfirmation:
         self.action_type = None
         self.choices = None
         self.input_buffer = ''
+
+    def _calculate_min_abbrev_chars(self):
+        """
+        Calculate minimum prefix length needed to disambiguate choices.
+        Returns: min_length + 1, capped at longest choice length.
+        """
+        if not self.choices or len(self.choices) <= 1:
+            return 1
+
+        # Find minimum prefix length to distinguish all choices (case-insensitive)
+        max_len = max(len(c) for c in self.choices)
+
+        for prefix_len in range(1, max_len + 1):
+            prefixes = {}
+            for choice in self.choices:
+                prefix = choice[:prefix_len].lower()
+                if prefix in prefixes:
+                    # Collision found
+                    break
+                prefixes[prefix] = choice
+            else:
+                # No collision at this length - we can disambiguate
+                # Add 1 to make errors less likely, but cap at longest choice
+                return min(prefix_len + 1, max_len)
+
+        # If we get here, choices can't be disambiguated (e.g., "Yes" and "yes")
+        # Still return a reasonable value
+        return max_len
+
+    def _get_effective_min_abbrev_chars(self):
+        """Get the effective min_abbrev_chars value (explicit or calculated)."""
+        if self.min_abbrev_chars is not None:
+            return self.min_abbrev_chars
+
+        # Calculate if not cached
+        if self._calculated_min_abbrev is None:
+            self._calculated_min_abbrev = self._calculate_min_abbrev_chars()
+
+        return self._calculated_min_abbrev
 
     def _resolve_choice(self):
         """
@@ -553,7 +599,8 @@ class InlineConfirmation:
         if len(ci_matches) == 1: return ci_matches[0]
 
         # 3. Leading substring (min_abbrev_chars+ chars only)
-        if len(buf) >= self.min_abbrev_chars:
+        min_chars = self._get_effective_min_abbrev_chars()
+        if len(buf) >= min_chars:
             # Case-sensitive substring
             ss_matches = [c for c in self.choices if c.startswith(buf)]
             if len(ss_matches) == 1: return ss_matches[0]
@@ -620,11 +667,8 @@ class InlineConfirmation:
             if len(self.choices) == 1:
                 return f'Type {self.choices[0]} + ENTER or ESC'
             else:
-                # Show abbreviated options
-                opts = '/'.join(self.choices[:3])
-                if len(self.choices) > 3:
-                    opts += '/...'
-                return f'{opts} ({self.min_abbrev_chars}+ chars) + ENTER or ESC'
+                min_chars = self._get_effective_min_abbrev_chars()
+                return f'{min_chars}+ chars + ENTER or ESC'
         return ''
 
 
