@@ -82,8 +82,8 @@ ctrl_c_flag = False
 NAVIGATION_KEYS = {
     curses.KEY_UP, curses.KEY_DOWN, curses.KEY_LEFT, curses.KEY_RIGHT,
     curses.KEY_HOME, curses.KEY_END, curses.KEY_PPAGE, curses.KEY_NPAGE,
-    ord('j'), ord('k'), ord('h'), ord('l'),
-    ord('0'), ord('$'), ord('H'), ord('M'), ord('L'),
+    ord('j'), ord('k'),  # Vi-style up/down
+    ord('0'), ord('$'), ord('H'), ord('M'), ord('L'),  # Line start/end, page positions
     ord('\x15'),  # Ctrl-U (half page up)
     ord('\x04'),  # Ctrl-D (half page down)
     ord('\x02'),  # Ctrl-B (page up)

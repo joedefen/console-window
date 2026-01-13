@@ -23,7 +23,7 @@ name = "console_window"
 # UNIFIED PROJECT METADATA (Replaces [tool.flit.metadata])
 [project]
 name = "console-window" 
-version = "1.4.1"
+version = "1.4.2"
 description = "A robust curses wrapper for creating Text User Interfaces (TUIs)."
 readme = "README.md"
 requires-python = ">=3.8"
