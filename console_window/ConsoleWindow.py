@@ -492,6 +492,7 @@ class InlineConfirmation:
     - 'yes'/'YES': Explicit string confirmation (case-sensitive for 'YES').
     - 'identity': Requires typing a specific string (e.g., a device node like 'sda1').
     - 'choices': Flexible matching against a list of valid strings.
+    - 'text': Free-form text input - accepts any text and confirms on ENTER.
 
     :param min_abbrev_chars: Minimum characters required for abbreviated choice matching.
                              When None (default), automatically calculates based on choices:
@@ -501,7 +502,7 @@ class InlineConfirmation:
     Methods:
     - get_hint(): Returns a hint string when input_buffer is empty (display in dimmed/italic style)
     """
-    MODES = 'Y y YES yes identity choices'.split()
+    MODES = 'Y y YES yes identity choices text'.split()
 
     def __init__(self, min_abbrev_chars=None):
         self.active = False
@@ -629,7 +630,11 @@ class InlineConfirmation:
             self.input_buffer = self.input_buffer[:-1]
         elif key in (10, 13): # Enter
             match = None
-            
+
+            # 'text' mode: accept any input
+            if self.mode == 'text':
+                return 'confirmed' if self.input_buffer else 'continue'
+
             if self.mode == 'choices':
                 match = self._resolve_choice()
             elif self.mode == 'identity':
@@ -638,11 +643,11 @@ class InlineConfirmation:
                 if self.input_buffer == 'YES': match = 'YES'
             else: # 'yes' or other permissive modes
                 if self.input_buffer.lower() == 'yes': match = self.input_buffer
-            
+
             if match:
                 self.input_buffer = match # Canonicalize
                 return 'confirmed'
-            
+
             self.input_buffer = '' # Reset on failure
 
         return 'continue'
@@ -663,6 +668,8 @@ class InlineConfirmation:
             return 'Type yes + ENTER or ESC'
         elif self.mode == 'identity':
             return f'Type {self.identity} + ENTER or ESC'
+        elif self.mode == 'text':
+            return 'Type text + ENTER or ESC'
         elif self.mode == 'choices':
             if len(self.choices) == 1:
                 return f'Type {self.choices[0]} + ENTER or ESC'
