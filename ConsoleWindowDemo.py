@@ -191,8 +191,8 @@ class DemoApp:
 
     def _start_operation(self):
         """Start operation after confirmation"""
-        if self.confirmation.partition_name:
-            item_name = self.confirmation.partition_name
+        if self.confirmation.identity:
+            item_name = self.confirmation.identity
             # Mark item as "processed"
             self.selected_items.add(item_name)
             self.operation_count += 1
@@ -340,7 +340,7 @@ class MainScreen(DemoScreen):
 
             # Show inline confirmation if active for this item
             if app.confirmation.active and \
-               app.confirmation.partition_name == username:
+               app.confirmation.identity == username:
                 msg = f'    ⚠️  Process {username}?'
                 if app.confirmation.mode == 'y':
                     msg += " - Press 'y' or ESC"
