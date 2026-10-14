@@ -15,21 +15,61 @@ from __future__ import annotations
 
 import atexit
 import curses
+import itertools
 import os
 import re
 import textwrap
 import time
+import weakref
 from curses.textpad import Textbox, rectangle
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Callable
 
 from . import geometry, signals, textwidth
+from .backend import CursesBackend, RenderBackend
 from .keys import NAVIGATION_KEYS
 from .opts import ConsoleWindowOpts
 from .theme import Theme
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .context import Context
+
+
+# Live ConsoleWindow instances, held by weak reference and keyed by creation
+# order.  This replaces the old process-wide ``ConsoleWindow.static_scr`` /
+# ``ConsoleWindow.static_win`` singletons: several windows may now coexist (e.g.
+# a real one plus a headless one in a test), the registry keeps creation order
+# (so ``primary_window()`` is deterministic) and never keeps a window alive
+# (AUDIT.md §4.5).
+_WINDOWS: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
+_WINDOW_IDS = itertools.count()
+
+# ``atexit`` teardown is registered once for the whole process, not once per
+# window, so creating multiple windows does not stack up duplicate handlers.
+_ATEXIT_REGISTERED = False
+
+
+def _register_window(win: ConsoleWindow) -> None:
+    """Track ``win`` in the live-window registry (weak reference)."""
+    key = next(_WINDOW_IDS)
+    win._registry_key = key
+    _WINDOWS[key] = win
+
+
+def _unregister_window(win: ConsoleWindow) -> None:
+    """Drop ``win`` from the live-window registry, if present."""
+    key = getattr(win, '_registry_key', None)
+    if key is not None:
+        _WINDOWS.pop(key, None)
+        win._registry_key = None
+
+
+def _register_atexit() -> None:
+    """Register the one-shot process cleanup exactly once."""
+    global _ATEXIT_REGISTERED
+    if not _ATEXIT_REGISTERED:
+        atexit.register(ConsoleWindow.stop_all)
+        _ATEXIT_REGISTERED = True
 
 
 class ConsoleWindow:
@@ -54,8 +94,9 @@ class ConsoleWindow:
     flash_repaint: bool = True
     # How often (milliseconds) flash() polls for a key while the message is up.
     flash_poll_ms: int = 50
-    static_scr: curses.window | None = None
-    static_win: ConsoleWindow | None = None  # Reference to active ConsoleWindow instance for theme updates
+    # NOTE: these used to be ``static_scr``/``static_win`` process-wide class
+    # attributes.  Live instances are now tracked in the module ``_WINDOWS``
+    # registry (see start_curses/stop_curses/active_windows) — no singleton.
     nav_keys: str = """
         Navigation:      H/M/L:      top/middle/end-of-page
           k, UP:  up one row             0, HOME:  first row
@@ -67,7 +108,8 @@ class ConsoleWindow:
                  head_rows: int | None = None, body_rows: int | None = None,
                  body_cols: int | None = None, keys: set | list | None = None,
                  pick_mode: bool | None = None, pick_size: int | None = None,
-                 mod_pick: Callable | None = None, ctrl_c_terminates: bool | None = None) -> None:
+                 mod_pick: Callable | None = None, ctrl_c_terminates: bool | None = None,
+                 backend: RenderBackend | None = None) -> None:
         """
         Initializes the ConsoleWindow, sets up internal pads, and starts curses mode.
 
@@ -81,7 +123,12 @@ class ConsoleWindow:
         :param pick_size: DEPRECATED - use opts. Number of rows highlighted as single pick unit.
         :param mod_pick: DEPRECATED - use opts. Optional callable to modify highlighted text.
         :param ctrl_c_terminates: DEPRECATED - use opts. If True, Ctrl-C terminates; if False, returns key 3.
+        :param backend: Optional :class:`~console_window.backend.RenderBackend`. Defaults to
+                        :class:`~console_window.backend.CursesBackend`; pass a
+                        :class:`~console_window.backend.HeadlessBackend` to build the window
+                        without a terminal (used by tests).
         :type opts: ConsoleWindowOpts or None
+        :type backend: RenderBackend or None
         """
         # Enforce either opts OR deprecated parameters, not both
         has_opts = opts is not None
@@ -115,6 +162,7 @@ class ConsoleWindow:
         signals.set_ctrl_c_policy(self.opts.ctrl_c_terminates)
         self.ctrl_c_terminates = self.opts.ctrl_c_terminates
 
+        self._backend: RenderBackend = backend if backend is not None else CursesBackend()
         self.scr = self._start_curses()
         # curses.window exposes no gettimeout(), so every place that sets a read
         # timeout records it here (via _set_scr_timeout).  This lets modal
@@ -123,7 +171,7 @@ class ConsoleWindow:
         self._scr_timeout_ms = ConsoleWindow.timeout_ms
 
         self.head = SimpleNamespace(
-            pad=curses.newpad(self.opts.head_rows, self.opts.body_cols),
+            pad=self._backend.newpad(self.opts.head_rows, self.opts.body_cols),
             rows=self.opts.head_rows,
             cols=self.opts.body_cols,
             row_cnt=0,  # no. head rows added
@@ -133,7 +181,7 @@ class ConsoleWindow:
             view_cnt=0,  # no. head rows viewable (NOT in body)
         )
         self.body = SimpleNamespace(
-            pad = curses.newpad(self.opts.body_rows, self.opts.body_cols),
+            pad = self._backend.newpad(self.opts.body_rows, self.opts.body_cols),
             rows= self.opts.body_rows,
             cols= self.opts.body_cols,
             row_cnt = 0,
@@ -143,7 +191,7 @@ class ConsoleWindow:
         )
 
         # Apply theme background to pads
-        if curses.has_colors():
+        if self._backend.has_colors():
             theme = Theme.THEMES.get(Theme.get_current(), Theme.THEMES['default'])
             if 'default_fg' in theme and 'default_bg' in theme:
                 default_fg = theme['default_fg']
@@ -152,8 +200,9 @@ class ConsoleWindow:
                     self.head.pad.bkgd(' ', curses.color_pair(8))
                     self.body.pad.bkgd(' ', curses.color_pair(8))
 
-        # Store reference for theme updates
-        ConsoleWindow.static_win = self
+        # Register this instance so theme broadcasts and process teardown reach
+        # it (replaces the old ``ConsoleWindow.static_win = self``).
+        _register_window(self)
 
         self.mod_pick = self.opts.mod_pick # call back to modify highlighted row
         self.hor_line_cnt = 1 if self.opts.head_line else 0 # no. h-lines in header
@@ -406,35 +455,41 @@ class ConsoleWindow:
 
         return True
 
-    @staticmethod
-    def _start_curses() -> curses.window:
+    def _start_curses(self) -> object:
         """
-        For compatibility only. Used to be private, but that was annoying.
-        """
-        return ConsoleWindow.start_curses()
+        Enter curses via this window's backend and return the main screen.
 
-    @staticmethod
-    def start_curses() -> curses.window:
+        This sits behind the injectable :class:`~console_window.backend.RenderBackend`
+        so a headless backend can be swapped in for tests; it no longer stores the
+        screen in a process-wide singleton.
+        """
+        return self._init_screen(self._backend)
+
+    @classmethod
+    def start_curses(cls, backend: RenderBackend | None = None) -> object:
         """
         Performs the Curses initial setup: initscr, noecho, cbreak, curs_set(0),
         keypad(1), sets up the timeout, and initializes color pairs.
 
+        Kept as a compatibility hook that does *not* require constructing a
+        window.  It records no global "current screen" state: each window owns
+        its own screen (``self.scr``).
+
+        :param backend: Optional render backend; defaults to a real terminal.
         :returns: The main screen object.
         :rtype: _curses.window
         """
-        atexit.register(ConsoleWindow.stop_curses)
+        return cls._init_screen(backend if backend is not None else CursesBackend())
+
+    @staticmethod
+    def _init_screen(backend: RenderBackend) -> object:
+        """Shared screen setup used by both ``__init__`` and ``start_curses``."""
+        _register_atexit()
         signals.setup_ctrl_c()
-        ConsoleWindow.static_scr = scr = curses.initscr()
-        curses.set_escdelay(25)  # Reduce ESC key delay from 1000ms to 25ms
-        curses.noecho()
-        curses.cbreak()
-        curses.curs_set(0)
-        scr.keypad(1)
-        scr.timeout(ConsoleWindow.timeout_ms)
-        scr.clear()
+        scr = backend.start(ConsoleWindow.timeout_ms)
 
         # Initialize color support with theme
-        if curses.has_colors():
+        if backend.has_colors():
             curses.start_color()
             curses.use_default_colors()  # Allow -1 for default terminal colors
 
@@ -500,20 +555,69 @@ class ConsoleWindow:
         if self.pick_mode:
             self.last_pick_pos = -2
 
-    @staticmethod
-    def stop_curses() -> None:
+    def stop_curses(self) -> None:
         """
-        Curses shutdown (registered to be called on exit). Restores the terminal
-        to its pre-curses state.
+        Tear down *this* window's screen and de-register it.
+
+        Restores the terminal to its pre-curses state (on the real backend) and
+        releases the screen.  Because teardown is now per-instance, tearing down
+        one window leaves the others alone — it no longer nulls process-wide
+        singletons.  Safe to call more than once.
         """
-        if ConsoleWindow.static_scr:
-            curses.nocbreak()
-            curses.echo()
-            ConsoleWindow.static_scr.keypad(0)
-            curses.endwin()
-            ConsoleWindow.static_scr = None
-            ConsoleWindow.static_win = None
+        scr = getattr(self, 'scr', None)
+        if scr is None:
+            return
+        try:
+            backend = getattr(self, '_backend', None) or CursesBackend()
+            backend.stop(scr)
+        finally:
+            self.scr = None
+            _unregister_window(self)
             signals.teardown_ctrl_c()
+
+    def __enter__(self) -> ConsoleWindow:
+        """Support ``with ConsoleWindow(...) as win:`` for deterministic teardown."""
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+        self.stop_curses()
+
+    @classmethod
+    def active_windows(cls) -> list[ConsoleWindow]:
+        """Return the live :class:`ConsoleWindow` instances in creation order."""
+        return list(_WINDOWS.values())
+
+    @classmethod
+    def primary_window(cls) -> ConsoleWindow | None:
+        """Return the most recently created live window, or ``None``."""
+        windows = cls.active_windows()
+        return windows[-1] if windows else None
+
+    @classmethod
+    def stop_all(cls) -> None:
+        """Tear down every live window (registered once with :mod:`atexit`)."""
+        for win in cls.active_windows():
+            win.stop_curses()
+
+    @classmethod
+    def _apply_default_colors(cls, pair: int) -> None:
+        """Apply the default background color pair to every live window.
+
+        Used by :meth:`Theme.set` so a theme change reaches *all* windows rather
+        than a single global "static" one.
+        """
+        for win in cls.active_windows():
+            scr = getattr(win, 'scr', None)
+            if scr is not None:
+                try:
+                    scr.bkgd(' ', pair)
+                except curses.error:
+                    pass
+            for ns in (win.head, win.body):
+                try:
+                    ns.pad.bkgd(' ', pair)
+                except curses.error:
+                    pass
 
     def calc(self) -> bool:
         """
@@ -962,7 +1066,7 @@ class ConsoleWindow:
         try:
             self.render_once(redraw)
         except Exception:
-            ConsoleWindow.stop_curses()
+            self.stop_curses()
             print(f"""curses err:
     head.row_cnt={self.head.row_cnt}
     head.view_cnt={self.head.view_cnt}

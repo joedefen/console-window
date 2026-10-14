@@ -109,7 +109,9 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         pass
     except Exception as exce:
-        ConsoleWindow.stop_curses()
+        win = ConsoleWindow.primary_window()
+        if win:
+            win.stop_curses()
         print("exception:", str(exce))
         print(traceback.format_exc())
         if dump_str:

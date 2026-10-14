@@ -24,6 +24,8 @@ fully backward compatible (`from console_window import ...` and
 - `console_window.geometry` — pure scroll/pick math extracted for testing:
   `cook_abut`, `compute_abut`, `calc_indicator`, `scroll_indicator_row`,
   `scroll_indicator_col`, `count_pickable_rows`, `find_pickable`.
+- `console_window.backend` — a `RenderBackend` abstraction with `CursesBackend`
+  (real terminal) and `HeadlessBackend` (in-memory), plus `tests/test_backend.py`.
 - `console_window.__version__`.
 - Explicit `__all__` in the package root and compatibility module.
 - `[tool.pytest.ini_options]` in `pyproject.toml`.
@@ -45,6 +47,12 @@ fully backward compatible (`from console_window import ...` and
 - SIGINT handling moved to an explicit `console_window.signals` policy API;
   removed the action-at-a-distance rebinding of module-level functions.
 - `set_demo_mode()` now tests the resulting state rather than the argument.
+- Removed the process-wide `ConsoleWindow.static_scr`/`static_win` singletons:
+  live windows are tracked in a weak-reference registry, teardown is per-instance
+  (`stop_curses()`), `stop_all()` is the single `atexit` hook, and `Theme.set()`
+  broadcasts to every live window via `_apply_default_colors()`. Multiple windows
+  may now coexist, and one may be constructed without a terminal by passing
+  `backend=HeadlessBackend()` to the constructor.
 - Every package module opts into PEP 563 (`from __future__ import annotations`)
   so the modern `X | None` annotations remain valid on Python 3.8.
 - `add_fancy_header()` regex logic extracted into named helpers.

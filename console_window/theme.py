@@ -174,12 +174,9 @@ class Theme:
             # Always update the default color pair and screen background
             # (even when -1, -1 to reset to terminal defaults)
             curses.init_pair(8, default_fg, default_bg)
-            if ConsoleWindow.static_scr:
-                ConsoleWindow.static_scr.bkgd(' ', curses.color_pair(8))
-            # Also update pads if window exists
-            if ConsoleWindow.static_win:
-                ConsoleWindow.static_win.head.pad.bkgd(' ', curses.color_pair(8))
-                ConsoleWindow.static_win.body.pad.bkgd(' ', curses.color_pair(8))
+            # Broadcast to *every* live window — there is no longer a single
+            # process-wide "static" window to update.
+            ConsoleWindow._apply_default_colors(curses.color_pair(8))
 
         # Reinitialize color pairs with new theme
         for color_id in [cls.DANGER, cls.SUCCESS, cls.OLD_SUCCESS, cls.WARNING,

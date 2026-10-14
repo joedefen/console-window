@@ -48,7 +48,7 @@ def test_root_and_shim_reference_same_objects():
 
 def test_new_submodules_exist():
     for mod in ('window', 'theme', 'context', 'opts', 'widgets',
-                'spinner', 'screens', 'keys', 'signals', 'geometry'):
+                'spinner', 'screens', 'keys', 'signals', 'geometry', 'backend'):
         importlib.import_module(f'console_window.{mod}')
 
 
