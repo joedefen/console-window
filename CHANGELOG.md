@@ -34,6 +34,10 @@ fully backward compatible (`from console_window import ...` and
 - `add_fancy_header()` regex logic extracted into named helpers.
 
 ### Fixed
+- Demo: the settings spinner keys (`v` view mode, `s` sort, `t` theme) now also
+  work while the HELP screen is open — they are scoped to include `HELP_ST`.
+  (Scoping logic itself was unchanged by the refactor; this was a demo-scope
+  issue.)
 - Removed retired `put_body()` references (docstring + `__main__` self-test now
   use `add_body()`).
 - `Development Status` classifier aligned with the release; version bumped to

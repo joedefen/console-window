@@ -23,7 +23,7 @@ name = "console_window"
 # UNIFIED PROJECT METADATA (Replaces [tool.flit.metadata])
 [project]
 name = "console-window" 
-version = "1.4.3"
+version = "2.0.1"
 description = "A robust curses wrapper for creating Text User Interfaces (TUIs)."
 readme = "README.md"
 requires-python = ">=3.8"
@@ -38,10 +38,13 @@ authors = [
 ]
 
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux",
     "Topic :: Terminals",
     "Topic :: Software Development :: User Interfaces",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

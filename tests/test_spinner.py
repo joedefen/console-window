@@ -109,3 +109,29 @@ def test_without_stack_duplicate_key_raises():
     spin.add_key('a_opt', 'a - one', vals=[1, 2], keys=[ord('a')])
     with pytest.raises(ValueError):
         spin.add_key('b_opt', 'a - two', vals=[1, 2], keys=[ord('a')])
+
+
+def test_key_scoped_to_multiple_screens_resolves_on_both():
+    # Mirrors the demo pattern: a setting active on MAIN *and* HELP.
+    stack = make_stack()
+    spin = OptionSpinner(stack=stack)
+    spin.add_key('view_mode', 'v - view mode', vals=['a', 'b'],
+                 keys=[ord('v')], scope={0, 1})
+    obj = spin.default_obj
+
+    # HELP screen (1)
+    stack.curr = SimpleNamespace(num=1)
+    assert spin.do_key(ord('v'), win=None) == 'b'
+    # MAIN screen (0)
+    stack.curr = SimpleNamespace(num=0)
+    assert spin.do_key(ord('v'), win=None) == 'a'
+
+
+def test_key_scoped_elsewhere_does_not_resolve():
+    # Documents strict per-screen scoping: a MAIN-only key is inert on HELP.
+    stack = make_stack()
+    spin = OptionSpinner(stack=stack)
+    spin.add_key('view_mode', 'v - view mode', vals=['a', 'b'],
+                 keys=[ord('v')], scope={0})
+    stack.curr = SimpleNamespace(num=1)
+    assert spin.do_key(ord('v'), win=None) is None

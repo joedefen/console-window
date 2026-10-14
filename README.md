@@ -13,6 +13,18 @@ Install the package via `pip`:
 pip install console-window
 ```
 
+## Running the Demo (from source)
+
+For development, run the bundled demo directly against your working tree — no
+install or build step required:
+
+```bash
+./runner
+```
+
+(`runner` executes `ConsoleWindowDemo` as `__main__`, so live edits are picked
+up immediately. The equivalent one-off is `python3 ConsoleWindowDemo.py`.)
+
 ## Core Features (The "Secret Sauce")
 
 The wrapper handles several advanced terminal interaction patterns automatically:
