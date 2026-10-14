@@ -32,15 +32,22 @@ Features demonstrated:
 """
 # python: disable=invalid-name
 
+import curses as cs
 import sys
 import time
 import traceback
-import curses as cs
 from types import SimpleNamespace
+
 from console_window import (
-    ConsoleWindow, ConsoleWindowOpts, OptionSpinner,
-    IncrementalSearchBar, InlineConfirmation, Theme,
-    Screen, ScreenStack, Context
+    ConsoleWindow,
+    ConsoleWindowOpts,
+    Context,
+    IncrementalSearchBar,
+    InlineConfirmation,
+    OptionSpinner,
+    Screen,
+    ScreenStack,
+    Theme,
 )
 
 # Screen IDs
@@ -106,14 +113,16 @@ class DemoApp:
         themes = Theme.list_all()
 
         # Add view mode and sort options
+        # NOTE: settings shown on the HELP screen are scoped to HELP_ST as well,
+        # so their spinner keys keep working while help is open.
         spin.add_key('quit', 'q - quit', genre='action')
         spin.add_key('escape', 'ESC,ENTER - back',
                      keys=[27,10,cs.KEY_ENTER], genre='action')
         spin.add_key('view_mode', 'v - view mode',
-                     vals=['compact', 'detailed', 'full'], scope={MAIN_ST})
+                     vals=['compact', 'detailed', 'full'], scope={MAIN_ST, HELP_ST})
         spin.add_key('sort_by', 's - sort by',
-                     vals=['name', 'uid', 'home'], scope={MAIN_ST})
-        spin.add_key('theme', 't - theme', vals=themes, scope={THEME_ST})
+                     vals=['name', 'uid', 'home'], scope={MAIN_ST, HELP_ST})
+        spin.add_key('theme', 't - theme', vals=themes, scope={THEME_ST, HELP_ST})
 
         # Add navigation keys (global)
         spin.add_key('help_screen', '? - help', genre='action', scope={MAIN_ST})
