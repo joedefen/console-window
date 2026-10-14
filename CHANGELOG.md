@@ -10,10 +10,10 @@ fully backward compatible (`from console_window import ...` and
 `from console_window.ConsoleWindow import ...` both continue to work).
 
 ### Added
-- Unit-test suite (`tests/`, 77 tests, TTY-free) covering scroll/pick geometry,
+- Unit-test suite (`tests/`, 80 tests, TTY-free) covering scroll/pick geometry,
   `IncrementalSearchBar` / `InlineConfirmation`, `OptionSpinner` scope
   subtraction, public-API compatibility, the `answer()`/`alert()` dialog fixes,
-  and `set_demo_mode()` toggle/state handling.
+  `set_demo_mode()` toggle/state handling, and `render()`'s retry cap.
 - `console_window.geometry` — pure scroll/pick math extracted for testing:
   `cook_abut`, `compute_abut`, `calc_indicator`, `scroll_indicator_row`,
   `scroll_indicator_col`, `count_pickable_rows`, `find_pickable`.
@@ -48,6 +48,10 @@ fully backward compatible (`from console_window import ...` and
   abort) instead of resetting to the class default `ConsoleWindow.timeout_ms`.
 - `alert()` recomputes `self.rows`/`self.cols` from `getmaxyx()` before drawing,
   so a resize immediately before the call no longer causes a misdraw.
+- `render()` now bounds its transient-error retry loop by wall-clock time
+  (`ConsoleWindow.render_retry_seconds`, default 2 s) instead of a fixed 128
+  iterations, so a reproducible `curses.error` aborts quickly with the
+  diagnostic dump rather than freezing the UI for ~20 s.
 - Demo: the settings spinner keys (`v` view mode, `s` sort, `t` theme) now also
   work while the HELP screen is open — they are scoped to include `HELP_ST`.
   (Scoping logic itself was unchanged by the refactor; this was a demo-scope

@@ -43,6 +43,11 @@ class ConsoleWindow:
     and an optional item selection (pick) mode.
     """
     timeout_ms: int = 2000
+    # render() retries transient curses errors within this wall-clock budget
+    # (seconds) instead of a fixed iteration count, so a persistent error aborts
+    # quickly rather than freezing the UI for ~20 s.
+    render_retry_seconds: float = 2.0
+    render_retry_interval: float = 0.16  # seconds to wait between retries
     static_scr: curses.window | None = None
     static_win: ConsoleWindow | None = None  # Reference to active ConsoleWindow instance for theme updates
     nav_keys: str = """
@@ -925,14 +930,18 @@ class ConsoleWindow:
                     to clear terminal corruption.
 
         This method wraps :py:meth:`render_once` in a loop to handle spurious
-        ``curses.error`` exceptions that can occur during screen resizing.
+        ``curses.error`` exceptions that can occur during screen resizing.  The
+        retry window is bounded by wall-clock time (:attr:`render_retry_seconds`)
+        rather than a fixed iteration count, so a persistent/reproducible error
+        fails fast with a diagnostic dump instead of freezing the UI.
         """
-        for _ in range(128):
+        deadline = time.monotonic() + ConsoleWindow.render_retry_seconds
+        while time.monotonic() < deadline:
             try:
                 self.render_once(redraw)
                 return
             except curses.error:
-                time.sleep(0.16)
+                time.sleep(ConsoleWindow.render_retry_interval)
                 self._set_screen_dims()
                 continue
         try:
