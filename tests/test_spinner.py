@@ -134,3 +134,51 @@ def test_key_scoped_elsewhere_does_not_resolve():
                  keys=[ord('v')], scope={0})
     stack.curr = SimpleNamespace(num=1)
     assert spin.do_key(ord('v'), win=None) is None
+
+
+def test_genre_inferred_when_omitted():
+    # With no explicit genre the kind is derived from vals/prompt/neither.
+    spin = OptionSpinner()
+    spin.add_key('a_act', 'a - action', keys=[ord('a')])
+    spin.add_key('b_cycle', 'b - cycle', vals=[1, 2], keys=[ord('b')])
+    spin.add_key('c_prompt', 'c - prompt', prompt='value?', keys=[ord('c')])
+    assert spin.attr_to_option['a_act'].genre == 'action'
+    assert spin.attr_to_option['b_cycle'].genre == 'cycle'
+    assert spin.attr_to_option['c_prompt'].genre == 'prompt'
+
+
+def test_genre_explicit_matches_inferred():
+    # An explicit genre consistent with the arguments is accepted and honored.
+    spin = OptionSpinner()
+    spin.add_key('a_act', 'a - action', genre='action', keys=[ord('a')])
+    spin.add_key('b_cycle', 'b - cycle', genre='cycle', vals=[1, 2], keys=[ord('b')])
+    spin.add_key('c_prompt', 'c - prompt', genre='prompt', prompt='value?',
+                 keys=[ord('c')])
+    assert spin.attr_to_option['a_act'].genre == 'action'
+    assert spin.attr_to_option['b_cycle'].genre == 'cycle'
+    assert spin.attr_to_option['c_prompt'].genre == 'prompt'
+
+
+def test_genre_action_with_stray_vals_raises():
+    # The trap from the audit: genre='action' must NOT silently become a spinner.
+    spin = OptionSpinner()
+    with pytest.raises(ValueError):
+        spin.add_key('trap', 'a - trap', genre='action', vals=[1, 2], keys=[ord('a')])
+
+
+def test_genre_cycle_without_vals_raises():
+    spin = OptionSpinner()
+    with pytest.raises(ValueError):
+        spin.add_key('bad', 'a - bad', genre='cycle', keys=[ord('a')])
+
+
+def test_genre_prompt_without_prompt_raises():
+    spin = OptionSpinner()
+    with pytest.raises(ValueError):
+        spin.add_key('bad', 'a - bad', genre='prompt', keys=[ord('a')])
+
+
+def test_genre_invalid_value_raises():
+    spin = OptionSpinner()
+    with pytest.raises(ValueError):
+        spin.add_key('bad', 'a - bad', genre='spinner', keys=[ord('a')])

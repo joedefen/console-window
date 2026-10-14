@@ -256,7 +256,13 @@ class OptionSpinner:
                      the action. If a string, ord(each-character) is assumed.
                      If None, uses the first letter of ``descr``.
         :param comments: Additional line(s) for the help screen item (string or list of strings).
-        :param genre: (action, cycle, prompt)
+        :param genre: Optional explicit option kind: ``'action'``, ``'cycle'``
+                      or ``'prompt'``. When omitted it is inferred from ``vals``
+                      (→ ``'cycle'``) or ``prompt`` (→ ``'prompt'``), defaulting
+                      to ``'action'``. When supplied it is **validated** against
+                      ``vals``/``prompt``; a mismatch (e.g. ``genre='action'``
+                      with a stray ``vals``) raises :py:class:`ValueError`
+                      instead of silently changing the option's kind.
         :param scope: Screen number(s) where this key is active. Can be:
                       - None (default): all screens, or all screens with action if genre='action'
                       - int: single screen number
@@ -292,12 +298,29 @@ class OptionSpinner:
         ns.descr = descr
         ns.attr = attr
         ns.obj = obj if obj else self.default_obj
+        # Determine the option's genre. An explicit `genre` argument is honored
+        # and validated against the supplied `vals`/`prompt`, so a stray value
+        # can no longer silently change the option's kind (previously
+        # genre='action' combined with `vals` became a spinner).
+        if genre is not None and genre not in ('action', 'cycle', 'prompt'):
+            raise ValueError(
+                f"genre must be 'action', 'cycle' or 'prompt' (got {genre!r})"
+            )
+        inferred_genre = 'cycle' if vals else 'prompt' if prompt else 'action'
+        if genre is None:
+            genre = inferred_genre
+        elif genre != inferred_genre:
+            supplied = 'vals' if vals else 'prompt' if prompt else 'neither vals nor prompt'
+            raise ValueError(
+                f"genre={genre!r} conflicts with the supplied arguments "
+                f"({supplied}); expected genre={inferred_genre!r}. "
+                f"Drop the conflicting argument or pass the matching genre."
+            )
         if vals:
-            ns.vals, ns.genre = vals, 'cycle'
+            ns.vals = vals
         elif prompt:
-            ns.prompt, ns.genre = prompt, 'prompt'
-        else:
-            ns.genre = 'action'
+            ns.prompt = prompt
+        ns.genre = genre
 
         # Process scope parameter
         if scope is None:
