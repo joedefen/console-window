@@ -1,9 +1,16 @@
 """Key-driven option management (spinners, prompts, actions)."""
 
+from __future__ import annotations
+
 import curses
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 
 from .keys import NAVIGATION_KEYS
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from .screens import ScreenStack
+    from .window import ConsoleWindow
 
 
 class OptionSpinner:
@@ -14,7 +21,7 @@ class OptionSpinner:
 
     It also generates a formatted help screen based on the registered options.
     """
-    def __init__(self, stack=None):
+    def __init__(self, stack: ScreenStack | None = None) -> None:
         """
         Initializes the OptionSpinner, setting up internal mappings for options
         and keys.
@@ -53,7 +60,7 @@ class OptionSpinner:
                 self.stack.obj = self._default_obj
 
     @property
-    def default_obj(self):
+    def default_obj(self) -> object:
         """
         The default object for storing option values.
 
@@ -63,14 +70,14 @@ class OptionSpinner:
         return self._default_obj
 
     @default_obj.setter
-    def default_obj(self, value):
+    def default_obj(self, value: object) -> None:
         """Set default_obj and keep stack.obj synchronized."""
         self._default_obj = value
         if self.stack:
             self.stack.obj = value  # Keep in sync!
 
     @staticmethod
-    def _make_option_ns():
+    def _make_option_ns() -> SimpleNamespace:
         """Internal helper to create a default namespace for an option."""
         return SimpleNamespace(
             keys=[],
@@ -84,7 +91,7 @@ class OptionSpinner:
             scope=None,  # None = all screens, or set of screen numbers
         )
 
-    def get_value(self, attr, coerce=False):
+    def get_value(self, attr: str, coerce: bool = False) -> object:
         """
         Get the current value of the given attribute.
 
@@ -110,7 +117,7 @@ class OptionSpinner:
                     setattr(ns.obj, ns.attr, '')
         return value
 
-    def _register(self, ns):
+    def _register(self, ns: SimpleNamespace) -> None:
         """
         Create the internal mappings needed for a new option namespace.
         Handles scope subtraction for overlapping keys.
@@ -197,7 +204,7 @@ class OptionSpinner:
         self.align = max(self.align, self.margin+len(ns.descr))
         self.get_value(ns.attr, coerce=True)
 
-    def add(self, obj, specs):
+    def add(self, obj: object, specs: list) -> None:
         """
         **Compatibility Method.** Adds options using an older array-of-specs format.
 
@@ -227,8 +234,12 @@ class OptionSpinner:
             ns.keys = [ord(ns.descr[0])]
             self._register(ns)
 
-    def add_key(self, attr, descr, obj=None, vals=None, prompt=None,
-                keys=None, comments=None, genre=None, scope=None):
+    def add_key(self, attr: str, descr: str, obj: object | None = None,
+                vals: list | None = None, prompt: str | None = None,
+                keys: int | str | list | tuple | set | None = None,
+                comments: str | list[str] | tuple[str, ...] | None = None,
+                genre: str | None = None,
+                scope: int | list | set | None = None) -> None:
         """
         Adds an option that is toggled by a key press.
 
@@ -301,7 +312,7 @@ class OptionSpinner:
         self._register(ns)
 
     @staticmethod
-    def show_help_nav_keys(win):
+    def show_help_nav_keys(win: ConsoleWindow) -> None:
         """
         Displays the standard navigation keys blurb in the provided ConsoleWindow.
 
@@ -314,7 +325,7 @@ class OptionSpinner:
             if line:
                 win.add_header(line)
 
-    def show_help_body(self, win, screen_filter=None):
+    def show_help_body(self, win: ConsoleWindow, screen_filter: int | list | set | None = None) -> None:
         """
         Writes the formatted list of all registered options and their current
         values to the body of the provided :py:class:`ConsoleWindow`.
@@ -351,7 +362,7 @@ class OptionSpinner:
 
             # get / coerce the current value
             value = self.get_value(ns.attr)
-            assert value is not None, f'cannot get value of {repr(ns.attr)}'
+            assert value is not None, f'cannot get value of {ns.attr!r}'
 
             dot = ' ' if ns.genre == 'action' else '·'
             win.add_body(f'{ns.descr:{dot}<{self.align}} ')
@@ -369,7 +380,7 @@ class OptionSpinner:
             for comment in ns.comments:
                 win.add_body(f'{"":>{self.align}}:  {comment}')
 
-    def do_key(self, key, win):
+    def do_key(self, key: int, win: ConsoleWindow) -> object | None:
         """
         Processes a registered key press.
 

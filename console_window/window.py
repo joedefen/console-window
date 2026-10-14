@@ -11,6 +11,8 @@ sibling modules: :mod:`console_window.theme`, :mod:`console_window.context`,
 # pylint: disable=too-many-return-statements,too-many-nested-blocks
 # pylint: disable=multiple-statements,no-else-return
 
+from __future__ import annotations
+
 import atexit
 import curses
 import os
@@ -19,11 +21,15 @@ import textwrap
 import time
 from curses.textpad import Textbox, rectangle
 from types import SimpleNamespace
+from typing import TYPE_CHECKING, Callable
 
 from . import geometry, signals
 from .keys import NAVIGATION_KEYS
 from .opts import ConsoleWindowOpts
 from .theme import Theme
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from .context import Context
 
 
 class ConsoleWindow:
@@ -36,19 +42,21 @@ class ConsoleWindow:
     initialization, cleanup, rendering, and user input including scrolling
     and an optional item selection (pick) mode.
     """
-    timeout_ms = 2000
-    static_scr = None
-    static_win = None  # Reference to active ConsoleWindow instance for theme updates
-    nav_keys = """
+    timeout_ms: int = 2000
+    static_scr: curses.window | None = None
+    static_win: ConsoleWindow | None = None  # Reference to active ConsoleWindow instance for theme updates
+    nav_keys: str = """
         Navigation:      H/M/L:      top/middle/end-of-page
           k, UP:  up one row             0, HOME:  first row
         j, DOWN:  down one row           $, END:  last row
           Ctrl-u:  half-page up     Ctrl-b, PPAGE:  page up
           Ctrl-d:  half-page down     Ctrl-f, NPAGE:  page down
     """
-    def __init__(self, opts=None, head_line=None, head_rows=None, body_rows=None,
-                 body_cols=None, keys=None, pick_mode=None, pick_size=None,
-                 mod_pick=None, ctrl_c_terminates=None):
+    def __init__(self, opts: ConsoleWindowOpts | None = None, head_line: bool | None = None,
+                 head_rows: int | None = None, body_rows: int | None = None,
+                 body_cols: int | None = None, keys: set | list | None = None,
+                 pick_mode: bool | None = None, pick_size: int | None = None,
+                 mod_pick: Callable | None = None, ctrl_c_terminates: bool | None = None) -> None:
         """
         Initializes the ConsoleWindow, sets up internal pads, and starts curses mode.
 
@@ -156,7 +164,7 @@ class ConsoleWindow:
         self._set_screen_dims()
         self.calc()
 
-    def set_handled_keys(self, keys):
+    def set_handled_keys(self, keys: object) -> None:
         """
         Set or update the keys that prompt() should return to the application.
 
@@ -173,7 +181,7 @@ class ConsoleWindow:
         else:
             self.handled_keys = set()
 
-    def set_demo_mode(self, enabled):
+    def set_demo_mode(self, enabled: bool | None) -> bool:
         """
         Enable or disable demo mode. Passing None will toggle it.
 
@@ -191,7 +199,7 @@ class ConsoleWindow:
             self.last_demo_key = ''
         return self.opts.demo_mode
 
-    def _format_key_for_demo(self, key):
+    def _format_key_for_demo(self, key: int) -> str:
         """
         Format a key code as a 3-character string for demo mode display.
 
@@ -220,7 +228,7 @@ class ConsoleWindow:
         else:
             return '???'
 
-    def get_pad_width(self):
+    def get_pad_width(self) -> int:
         """
         Returns the maximum usable column width for content drawing.
 
@@ -229,7 +237,7 @@ class ConsoleWindow:
         """
         return min(self.cols-1, self.body_cols)
 
-    def _is_pickable(self, row):
+    def _is_pickable(self, row: int) -> bool:
         """
         Check if a body row is pickable.
 
@@ -245,7 +253,7 @@ class ConsoleWindow:
             return True  # Default to pickable if no context
         return ctx.pickable
 
-    def _count_pickable_rows(self, start_pos, count, direction=1):
+    def _count_pickable_rows(self, start_pos: int, count: int, direction: int = 1) -> int:
         """
         Move through count pickable rows from start_pos in the given direction.
 
@@ -264,7 +272,7 @@ class ConsoleWindow:
         return geometry.count_pickable_rows(
             self._is_pickable, self.body.row_cnt, start_pos, count, direction)
 
-    def get_picked_context(self):
+    def get_picked_context(self) -> Context | None:
         """
         Get the Context object for the currently picked line.
 
@@ -277,7 +285,7 @@ class ConsoleWindow:
             return None
         return self.body.contexts[self.pick_pos]
 
-    def _cook_abut(self, abut_value):
+    def _cook_abut(self, abut_value: geometry.AbutSpec) -> tuple[int, int] | None:
         """
         Parse the abut attribute into [before, after] format.
 
@@ -290,7 +298,7 @@ class ConsoleWindow:
         """
         return geometry.cook_abut(abut_value)
 
-    def _get_effective_abut(self, row):
+    def _get_effective_abut(self, row: int) -> geometry.AbutSpec:
         """
         Get the effective abut value for a row, either explicit or auto-calculated.
 
@@ -324,7 +332,7 @@ class ConsoleWindow:
         return geometry.compute_abut(explicit, transient_count)
 
     @staticmethod
-    def get_nav_keys_blurb():
+    def get_nav_keys_blurb() -> str:
         """
         Returns a multiline string describing the default navigation key bindings
         for use in help screens.
@@ -334,14 +342,14 @@ class ConsoleWindow:
         """
         return textwrap.dedent(ConsoleWindow.nav_keys)
 
-    def _set_screen_dims(self):
+    def _set_screen_dims(self) -> bool:
         """Recalculate dimensions based on current terminal size."""
         rows, cols = self.scr.getmaxyx()
         same = bool(rows == self.rows and cols == self.cols)
         self.rows, self.cols = rows, cols
         return same
 
-    def _set_scr_timeout(self, ms):
+    def _set_scr_timeout(self, ms: int) -> None:
         """Set the screen read timeout (milliseconds) and remember it.
 
         ``curses.window`` has no ``gettimeout()``, so the last value applied is
@@ -356,7 +364,7 @@ class ConsoleWindow:
         self._scr_timeout_ms = ms
         self.scr.timeout(ms)
 
-    def _check_min_size(self):
+    def _check_min_size(self) -> bool:
         """
         Checks if current terminal size meets minimum requirements.
         Blocks with a message if too small, waiting for resize or ESC.
@@ -388,14 +396,14 @@ class ConsoleWindow:
         return True
 
     @staticmethod
-    def _start_curses():
+    def _start_curses() -> curses.window:
         """
         For compatibility only. Used to be private, but that was annoying.
         """
         return ConsoleWindow.start_curses()
 
     @staticmethod
-    def start_curses():
+    def start_curses() -> curses.window:
         """
         Performs the Curses initial setup: initscr, noecho, cbreak, curs_set(0),
         keypad(1), sets up the timeout, and initializes color pairs.
@@ -446,7 +454,7 @@ class ConsoleWindow:
 
         return scr
 
-    def set_pick_mode(self, on=True, pick_size=1):
+    def set_pick_mode(self, on: bool = True, pick_size: int = 1) -> None:
         """
         Toggles the item highlighting/selection mode for the body area.
 
@@ -464,7 +472,7 @@ class ConsoleWindow:
         if self.pick_mode and (not was_on or was_size != self.pick_size):
             self.last_pick_pos = -2 # indicates need to clear them all
 
-    def set_pick_range(self, start_col=None, end_col=None):
+    def set_pick_range(self, start_col: int | None = None, end_col: int | None = None) -> None:
         """
         Set the column range for pick highlighting.
 
@@ -482,7 +490,7 @@ class ConsoleWindow:
             self.last_pick_pos = -2
 
     @staticmethod
-    def stop_curses():
+    def stop_curses() -> None:
         """
         Curses shutdown (registered to be called on exit). Restores the terminal
         to its pre-curses state.
@@ -496,7 +504,7 @@ class ConsoleWindow:
             ConsoleWindow.static_win = None
             signals.teardown_ctrl_c()
 
-    def calc(self):
+    def calc(self) -> bool:
         """
         Recalculates the screen geometry, viewable areas, and maximum scroll position.
 
@@ -510,7 +518,8 @@ class ConsoleWindow:
         self.body_base = self.head.view_cnt + self.hor_line_cnt
         return not same
 
-    def _add(self, ns, text, attr=None, resume=False, context=None):
+    def _add(self, ns: SimpleNamespace, text: str, attr: int | None = None,
+             resume: bool = False, context: Context | None = None) -> None:
         """Internal method to add text to a pad using its namespace."""
         is_body = bool(id(ns) == id(self.body))
         if ns.row_cnt < ns.rows:
@@ -540,7 +549,8 @@ class ConsoleWindow:
                 ns.contexts.append(context)  # Context metadata (or None)
                 ns.row_cnt += 1
 
-    def add_header(self, text, attr=None, resume=False, context=None):
+    def add_header(self, text: str, attr: int | None = None, resume: bool = False,
+                   context: Context | None = None) -> None:
         """
         Adds a line of text to the header pad.
 
@@ -555,7 +565,8 @@ class ConsoleWindow:
         """
         self._add(self.head, text, attr, resume, context)
 
-    def add_body(self, text, attr=None, resume=False, context=None):
+    def add_body(self, text: str, attr: int | None = None, resume: bool = False,
+                 context: Context | None = None) -> None:
         """
         Adds a line of text to the body pad.
 
@@ -570,7 +581,8 @@ class ConsoleWindow:
         """
         self._add(self.body, text, attr, resume, context)
 
-    def add_fancy_header(self, line, mode='Underline', search_pattern_attr=None):
+    def add_fancy_header(self, line: str, mode: str = 'Underline',
+                         search_pattern_attr: int | None = None) -> None:
         """
         Parses header line and adds it with fancy formatting.
 
@@ -696,7 +708,8 @@ class ConsoleWindow:
         if visible_length > self.max_header_len:
             self.max_header_len = visible_length
 
-    def draw(self, y, x, text, text_attr=None, width=None, leftpad=False, header=False):
+    def draw(self, y: int, x: int, text: str, text_attr: int | None = None,
+             width: int | None = None, leftpad: bool = False, header: bool = False) -> None:
         """
         Draws the given text at a specific position (row=y, col=x) on a pad.
 
@@ -750,15 +763,15 @@ class ConsoleWindow:
             pass
 
 
-    def highlight_picked(self):
+    def highlight_picked(self) -> None:
         """
         Highlights the current selection and un-highlights the previous one.
         Called internally during :py:meth:`render_once` when in pick mode.
         """
-        def get_text(pos):
+        def get_text(pos: int) -> str:
             return self.body.texts[pos][0:self.cols] if pos < len(self.body.texts) else ''
 
-        def get_attrs(pos):
+        def get_attrs(pos: int) -> list:
             return self.body.text_attrs[pos] if pos < len(self.body.text_attrs) else None
 
         if not self.pick_mode:
@@ -792,7 +805,9 @@ class ConsoleWindow:
                                                   extra_attr_range=self.opts.pick_range)
                 self.last_pick_pos = pos1
 
-    def _draw_line_with_attrs(self, pad, row, col_offset, text, attrs, extra_attr=None, extra_attr_range=None):
+    def _draw_line_with_attrs(self, pad: object, row: int, col_offset: int, text: str,
+                              attrs: list, extra_attr: int | None = None,
+                              extra_attr_range: tuple | None = None) -> None:
         """
         Draw a line using run-length encoded attributes.
 
@@ -886,23 +901,23 @@ class ConsoleWindow:
 
             pos += count
 
-    def _scroll_indicator_row(self):
+    def _scroll_indicator_row(self) -> int:
         """Internal helper to compute the scroll indicator row position."""
         return geometry.scroll_indicator_row(
             self.scroll_pos, self.max_scroll_pos, self.scroll_view_size,
             self.body_base, self.rows)
 
-    def _scroll_indicator_col(self):
+    def _scroll_indicator_col(self) -> int:
         """Internal helper to compute the scroll indicator column position."""
         return geometry.scroll_indicator_col(
             self.pick_mode, self.pick_pos, self.scroll_pos,
             self.max_scroll_pos, self.body.row_cnt, self.cols)
 
-    def _calc_indicator(self, pos, pos0, pos9, ind0, ind9):
+    def _calc_indicator(self, pos: int, pos0: int, pos9: int, ind0: int, ind9: int) -> int:
         """Internal helper to calculate indicator position based on content position."""
         return geometry.calc_indicator(pos, pos0, pos9, ind0, ind9, self.max_scroll_pos)
 
-    def render(self, redraw=False):
+    def render(self, redraw: bool = False) -> None:
         """
         Draws the content of the pads to the visible screen.
 
@@ -941,7 +956,7 @@ class ConsoleWindow:
             raise
 
 
-    def fix_positions(self, delta=0):
+    def fix_positions(self, delta: int = 0) -> None:
         """
         Ensures the vertical scroll and pick positions are within valid boundaries,
         adjusting the scroll position to keep the pick cursor visible.
@@ -1081,7 +1096,7 @@ class ConsoleWindow:
 
     # Assuming this function is part of a class with attributes like self.scr, self.head, self.body, etc.
 
-    def render_once(self, redraw: bool = False):
+    def render_once(self, redraw: bool = False) -> None:
         """
         Performs the actual rendering of header, horizontal line, and body pads.
         Handles pick highlighting and scroll bar drawing.
@@ -1116,8 +1131,8 @@ class ConsoleWindow:
                 if not self.opts.single_cell_scroll_indicator and 0 < ind_pos < self.cols-1:
                     # Proportional range indicator
                     width = self.scroll_view_size/self.body.row_cnt*self.cols
-                    bot = max(int(round(ind_pos-width/2)), 1)
-                    top = min(int(round(ind_pos+width/2)), self.cols-1)
+                    bot = max(round(ind_pos-width/2), 1)
+                    top = min(round(ind_pos+width/2), self.cols-1)
                     cnt = max(top - bot, 1)
 
                 for idx in range(bot, bot+cnt):
@@ -1150,7 +1165,8 @@ class ConsoleWindow:
         curses.doupdate()
 
 
-    def answer(self, prompt='Type string [then Enter]', seed='', width=80, height=5, esc_abort=None, prompt_attr=None):
+    def answer(self, prompt: str = 'Type string [then Enter]', seed: str = '', width: int = 80,
+               height: int = 5, esc_abort: bool | None = None, prompt_attr: int | None = None) -> str | None:
         """
         Presents a modal dialog box with working horizontal scroll indicators.
         Uses opts.dialog_abort to determine ESC behavior and opts.dialog_return for submit key.
@@ -1168,7 +1184,7 @@ class ConsoleWindow:
         # restore it; curses.window has no gettimeout(), so we track it ourselves.
         prev_timeout_ms = getattr(self, '_scr_timeout_ms', ConsoleWindow.timeout_ms)
 
-        def draw_rectangle(scr, r1, c1, r2, c2):
+        def draw_rectangle(scr: object, r1: int, c1: int, r2: int, c2: int) -> None:
             """Draws a box using standard curses characters."""
             scr.border(0)
             for r in range(r1, r2 + 1):
@@ -1191,7 +1207,7 @@ class ConsoleWindow:
         v_scroll_top = 0
         last_esc_time = None  # For ESC-ESC tracking
 
-        def calculate_geometry(self):
+        def calculate_geometry(self: ConsoleWindow) -> None:
             # ... (Geometry calculation logic remains the same) ...
             self.rows, self.cols = self.scr.getmaxyx()
             min_cols, min_rows = self.opts.min_cols_rows
@@ -1451,7 +1467,7 @@ class ConsoleWindow:
                 continue
 
 
-    def flash(self, message='', duration=2.0):
+    def flash(self, message: str = '', duration: float = 2.0) -> None:
         """
         Displays a brief flash message in the center of the screen.
         Auto-dismisses after duration seconds without requiring user input.
@@ -1485,7 +1501,8 @@ class ConsoleWindow:
         time.sleep(duration)
 
 
-    def alert(self, message='', title='ALERT', _height=None, _width=None):
+    def alert(self, message: str = '', title: str = 'ALERT',
+              _height: int | None = None, _width: int | None = None) -> None:
         """
         Displays a blocking, modal alert box with a title and message.
         Auto-sizes based on content and terminal size with 1-cell border.
@@ -1595,7 +1612,7 @@ class ConsoleWindow:
         Textbox(win).edit(_textbox_edit_on_enter).strip()
         return
 
-    def clear(self):
+    def clear(self) -> None:
         """
         Clears all content from both the header and body pads and resets internal
         counters in preparation for adding new screen content.
@@ -1608,7 +1625,7 @@ class ConsoleWindow:
         self.head.contexts, self.body.contexts = [], []
         self.head.row_cnt = self.body.row_cnt = 0
 
-    def prompt(self, seconds=1.0):
+    def prompt(self, seconds: float = 1.0) -> int | None:
         """
         Waits for user input for up to ``seconds``.
 
@@ -1761,7 +1778,7 @@ class ConsoleWindow:
         return None
 
 
-def _textbox_edit_on_enter(key):
+def _textbox_edit_on_enter(key: int) -> int:
     """Exit ``curses.textpad.Textbox.edit`` as soon as ENTER is pressed.
 
     ``Textbox.edit(validator)`` has no dedicated "stop" return value: it keeps
@@ -1779,18 +1796,18 @@ def _textbox_edit_on_enter(key):
     return 7 if key in (10, curses.KEY_ENTER) else key
 
 
-def re_match_word(word):
+def re_match_word(word: str) -> bool:
     """Return True if ``word`` is a simple \\w/- token (used by add_fancy_header)."""
     return bool(re.match(r'^[\w-]+$', word))
 
 
-def re_match_key(s):
+def re_match_key(s: str) -> str | None:
     """Match a leading multi-character key name followed by ':' (e.g. 'ESC:')."""
     match = re.match(r'([A-Z]{2,}|[A-Z]):', s)
     return match.group(1) if match else None
 
 
-def re_match_pattern(s):
+def re_match_pattern(s: str) -> str | None:
     """Match a leading /search-pattern token (including the slash)."""
     match = re.match(r'/(\S+)', s)
     return match.group(0) if match else None

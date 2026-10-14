@@ -1,5 +1,7 @@
 """Per-line metadata for ConsoleWindow body/header rows."""
 
+from __future__ import annotations
+
 
 class Context:
     """
@@ -48,7 +50,7 @@ class Context:
         win.add_body("Search result", context=ctx)
         # When this line is picked, only 10 lines before and 20 after are visible
     """
-    def __init__(self, genre='', pickable=True, **kwargs):
+    def __init__(self, genre: str = '', pickable: bool = True, **kwargs: object) -> None:
         self.genre = genre
         # Auto-set pickable=False only for DECOR genre
         # TRANSIENT is navigable but ephemeral (handled by app logic)

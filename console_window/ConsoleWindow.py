@@ -45,9 +45,9 @@ dump_str = None
 
 
 if __name__ == '__main__':
-    def main():
+    def main() -> None:
         """Test program"""
-        def do_key(key):
+        def do_key(key: int) -> object:
             nonlocal spin, win, opts, pick_values
             value = spin.do_key(key, win)
             if key in (ord('p'), ord('s')):
@@ -82,7 +82,7 @@ if __name__ == '__main__':
         opts.prev_pick = 'n/a'
         pick_values = []
         for loop in range(100000000000):
-            body_size = int(round(win.scroll_view_size*opts.mult))
+            body_size = round(win.scroll_view_size*opts.mult)
             # body_size = 4000 # temp to test scroll pos indicator when big
             if opts.help_mode:
                 win.set_pick_mode(False)
