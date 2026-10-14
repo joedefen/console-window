@@ -13,11 +13,13 @@ from .ConsoleWindow import (
     ConsoleWindow,
     ConsoleWindowOpts,
     Context,
+    HeaderLine,
     IncrementalSearchBar,
     InlineConfirmation,
     OptionSpinner,
     Screen,
     ScreenStack,
+    Span,
     Theme,
 )
 
@@ -28,10 +30,12 @@ __all__ = [
     'ConsoleWindow',
     'ConsoleWindowOpts',
     'Context',
+    'HeaderLine',
     'IncrementalSearchBar',
     'InlineConfirmation',
     'OptionSpinner',
     'Screen',
     'ScreenStack',
+    'Span',
     'Theme',
 ]

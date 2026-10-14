@@ -15,6 +15,8 @@ PUBLIC_NAMES = [
     'Screen',
     'ScreenStack',
     'BasicHelpScreen',
+    'HeaderLine',
+    'Span',
     'HOME_ST',
     'NAVIGATION_KEYS',
 ]

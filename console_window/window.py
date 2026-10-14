@@ -3,7 +3,8 @@
 This module contains the high-level window class.  Related pieces live in
 sibling modules: :mod:`console_window.theme`, :mod:`console_window.context`,
 :mod:`console_window.opts`, :mod:`console_window.keys`,
-:mod:`console_window.signals`, and :mod:`console_window.geometry`.
+:mod:`console_window.signals`, :mod:`console_window.geometry`, and
+:mod:`console_window.header` (explicit header-span tokens).
 """
 # pylint: disable=too-many-instance-attributes,too-many-arguments
 # pylint: disable=invalid-name,broad-except,too-many-branches,global-statement
@@ -17,16 +18,17 @@ import atexit
 import curses
 import itertools
 import os
-import re
 import textwrap
 import time
 import weakref
+from collections.abc import Iterable
 from curses.textpad import Textbox, rectangle
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Callable
 
 from . import geometry, signals, textwidth
 from .backend import CursesBackend, RenderBackend
+from .header import LABEL, PLAIN, SEARCH, HeaderLine, Span, parse_fancy_header
 from .keys import NAVIGATION_KEYS
 from .opts import ConsoleWindowOpts
 from .theme import Theme
@@ -696,108 +698,87 @@ class ConsoleWindow:
         """
         self._add(self.body, text, attr, resume, context)
 
-    def add_fancy_header(self, line: str, mode: str = 'Underline',
+    def add_fancy_header(self, line: str | HeaderLine, mode: str = 'Underline',
                          search_pattern_attr: int | None = None) -> None:
         """
-        Parses header line and adds it with fancy formatting.
+        Adds a header line, with optional "fancy" key/label markup.
 
-        Modes:
-        - 'Off': Normal formatting (no special handling)
-        - 'Underline': Underlined and bold keys
-        - 'Reverse': Reverse video keys
+        .. note::
+            The *string* form re-parses its content at render time and can
+            misfire on data that merely looks like markup (``AUDIT.md`` §4.14).
+            Prefer :meth:`add_header_line` with a :class:`HeaderLine`, which
+            declares intent explicitly.  A :class:`HeaderLine` (or any iterable
+            of :class:`~console_window.header.Span`) is also accepted here and is
+            never re-parsed.
 
-        Converts [x]text to formatted x (brackets removed).
-        Handles x:text patterns by formatting x.
-        Handles /pattern by highlighting the entire pattern.
-        Multi-character keys like ESC:, ENTER:, TAB: are supported.
+        The legacy string form behaves exactly as before:
 
-        :param line: The header text to add with formatting
-        :param mode: Formatting mode ('Off', 'Underline', or 'Reverse')
-        :param search_pattern_attr: Optional custom attribute for /pattern highlighting
-        :type line: str
+        * ``[x]text`` → ``x`` is styled and the brackets removed,
+        * ``WORD:`` (at a token boundary) → ``WORD`` is styled,
+        * ``/pattern`` (at a token boundary) → the pattern is highlighted,
+        * the first word is bolded.
+
+        :param line: A legacy string to parse, or a :class:`HeaderLine` of spans.
+        :param mode: Formatting mode: ``'Off'``, ``'Underline'`` or ``'Reverse'``.
+        :param search_pattern_attr: Optional custom attribute for ``/pattern``.
+        :type line: str or HeaderLine
         :type mode: str
         :type search_pattern_attr: int or None
         """
-        if mode == 'Off':
-            # Fancy mode off, just add the line normally
-            self.add_header(line)
-            return
+        if isinstance(line, str):
+            if mode == 'Off':
+                # Legacy: no markup processing, add the raw line unchanged.
+                self.add_header(line)
+                return
+            spans = parse_fancy_header(line)
+        else:
+            spans = list(line)
+        self._emit_header_spans(spans, mode, search_pattern_attr)
 
-        # Choose the attribute based on mode
-        key_attr = (curses.A_UNDERLINE | curses.A_BOLD) if mode == 'Underline' else curses.A_REVERSE
+    def add_header_line(self, header_line: HeaderLine | Iterable[Span],
+                        mode: str = 'Underline',
+                        search_pattern_attr: int | None = None) -> None:
+        """
+        Adds a header line built from explicit :class:`HeaderLine` spans.
 
-        # List of (text, attr) tuples
-        result_sections = []
-        i = 0
-        current_text = ""
+        Unlike :meth:`add_fancy_header`, nothing is guessed from the text: the
+        caller declares which runs are keys/labels/search patterns, so data can
+        never be misinterpreted as markup.
 
-        # Check if line starts with all-caps word and extract it
-        stripped = line.lstrip()
-        if stripped:
-            first_word_match = stripped.split()[0] if stripped.split() else ''
-            if first_word_match and re_match_word(first_word_match):
-                # Add leading whitespace
-                leading_space = line[:len(line) - len(stripped)]
-                if leading_space:
-                    result_sections.append((leading_space, None))
-                # Add the all-caps word in BOLD
-                result_sections.append((first_word_match, curses.A_BOLD))
-                # Skip past it in our processing
-                i = len(leading_space) + len(first_word_match)
+        :param header_line: A :class:`HeaderLine` (or any iterable of
+                            :class:`~console_window.header.Span`).
+        :param mode: Formatting mode: ``'Off'``, ``'Underline'`` or ``'Reverse'``.
+        :param search_pattern_attr: Optional custom attribute for search spans.
+        :type header_line: HeaderLine or Iterable[Span]
+        :type mode: str
+        :type search_pattern_attr: int or None
+        """
+        self._emit_header_spans(list(header_line), mode, search_pattern_attr)
 
-        while i < len(line):
-            # Check for [x]text pattern
-            if line[i] == '[' and i + 2 < len(line) and line[i + 2] == ']':
-                # Save any accumulated normal text
-                if current_text:
-                    result_sections.append((current_text, None))
-                    current_text = ""
+    @staticmethod
+    def _resolve_header_attr(role: str, mode: str,
+                             search_pattern_attr: int | None) -> int | None:
+        """Map a span :data:`role` plus format ``mode`` to a curses attribute."""
+        if mode == 'Off' or role == PLAIN:
+            return None
+        if role == LABEL:
+            return curses.A_BOLD
+        if role == SEARCH:
+            if search_pattern_attr is not None:
+                return search_pattern_attr
+            return curses.A_BOLD | curses.A_REVERSE
+        # KEY (and any unknown role) follows the mode's key styling.
+        if mode == 'Underline':
+            return curses.A_UNDERLINE | curses.A_BOLD
+        return curses.A_REVERSE
 
-                # Extract the key letter and add it with chosen attribute
-                key_char = line[i + 1]
-                result_sections.append((key_char, key_attr))
-                i += 3  # Skip past [x]
-
-            # Check for multi-character key names like ESC:, ENTER:, TAB:
-            elif (i == 0 or line[i - 1] == ' '):
-                # Look ahead for uppercase word followed by colon
-                match = re_match_key(line[i:])
-                if match:
-                    # Found a key name followed by colon
-                    if current_text:
-                        result_sections.append((current_text, None))
-                        current_text = ""
-
-                    key_name = match
-                    result_sections.append((key_name, key_attr))
-                    result_sections.append((':', None))  # Add the colon without formatting
-                    i += len(key_name) + 1  # Skip past key and colon
-                else:
-                    match = re_match_pattern(line[i:])
-                    if match:
-                        # Found a search pattern
-                        if current_text:
-                            result_sections.append((current_text, None))
-                            current_text = ""
-
-                        full_pattern = match  # includes the /
-                        # Use custom attr if provided, otherwise default bold+reverse
-                        pattern_attr = search_pattern_attr if search_pattern_attr is not None else (curses.A_BOLD | curses.A_REVERSE)
-                        result_sections.append((full_pattern, pattern_attr))
-                        i += len(full_pattern)
-                    else:
-                        # Not a key pattern, just regular character
-                        current_text += line[i]
-                        i += 1
-
-            else:
-                # Regular character
-                current_text += line[i]
-                i += 1
-
-        # Add any remaining text
-        if current_text:
-            result_sections.append((current_text, None))
+    def _emit_header_spans(self, spans: Iterable[Span], mode: str,
+                           search_pattern_attr: int | None = None) -> None:
+        """Render :class:`Span` tokens to the header pad (shared by both entry points)."""
+        result_sections = [
+            (span.text, self._resolve_header_attr(span.role, mode, search_pattern_attr))
+            for span in spans
+        ]
 
         # Calculate visible length (in display cells) of this header line
         visible_length = sum(textwidth.string_width(text) for text, attr in result_sections)
@@ -1944,18 +1925,3 @@ def _textbox_edit_on_enter(key: int) -> int:
     return 7 if key in (10, curses.KEY_ENTER) else key
 
 
-def re_match_word(word: str) -> bool:
-    """Return True if ``word`` is a simple \\w/- token (used by add_fancy_header)."""
-    return bool(re.match(r'^[\w-]+$', word))
-
-
-def re_match_key(s: str) -> str | None:
-    """Match a leading multi-character key name followed by ':' (e.g. 'ESC:')."""
-    match = re.match(r'([A-Z]{2,}|[A-Z]):', s)
-    return match.group(1) if match else None
-
-
-def re_match_pattern(s: str) -> str | None:
-    """Match a leading /search-pattern token (including the slash)."""
-    match = re.match(r'/(\S+)', s)
-    return match.group(0) if match else None

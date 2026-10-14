@@ -42,6 +42,7 @@ from console_window import (
     ConsoleWindow,
     ConsoleWindowOpts,
     Context,
+    HeaderLine,
     IncrementalSearchBar,
     InlineConfirmation,
     OptionSpinner,
@@ -355,22 +356,26 @@ class MainScreen(DemoScreen):
 
     def _draw_header(self):
         app = self.app
-        # Build header with filter display using fancy_header for compact formatting
-        line = app.filter_bar.get_display_string(prefix='/')
-        if not line:
-            line = '/'
-        # Use fancy_header to show filter with bold/underline formatting
+        # Build the header explicitly from HeaderLine tokens: intent is declared,
+        # so nothing here can be misread as markup (AUDIT.md §4.14).
+        line = HeaderLine()
+        line.text('  ')
+        bar_line = app.filter_bar.as_header_line(prefix='/')
+        if bar_line:
+            line.extend(bar_line)
+        else:
+            line.text('/')
 
         # Show spinner keys
-        line += f' [v]iew={app.opts.view_mode}'
-        line += f' [s]ort={app.opts.sort_by}'
-        line += ' [a]nsDemo'
-        line += ' l:alrtDemo'
-        line += ' SPC:process'
-        line += ' [t]hemes'
-        line += ' [h]ist'
-        line += ' ?:help'
-        app.win.add_fancy_header(f'  {line}', mode="Underline")
+        line.text(' ').bracket_key('v').text(f'iew={app.opts.view_mode}')
+        line.text(' ').bracket_key('s').text(f'ort={app.opts.sort_by}')
+        line.text(' ').bracket_key('a').text('nsDemo')
+        line.text(' ').key('l').text(':alrtDemo')
+        line.text(' ').key('SPC').text(':process')
+        line.text(' ').bracket_key('t').text('hemes')
+        line.text(' ').bracket_key('h').text('ist')
+        line.text(' ').key('?').text(':help')
+        app.win.add_header_line(line, mode='Underline')
 
         # Column headers
         view_mode = app.opts.view_mode

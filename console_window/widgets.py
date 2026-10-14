@@ -5,6 +5,8 @@ from __future__ import annotations
 import curses
 from typing import Callable
 
+from .header import HeaderLine
+
 
 class InlineConfirmation:
     """
@@ -259,11 +261,10 @@ class IncrementalSearchBar:
                     continue  # Key was handled, skip normal processing
             # Normal key handling...
 
-        # In your header/display code:
-        if search_bar.is_active:
-            header += search_bar.get_display_string(prefix=' /')
-        elif search_bar.text:
-            header += f' /{search_bar.text}'
+        # In your header/display code (preferred: explicit, unguessable spans):
+        line = search_bar.as_header_line(prefix='/')
+        if line:
+            win.add_header_line(line)
 
     Key Handling:
         - ENTER (10, 13): Accept current text, exit search mode
@@ -398,14 +399,39 @@ class IncrementalSearchBar:
             Inactive without text: ''
         """
         if self._active:
-            # Show cursor position with cursor_char (block by default for visibility)
+            # Show cursor position with cursor_char (block by default for visibility).
+            # The space after the prefix keeps the indicator readable; it also kept
+            # the string safe from add_fancy_header's parser.  New code should use
+            # as_header_line() (explicit SEARCH spans) and not rely on that.
             before = self._text[:self._cursor_pos]
             after = self._text[self._cursor_pos:]
-            # Add space after prefix to prevent pattern matching in fancy_header
             return f'{prefix} {before}{cursor_char}{after}{suffix}'
         if self._text:
             return f'{prefix}{self._text}{suffix}'
         return ''
+
+    def as_header_line(self, prefix: str = '/', cursor_char: str = '█') -> HeaderLine:
+        """
+        Build a :class:`~console_window.header.HeaderLine` for this search bar.
+
+        Preferred over :meth:`get_display_string` when feeding a header via
+        :meth:`ConsoleWindow.add_header_line`: the search text is emitted as an
+        explicit SEARCH span, so it can never be mistaken for other markup (the
+        reason the string form had to inject a spacer).
+
+        :param prefix: String shown before the search text (default ``'/'``).
+        :param cursor_char: Character marking the cursor while active (block by default).
+        :returns: A HeaderLine (empty when inactive with no text).
+        :rtype: HeaderLine
+        """
+        line = HeaderLine()
+        if self._active:
+            before = self._text[:self._cursor_pos]
+            after = self._text[self._cursor_pos:]
+            line.text(f'{prefix} {before}{cursor_char}{after}')
+        elif self._text:
+            line.search(self._text, prefix=prefix)
+        return line
 
     @property
     def is_active(self) -> bool:

@@ -18,6 +18,7 @@ import time
 import traceback
 
 from .context import Context
+from .header import HeaderLine, Span
 from .keys import NAVIGATION_KEYS
 from .opts import ConsoleWindowOpts
 from .screens import HOME_ST, BasicHelpScreen, Screen, ScreenStack
@@ -33,11 +34,13 @@ __all__ = [
     'ConsoleWindow',
     'ConsoleWindowOpts',
     'Context',
+    'HeaderLine',
     'IncrementalSearchBar',
     'InlineConfirmation',
     'OptionSpinner',
     'Screen',
     'ScreenStack',
+    'Span',
     'Theme',
 ]
 
