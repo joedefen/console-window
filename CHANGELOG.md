@@ -10,10 +10,10 @@ fully backward compatible (`from console_window import ...` and
 `from console_window.ConsoleWindow import ...` both continue to work).
 
 ### Added
-- Unit-test suite (`tests/`, 72 tests, TTY-free) covering scroll/pick geometry,
+- Unit-test suite (`tests/`, 77 tests, TTY-free) covering scroll/pick geometry,
   `IncrementalSearchBar` / `InlineConfirmation`, `OptionSpinner` scope
-  subtraction, public-API compatibility, and the `answer()`/`alert()` dialog
-  fixes.
+  subtraction, public-API compatibility, the `answer()`/`alert()` dialog fixes,
+  and `set_demo_mode()` toggle/state handling.
 - `console_window.geometry` — pure scroll/pick math extracted for testing:
   `cook_abut`, `compute_abut`, `calc_indicator`, `scroll_indicator_row`,
   `scroll_indicator_col`, `count_pickable_rows`, `find_pickable`.
