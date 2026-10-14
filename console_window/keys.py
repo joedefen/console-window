@@ -4,12 +4,14 @@ Kept dependency-free (only ``curses``) so that both the window engine and the
 option spinner can import it without risking circular imports.
 """
 
+from __future__ import annotations
+
 import curses
 
 # Navigation keys are reserved for cursor movement and scrolling.
 # They are excluded from application key bindings (see OptionSpinner._register)
 # and from demo-mode highlighting.
-NAVIGATION_KEYS = {
+NAVIGATION_KEYS: set[int] = {
     curses.KEY_UP, curses.KEY_DOWN, curses.KEY_LEFT, curses.KEY_RIGHT,
     curses.KEY_HOME, curses.KEY_END, curses.KEY_PPAGE, curses.KEY_NPAGE,
     ord('j'), ord('k'),  # Vi-style up/down

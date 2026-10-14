@@ -4,8 +4,15 @@ These functions contain no curses or instance state so they can be unit-tested
 without a terminal.  ``ConsoleWindow`` delegates its geometry math here.
 """
 
+from __future__ import annotations
 
-def cook_abut(abut_value):
+from typing import Callable, Sequence, Union
+
+# Accepted forms for a row's ``abut`` attribute (see :func:`cook_abut`).
+AbutSpec = Union[int, Sequence[int], None]
+
+
+def cook_abut(abut_value: AbutSpec) -> tuple[int, int] | None:
     """
     Parse an ``abut`` attribute into a ``(before, after)`` tuple.
 
@@ -36,7 +43,7 @@ def cook_abut(abut_value):
     return None
 
 
-def compute_abut(explicit_abut, transient_count):
+def compute_abut(explicit_abut: AbutSpec, transient_count: int) -> AbutSpec:
     """
     Determine the effective abut value for a row.
 
@@ -54,7 +61,7 @@ def compute_abut(explicit_abut, transient_count):
     return None
 
 
-def calc_indicator(pos, pos0, pos9, ind0, ind9, max_scroll_pos):
+def calc_indicator(pos: int, pos0: int, pos9: int, ind0: int, ind9: int, max_scroll_pos: int) -> int:
     """
     Map a content position to an indicator coordinate.
 
@@ -69,11 +76,11 @@ def calc_indicator(pos, pos0, pos9, ind0, ind9, max_scroll_pos):
         return ind0
     if pos >= pos9:
         return ind9
-    ind = int(round(ind0 + (ind9 - ind0 + 1) * (pos - pos0) / (pos9 - pos0 + 1)))
+    ind = round(ind0 + (ind9 - ind0 + 1) * (pos - pos0) / (pos9 - pos0 + 1))
     return min(max(ind, ind0 + 1), ind9 - 1)
 
 
-def scroll_indicator_row(scroll_pos, max_scroll_pos, scroll_view_size, body_base, rows):
+def scroll_indicator_row(scroll_pos: int, max_scroll_pos: int, scroll_view_size: int, body_base: int, rows: int) -> int:
     """Compute the row position of the vertical scroll indicator."""
     if max_scroll_pos <= 1:
         return body_base
@@ -84,14 +91,14 @@ def scroll_indicator_row(scroll_pos, max_scroll_pos, scroll_view_size, body_base
     return min(body_base + int(max(pos, 0)), rows - 1)
 
 
-def scroll_indicator_col(pick_mode, pick_pos, scroll_pos, max_scroll_pos, body_row_cnt, cols):
+def scroll_indicator_col(pick_mode: bool, pick_pos: int, scroll_pos: int, max_scroll_pos: int, body_row_cnt: int, cols: int) -> int:
     """Compute the column position of the horizontal scroll indicator."""
     if pick_mode:
         return calc_indicator(pick_pos, 0, body_row_cnt - 1, 0, cols - 1, max_scroll_pos)
     return calc_indicator(scroll_pos, 0, max_scroll_pos, 0, cols - 1, max_scroll_pos)
 
 
-def count_pickable_rows(is_pickable, row_cnt, start_pos, count, direction=1):
+def count_pickable_rows(is_pickable: Callable[[int], bool], row_cnt: int, start_pos: int, count: int, direction: int = 1) -> int:
     """
     Move through ``count`` pickable rows from ``start_pos`` in ``direction``.
 
@@ -115,7 +122,7 @@ def count_pickable_rows(is_pickable, row_cnt, start_pos, count, direction=1):
     return pos
 
 
-def find_pickable(is_pickable, row_cnt, pick_pos):
+def find_pickable(is_pickable: Callable[[int], bool], row_cnt: int, pick_pos: int) -> int:
     """
     Find the nearest pickable row to ``pick_pos`` (searching downward first).
 

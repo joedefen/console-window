@@ -1,5 +1,7 @@
 """Configuration object for :class:`~console_window.window.ConsoleWindow`."""
 
+from __future__ import annotations
+
 import curses
 
 
@@ -8,13 +10,13 @@ class ConsoleWindowOpts:
     Options class for ConsoleWindow with enforced valid members using __slots__.
     All options have sensible defaults.
     """
-    __slots__ = ['head_line', 'head_rows', 'body_rows', 'body_cols', 'keys',
-                 'pick_mode', 'pick_size', 'mod_pick', 'pick_attr', 'pick_range', 'ctrl_c_terminates',
-                 'return_if_pos_change', 'min_cols_rows', 'dialog_abort', 'dialog_return',
-                 'single_cell_scroll_indicator', 'answer_show_redraws', 'strip_attrs_in_pick_mode',
-                 'demo_mode', 'relax_handled_keys']
+    __slots__ = ['answer_show_redraws', 'body_cols', 'body_rows', 'ctrl_c_terminates',
+                 'demo_mode', 'dialog_abort', 'dialog_return', 'head_line', 'head_rows',
+                 'keys', 'min_cols_rows', 'mod_pick', 'pick_attr', 'pick_mode', 'pick_range',
+                 'pick_size', 'relax_handled_keys', 'return_if_pos_change',
+                 'single_cell_scroll_indicator', 'strip_attrs_in_pick_mode']
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: object) -> None:
         """
         Initialize ConsoleWindowOpts with defaults. All parameters are optional.
 

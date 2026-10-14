@@ -6,8 +6,11 @@ separate ``CURRENT_THEME`` attribute, leaving ``get_current()`` returning None
 after boot — that split has been removed.)
 """
 
+from __future__ import annotations
+
 import curses
 import os
+from typing import ClassVar
 
 
 class Theme:
@@ -26,10 +29,10 @@ class Theme:
     OLD_SUCCESS = 10 # For completed operations (dimmer)
 
     # Current theme name (set in start_curses / Theme.set)
-    _current = None
+    _current: ClassVar[str | None] = None
 
     # Available themes
-    THEMES = {
+    THEMES: ClassVar[dict] = {
         'dark-mono': {
             'name': 'Dark Mono',
             'default_fg': 253,
@@ -131,17 +134,17 @@ class Theme:
     }
 
     @classmethod
-    def get_current(cls):
+    def get_current(cls) -> str | None:
         """Get the name of the currently active color theme."""
         return cls._current
 
     @classmethod
-    def list_all(cls):
+    def list_all(cls) -> list[str]:
         """List all available color themes."""
         return list(cls.THEMES.keys())
 
     @classmethod
-    def set(cls, theme_name):
+    def set(cls, theme_name: str) -> bool:
         """Change the current theme and reinitialize color pairs.
 
         Args:
@@ -188,7 +191,7 @@ class Theme:
         return True
 
     @classmethod
-    def set_active(cls, theme_name):
+    def set_active(cls, theme_name: str) -> str:
         """Record the active theme name without reinitializing color pairs.
 
         Used by :meth:`ConsoleWindow.start_curses` once it has already applied
@@ -202,7 +205,7 @@ class Theme:
         return theme_name
 
     @classmethod
-    def create_picker_screen(cls, base_class):
+    def create_picker_screen(cls, base_class: type) -> type:
         """
         Create a theme picker screen class dynamically.
 
@@ -219,7 +222,7 @@ class Theme:
         class ThemePickerScreen(base_class):
             """Theme preview screen showing all available themes with color examples"""
 
-            def draw_screen(self):
+            def draw_screen(self) -> None:
                 """Draw the theme screen with color examples for all themes"""
                 app = self.app
                 win = app.win
@@ -254,7 +257,7 @@ class Theme:
                     attr = curses.color_pair(color_id)
                     win.add_body(line, attr=attr)
 
-            def spin_theme_ACTION(self):
+            def spin_theme_ACTION(self) -> None:
                 """Handle 't' key - cycle through themes"""
                 vals = cls.list_all()
                 value = cls.get_current()

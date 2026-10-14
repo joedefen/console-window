@@ -20,6 +20,12 @@ fully backward compatible (`from console_window import ...` and
 - `console_window.__version__`.
 - Explicit `__all__` in the package root and compatibility module.
 - `[tool.pytest.ini_options]` in `pyproject.toml`.
+- GitHub Actions CI (`.github/workflows/ci.yml`) running the TTY-free suite on
+  Python 3.8–3.13, plus a Ruff lint job backed by a `[tool.ruff]` config in
+  `pyproject.toml`.
+- Type annotations across the public API (every package module now uses
+  `from __future__ import annotations`), enforced for the package by Ruff's
+  `ANN` rules.
 
 ### Changed
 - Split the 3,815-line `console_window/ConsoleWindow.py` into focused modules:
@@ -32,6 +38,8 @@ fully backward compatible (`from console_window import ...` and
 - SIGINT handling moved to an explicit `console_window.signals` policy API;
   removed the action-at-a-distance rebinding of module-level functions.
 - `set_demo_mode()` now tests the resulting state rather than the argument.
+- Every package module opts into PEP 563 (`from __future__ import annotations`)
+  so the modern `X | None` annotations remain valid on Python 3.8.
 - `add_fancy_header()` regex logic extracted into named helpers.
 
 ### Fixed
@@ -44,6 +52,10 @@ fully backward compatible (`from console_window import ...` and
   work while the HELP screen is open — they are scoped to include `HELP_ST`.
   (Scoping logic itself was unchanged by the refactor; this was a demo-scope
   issue.)
+- `ScreenStack.__init__(screen_objects=...)` annotated as `dict | None` (fixes the
+  implicit-`Optional` finding, Ruff RUF013); removed redundant `int(round(...))`
+  casts (RUF046) and trailing whitespace in `widgets.py` (W291); dropped an
+  unused local in `tests/test_spinner.py` (F841).
 - Removed retired `put_body()` references (docstring + `__main__` self-test now
   use `add_body()`).
 - `Development Status` classifier aligned with the release; version bumped to

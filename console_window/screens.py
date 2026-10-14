@@ -40,7 +40,7 @@ class Screen:
     is_terminal = False         # True = cannot be pushed onto stack
     cannot_stack_me = False     # True = cannot have other screens pushed on top
 
-    def __init__(self, app):
+    def __init__(self, app: object) -> None:
         """
         Initialize the screen with references to the application and window.
         Called once when screen is first created.
@@ -52,7 +52,7 @@ class Screen:
         self.win = app.win
         self._cached_spinner = None  # Lazy-loaded spinner reference
 
-    def draw_screen(self):
+    def draw_screen(self) -> None:
         """
         Draw screen-specific content (header and body).
 
@@ -66,7 +66,7 @@ class Screen:
         """
         pass
 
-    def on_pause(self):
+    def on_pause(self) -> bool:
         """
         Called when another screen is about to be pushed on top of this one.
 
@@ -75,7 +75,7 @@ class Screen:
         """
         return not self.cannot_stack_me
 
-    def on_resume(self):
+    def on_resume(self) -> bool:
         """
         Called when this screen becomes the top screen again
         (after a screen that was on top of it was popped).
@@ -85,7 +85,7 @@ class Screen:
         """
         return True
 
-    def on_pop(self):
+    def on_pop(self) -> bool:
         """
         Called when this screen is being permanently removed from the stack.
         Must always succeed - use for cleanup only.
@@ -95,7 +95,7 @@ class Screen:
         """
         return True
 
-    def get_spinner(self):
+    def get_spinner(self) -> OptionSpinner | None:
         """
         Find and return the OptionSpinner instance from the app.
 
@@ -128,7 +128,7 @@ class Screen:
         # Not found - return None (don't cache to allow retry)
         return None
 
-    def handle_action(self, action_name):
+    def handle_action(self, action_name: str) -> bool:
         """
         Dispatch action to screen-specific handler method.
 
@@ -202,7 +202,8 @@ class ScreenStack:
         ss.pop()                  # Go back to home
     """
 
-    def __init__(self, win: ConsoleWindow, spins_obj: object, screens: tuple, screen_objects: dict = None):
+    def __init__(self, win: ConsoleWindow, spins_obj: object, screens: tuple,
+                 screen_objects: dict | None = None) -> None:
         """
         Initialize the ScreenStack with a home screen.
 
@@ -246,7 +247,7 @@ class ScreenStack:
         # Push home screen (HOME_ST=0) as the initial screen
         self.push(HOME_ST, 0)
 
-    def push(self, screen, prev_pos=None, force=False):
+    def push(self, screen: int, prev_pos: int | None = None, force: bool = False) -> int | None:
         """
         Push a new screen onto the stack with validation and loop prevention.
 
@@ -307,13 +308,13 @@ class ScreenStack:
         self.win.pick_pos = self.win.scroll_pos = 0
         return 0
 
-    def get_curr_obj(self):
+    def get_curr_obj(self) -> Screen | None:
         """ get the current screen object """
         if self.curr:
             return self.screen_objects.get(self.curr.num, None)
         return None
 
-    def pop(self, force=False):
+    def pop(self, force: bool = False) -> int | None:
         """
         Pop the top screen from the stack.
         on_pop() is always called for cleanup (cannot be rejected).
@@ -351,7 +352,7 @@ class ScreenStack:
         self.win.scroll_pos = self.curr.scroll_pos
         return self.curr.prev_pos
 
-    def is_curr(self, screens):
+    def is_curr(self, screens: int | str | list | tuple | set) -> bool:
         """
         Check if the current screen matches any of the given screen(s).
 
@@ -371,7 +372,7 @@ class ScreenStack:
             if ss.is_curr('HOME'):
                 print("On home screen (by name)")
         """
-        def test_one(screen):
+        def test_one(screen: int | str) -> bool:
             if isinstance(screen, int):
                 return screen == self.curr.num
             return str(screen) == self.curr.name
@@ -379,7 +380,7 @@ class ScreenStack:
             return any(test_one(screen) for screen in screens)
         return test_one(screen=screens)
 
-    def act_in(self, action, screens=None):
+    def act_in(self, action: str, screens: int | str | list | tuple | set | None = None) -> bool:
         """
         Check if an action flag is set and optionally if we're on specific screen(s).
 
@@ -410,7 +411,7 @@ class ScreenStack:
         setattr(self.obj, action, False)
         return val and (screens is None or self.is_curr(screens))
 
-    def perform_actions(self, spinner):
+    def perform_actions(self, spinner: OptionSpinner) -> int:
         """
         Automatically handle all pending actions for the current screen.
 
@@ -491,7 +492,7 @@ class BasicHelpScreen(Screen):
     This is a reference implementation that can be used as-is or customized
     for your application's specific help screen needs.
     """
-    def draw_screen(self):
+    def draw_screen(self) -> None:
         """
         Draw the help screen content.
 

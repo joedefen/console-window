@@ -117,7 +117,6 @@ def test_key_scoped_to_multiple_screens_resolves_on_both():
     spin = OptionSpinner(stack=stack)
     spin.add_key('view_mode', 'v - view mode', vals=['a', 'b'],
                  keys=[ord('v')], scope={0, 1})
-    obj = spin.default_obj
 
     # HELP screen (1)
     stack.curr = SimpleNamespace(num=1)

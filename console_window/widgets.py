@@ -1,6 +1,9 @@
 """Reusable input widgets: incremental search bar and inline confirmation."""
 
+from __future__ import annotations
+
 import curses
+from typing import Callable
 
 
 class InlineConfirmation:
@@ -29,7 +32,7 @@ class InlineConfirmation:
     """
     MODES = 'Y y YES yes identity choices text'.split()
 
-    def __init__(self, min_abbrev_chars=None):
+    def __init__(self, min_abbrev_chars: int | None = None) -> None:
         self.active = False
         self.action_type = None  # e.g., 'wipe' or 'verify'
         self.identity = None     # e.g., 'sda1'
@@ -39,7 +42,9 @@ class InlineConfirmation:
         self.min_abbrev_chars = min_abbrev_chars
         self._calculated_min_abbrev = None  # Cached calculated value
 
-    def start(self, action_type=None, identity=None, choices=None, mode=None, min_abbrev_chars=None):
+    def start(self, action_type: str | None = None, identity: str | None = None,
+              choices: str | list[str] | tuple[str, ...] | None = None,
+              mode: str | None = None, min_abbrev_chars: int | None = None) -> None:
         self.active = True
         self.action_type = action_type
         self.identity = identity
@@ -62,14 +67,14 @@ class InlineConfirmation:
         if self.mode == 'choices' and not self.choices:
             self.mode = 'yes'
 
-    def cancel(self):
+    def cancel(self) -> None:
         """Cancel the confirmation"""
         self.active = False
         self.action_type = None
         self.choices = None
         self.input_buffer = ''
 
-    def _calculate_min_abbrev_chars(self):
+    def _calculate_min_abbrev_chars(self) -> int:
         """
         Calculate minimum prefix length needed to disambiguate choices.
         Returns: min_length + 1, capped at longest choice length.
@@ -97,7 +102,7 @@ class InlineConfirmation:
         # Still return a reasonable value
         return max_len
 
-    def _get_effective_min_abbrev_chars(self):
+    def _get_effective_min_abbrev_chars(self) -> int:
         """Get the effective min_abbrev_chars value (explicit or calculated)."""
         if self.min_abbrev_chars is not None:
             return self.min_abbrev_chars
@@ -108,9 +113,9 @@ class InlineConfirmation:
 
         return self._calculated_min_abbrev
 
-    def _resolve_choice(self):
+    def _resolve_choice(self) -> str | None:
         """
-        Tiered matching logic for choices. Returns the full string if 
+        Tiered matching logic for choices. Returns the full string if
         a unique match is found, otherwise None.
         """
         buf = self.input_buffer
@@ -137,7 +142,7 @@ class InlineConfirmation:
 
         return None
 
-    def handle_key(self, key):
+    def handle_key(self, key: int) -> str:
         if key == 27: return 'cancelled'
 
         # Handle single-key modes
@@ -177,7 +182,7 @@ class InlineConfirmation:
 
         return 'continue'
 
-    def get_hint(self):
+    def get_hint(self) -> str:
         """
         Returns a hint string for display when input_buffer is empty.
         Intended to be shown in dimmed/italic style.
@@ -270,7 +275,9 @@ class IncrementalSearchBar:
         - Printable chars (32-126): Insert at cursor position
     """
 
-    def __init__(self, on_change=None, on_accept=None, on_cancel=None):
+    def __init__(self, on_change: Callable[[str], None] | None = None,
+                 on_accept: Callable[[str], None] | None = None,
+                 on_cancel: Callable[[str], None] | None = None) -> None:
         """
         Initialize the incremental search bar.
 
@@ -291,7 +298,7 @@ class IncrementalSearchBar:
         self.on_accept = on_accept
         self.on_cancel = on_cancel
 
-    def start(self, initial_text=''):
+    def start(self, initial_text: str = '') -> None:
         """
         Enter search mode with optional initial text.
 
@@ -302,7 +309,7 @@ class IncrementalSearchBar:
         self._start_text = initial_text
         self._cursor_pos = len(initial_text)
 
-    def handle_key(self, key):
+    def handle_key(self, key: int) -> bool:
         """
         Handle a key press in search mode.
 
@@ -372,7 +379,7 @@ class IncrementalSearchBar:
 
         return False
 
-    def get_display_string(self, prefix='/', suffix='', cursor_char='█'):
+    def get_display_string(self, prefix: str = '/', suffix: str = '', cursor_char: str = '█') -> str:
         """
         Get formatted display string with cursor indicator.
 
@@ -401,16 +408,16 @@ class IncrementalSearchBar:
         return ''
 
     @property
-    def is_active(self):
+    def is_active(self) -> bool:
         """Whether search mode is currently active."""
         return self._active
 
     @property
-    def text(self):
+    def text(self) -> str:
         """Current search text."""
         return self._text
 
     @property
-    def cursor_pos(self):
+    def cursor_pos(self) -> int:
         """Current cursor position within the text."""
         return self._cursor_pos
