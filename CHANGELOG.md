@@ -10,10 +10,13 @@ fully backward compatible (`from console_window import ...` and
 `from console_window.ConsoleWindow import ...` both continue to work).
 
 ### Added
-- Unit-test suite (`tests/`, 80 tests, TTY-free) covering scroll/pick geometry,
+- Unit-test suite (`tests/`, TTY-free) covering scroll/pick geometry,
   `IncrementalSearchBar` / `InlineConfirmation`, `OptionSpinner` scope
   subtraction, public-API compatibility, the `answer()`/`alert()` dialog fixes,
-  `set_demo_mode()` toggle/state handling, and `render()`'s retry cap.
+  `set_demo_mode()` toggle/state handling, `render()`'s retry cap, and the
+  non-destructive `flash()` behaviour (`tests/test_flash.py`).
+- `ConsoleWindow.flash_repaint` (repaint the underlying screen when `flash()`
+  ends) and `ConsoleWindow.flash_poll_ms` (flash key-poll interval).
 - `console_window.geometry` — pure scroll/pick math extracted for testing:
   `cook_abut`, `compute_abut`, `calc_indicator`, `scroll_indicator_row`,
   `scroll_indicator_col`, `count_pickable_rows`, `find_pickable`.
@@ -48,6 +51,13 @@ fully backward compatible (`from console_window import ...` and
   abort) instead of resetting to the class default `ConsoleWindow.timeout_ms`.
 - `alert()` recomputes `self.rows`/`self.cols` from `getmaxyx()` before drawing,
   so a resize immediately before the call no longer causes a misdraw.
+- `flash()` is now non-destructive and interruptible: it polls for a key
+  (`flash_poll_ms`) instead of `time.sleep`ing, so it can be dismissed early —
+  and any key pressed is preserved in `pending_keys` for the next `prompt()`
+  rather than being swallowed. A resize while the message is up redraws it, and
+  on exit the underlying screen is repainted from the pads (`flash_repaint`)
+  instead of being left blank; the pre-flash read timeout is restored on every
+  exit path.
 - `render()` now bounds its transient-error retry loop by wall-clock time
   (`ConsoleWindow.render_retry_seconds`, default 2 s) instead of a fixed 128
   iterations, so a reproducible `curses.error` aborts quickly with the
