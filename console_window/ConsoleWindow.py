@@ -374,7 +374,7 @@ class Context:
 
         # Example with abut to limit visible context:
         ctx = Context(genre='result', pickable=True, abut=[-10, 20])
-        win.put_body("Search result", context=ctx)
+        win.add_body("Search result", context=ctx)
         # When this line is picked, only 10 lines before and 20 after are visible
     """
     def __init__(self, genre='', pickable=True, **kwargs):
@@ -1799,7 +1799,7 @@ class ConsoleWindow:
         return not same
 
     def _add(self, ns, text, attr=None, resume=False, context=None):
-        """Internal method to add text to pad using its namespace (simpler version of _put)."""
+        """Internal method to add text to a pad using its namespace."""
         is_body = bool(id(ns) == id(self.body))
         if ns.row_cnt < ns.rows:
             row = max(ns.row_cnt - (1 if resume else 0), 0)
@@ -3795,7 +3795,7 @@ if __name__ == '__main__':
                 pick_values = []
                 for idx, line in enumerate(range(body_size//opts.pick_size)):
                     value = f'{loop}.{line}'
-                    win.put_body(f'Main pick: {value}')
+                    win.add_body(f'Main pick: {value}')
                     pick_values.append(value)
                     for num in range(1, opts.pick_size):
                         win.draw(num+idx*opts.pick_size, 0, f'  addon: {loop}.{line}')
