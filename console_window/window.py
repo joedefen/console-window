@@ -97,6 +97,11 @@ class ConsoleWindow:
         self.ctrl_c_terminates = self.opts.ctrl_c_terminates
 
         self.scr = self._start_curses()
+        # curses.window exposes no gettimeout(), so every place that sets a read
+        # timeout records it here (via _set_scr_timeout).  This lets modal
+        # dialogs such as answer() restore the timeout that was in effect before
+        # they ran, instead of assuming the class default.
+        self._scr_timeout_ms = ConsoleWindow.timeout_ms
 
         self.head = SimpleNamespace(
             pad=curses.newpad(self.opts.head_rows, self.opts.body_cols),
@@ -335,6 +340,21 @@ class ConsoleWindow:
         same = bool(rows == self.rows and cols == self.cols)
         self.rows, self.cols = rows, cols
         return same
+
+    def _set_scr_timeout(self, ms):
+        """Set the screen read timeout (milliseconds) and remember it.
+
+        ``curses.window`` has no ``gettimeout()``, so the last value applied is
+        tracked on the instance.  :meth:`answer` uses this to restore whatever
+        timeout was in effect before the dialog ran, rather than resetting to
+        the class default.
+
+        :param ms: Read timeout in milliseconds (negative = block forever,
+                   0 = non-blocking).
+        :type ms: int
+        """
+        self._scr_timeout_ms = ms
+        self.scr.timeout(ms)
 
     def _check_min_size(self):
         """
@@ -1143,6 +1163,11 @@ class ConsoleWindow:
             dialog_abort = 'ESC' if esc_abort else None
         else:
             dialog_abort = self.opts.dialog_abort
+
+        # Remember the timeout in effect before the dialog so every exit path can
+        # restore it; curses.window has no gettimeout(), so we track it ourselves.
+        prev_timeout_ms = getattr(self, '_scr_timeout_ms', ConsoleWindow.timeout_ms)
+
         def draw_rectangle(scr, r1, c1, r2, c2):
             """Draws a box using standard curses characters."""
             scr.border(0)
@@ -1191,7 +1216,7 @@ class ConsoleWindow:
 
         # Set longer timeout for dialog - redraw every 5s for screen recovery
         # This prevents flicker (was 200ms) while recovering from corruption
-        self.scr.timeout(5000)  # 5 second timeout for auto-refresh
+        self._set_scr_timeout(5000)  # 5 second timeout for auto-refresh
 
         # DEBUG: Set to True to show redraw indicator in upper-left corner
         debug_show_redraws = self.opts.answer_show_redraws
@@ -1216,7 +1241,7 @@ class ConsoleWindow:
                     curses.doupdate()
                     key = self.scr.getch()
                     if key in [27]:
-                        self.scr.timeout(ConsoleWindow.timeout_ms)
+                        self._set_scr_timeout(prev_timeout_ms)
                         return None
                     if key == curses.KEY_RESIZE: curses.update_lines_cols()
                     continue
@@ -1347,22 +1372,22 @@ class ConsoleWindow:
                 # Handle dialog_return (submit)
                 if self.opts.dialog_return == 'ENTER' and key in [10, 13]:
                     curses.curs_set(0)
-                    self.scr.timeout(ConsoleWindow.timeout_ms)
+                    self._set_scr_timeout(prev_timeout_ms)
                     return "".join(input_string)
                 elif self.opts.dialog_return == 'TAB' and key == 9:
                     curses.curs_set(0)
-                    self.scr.timeout(ConsoleWindow.timeout_ms)
+                    self._set_scr_timeout(prev_timeout_ms)
                     return "".join(input_string)
 
                 # Handle dialog_abort (ESC and ESC-ESC)
                 if key == 27:
                     if dialog_abort == 'ESC':
-                        self.scr.timeout(ConsoleWindow.timeout_ms)
+                        self._set_scr_timeout(prev_timeout_ms)
                         return None
                     elif dialog_abort == 'ESC-ESC':
                         current_time = time.time()
                         if last_esc_time is not None and (current_time - last_esc_time) <= 1.0:
-                            self.scr.timeout(ConsoleWindow.timeout_ms)
+                            self._set_scr_timeout(prev_timeout_ms)
                             return None  # Double ESC within timeout
                         last_esc_time = current_time
                         # Single ESC - just update time and continue
@@ -1474,9 +1499,10 @@ class ConsoleWindow:
         :type title: str
         :type message: str
         """
-        def mod_key(key):
-            """Internal function to map Enter/Key_Enter to an arbitrary key code 7 for Textbox.edit to exit."""
-            return  7 if key in (10, curses.KEY_ENTER) else key
+        # Refresh the cached dimensions from the live screen first: a resize may
+        # have happened since the last render, and everything below draws from
+        # self.rows/self.cols (answer() recomputes for the same reason).
+        self._set_screen_dims()
 
         # Auto-calculate dimensions with 1-cell border on all sides
         # Leave 1 cell on each side for reverse video border
@@ -1561,10 +1587,12 @@ class ConsoleWindow:
         visible_rows = box_height - 2  # Subtract top and bottom borders
         pad.refresh(0, 0, row0+1, col0+1, row0+visible_rows, col9-1)
 
-        # Wait for ENTER using dummy Textbox
+        # Wait for ENTER using dummy Textbox.  Textbox.edit() only stops when
+        # its validator returns the sentinel 7; _textbox_edit_on_enter maps the
+        # ENTER key codes onto that sentinel so any ENTER acknowledges the alert.
         win = curses.newwin(1, 1, row9-1, col9-2)
         curses.curs_set(0)  # Ensure cursor is off
-        Textbox(win).edit(mod_key).strip()
+        Textbox(win).edit(_textbox_edit_on_enter).strip()
         return
 
     def clear(self):
@@ -1731,6 +1759,24 @@ class ConsoleWindow:
                         self.last_demo_key = self._format_key_for_demo(key)
                     return key
         return None
+
+
+def _textbox_edit_on_enter(key):
+    """Exit ``curses.textpad.Textbox.edit`` as soon as ENTER is pressed.
+
+    ``Textbox.edit(validator)`` has no dedicated "stop" return value: it keeps
+    reading keys until the *validator* returns the sentinel code ``7`` (Ctrl-G).
+    To make a single ENTER press acknowledge :meth:`ConsoleWindow.alert`, map the
+    Enter key codes (``10`` and ``curses.KEY_ENTER``) onto that sentinel and pass
+    every other key through untouched so ``Textbox`` still performs editing.
+
+    :param key: Key code delivered by ``Textbox`` to the validator.
+    :type key: int
+    :returns: ``7`` for ENTER (which stops editing), otherwise ``key`` unchanged.
+    :rtype: int
+    """
+    # 7 is BEL / Ctrl-G, Textbox.do_command()'s "end edit" control code.
+    return 7 if key in (10, curses.KEY_ENTER) else key
 
 
 def re_match_word(word):

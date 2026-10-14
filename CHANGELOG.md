@@ -10,9 +10,10 @@ fully backward compatible (`from console_window import ...` and
 `from console_window.ConsoleWindow import ...` both continue to work).
 
 ### Added
-- Unit-test suite (`tests/`, 63 tests, TTY-free) covering scroll/pick geometry,
+- Unit-test suite (`tests/`, 72 tests, TTY-free) covering scroll/pick geometry,
   `IncrementalSearchBar` / `InlineConfirmation`, `OptionSpinner` scope
-  subtraction, and public-API compatibility.
+  subtraction, public-API compatibility, and the `answer()`/`alert()` dialog
+  fixes.
 - `console_window.geometry` — pure scroll/pick math extracted for testing:
   `cook_abut`, `compute_abut`, `calc_indicator`, `scroll_indicator_row`,
   `scroll_indicator_col`, `count_pickable_rows`, `find_pickable`.
@@ -34,6 +35,11 @@ fully backward compatible (`from console_window import ...` and
 - `add_fancy_header()` regex logic extracted into named helpers.
 
 ### Fixed
+- `answer()` now records the screen read timeout in effect before the dialog and
+  restores that value on every exit path (submit, TAB, ESC, ESC-ESC, too-small
+  abort) instead of resetting to the class default `ConsoleWindow.timeout_ms`.
+- `alert()` recomputes `self.rows`/`self.cols` from `getmaxyx()` before drawing,
+  so a resize immediately before the call no longer causes a misdraw.
 - Demo: the settings spinner keys (`v` view mode, `s` sort, `t` theme) now also
   work while the HELP screen is open — they are scoped to include `HELP_ST`.
   (Scoping logic itself was unchanged by the refactor; this was a demo-scope
