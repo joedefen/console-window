@@ -17,6 +17,10 @@ fully backward compatible (`from console_window import ...` and
   non-destructive `flash()` behaviour (`tests/test_flash.py`).
 - `ConsoleWindow.flash_repaint` (repaint the underlying screen when `flash()`
   ends) and `ConsoleWindow.flash_poll_ms` (flash key-poll interval).
+- `console_window.textwidth` — a stdlib-only (`unicodedata`-based) display-cell
+  width toolkit (`char_width`, `string_width`, `truncate`, `ljust`/`rjust`,
+  `cell_to_index`, `wrap_ranges`/`wrap_position`/`index_at_cell`, `wrap`),
+  plus `tests/test_textwidth.py` and `tests/test_widechars.py`.
 - `console_window.geometry` — pure scroll/pick math extracted for testing:
   `cook_abut`, `compute_abut`, `calc_indicator`, `scroll_indicator_row`,
   `scroll_indicator_col`, `count_pickable_rows`, `find_pickable`.
@@ -58,6 +62,12 @@ fully backward compatible (`from console_window import ...` and
   on exit the underlying screen is repainted from the pads (`flash_repaint`)
   instead of being left blank; the pre-flash read timeout is restored on every
   exit path.
+- Width arithmetic is now **display-cell aware** (wide CJK/emoji = 2 cells,
+  combining marks/ZWJ = 0) throughout the render pipeline: `_add`, `draw`,
+  `highlight_picked`/`_draw_line_with_attrs` (highlight columns map to
+  code-point indices), `add_fancy_header`, `flash`, `alert`, and the `answer()`
+  display/editor (cell-accurate wrapping and cursor placement) — fixing
+  misalignment for the wide characters the demo already uses.
 - `render()` now bounds its transient-error retry loop by wall-clock time
   (`ConsoleWindow.render_retry_seconds`, default 2 s) instead of a fixed 128
   iterations, so a reproducible `curses.error` aborts quickly with the

@@ -23,7 +23,7 @@ from curses.textpad import Textbox, rectangle
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Callable
 
-from . import geometry, signals
+from . import geometry, signals, textwidth
 from .keys import NAVIGATION_KEYS
 from .opts import ConsoleWindowOpts
 from .theme import Theme
@@ -545,15 +545,15 @@ class ConsoleWindow:
                 _, x = ns.pad.getyx()
                 cols = self.get_pad_width() - x
                 if cols > 0:
-                    actual_text = text[0:cols]
+                    actual_text = textwidth.truncate(text, cols)
                     ns.pad.addstr(actual_text, attr)
                     ns.texts[row] += actual_text
-                    # Append to existing attrs list
+                    # Append to existing attrs list (counts are code points)
                     if row < len(ns.text_attrs):
                         ns.text_attrs[row].append((attr, len(actual_text)))
                     # Note: context not updated on resume
             else:
-                actual_text = text[0:self.cols]
+                actual_text = textwidth.truncate(text, self.cols)
                 ns.pad.addstr(row, 0, actual_text, attr)
                 ns.texts.append(actual_text)  # text only history
                 ns.text_attrs.append([(attr, len(actual_text))])  # run-length encoded
@@ -695,8 +695,8 @@ class ConsoleWindow:
         if current_text:
             result_sections.append((current_text, None))
 
-        # Calculate visible length of this header line
-        visible_length = sum(len(text) for text, attr in result_sections)
+        # Calculate visible length (in display cells) of this header line
+        visible_length = sum(textwidth.string_width(text) for text, attr in result_sections)
 
         # Check if this is the first header line
         is_first_header = (self.head.row_cnt == 0)
@@ -754,20 +754,19 @@ class ConsoleWindow:
             width = min(width, self.get_pad_width() - x)
             if width <= 0:
                 return
-            padlen = width - len(uni)
-            if padlen > 0:
-                if leftpad:
-                    uni = padlen * ' ' + uni
-                else:  # rightpad
-                    uni += padlen * ' '
-            text = uni[:width].encode('utf-8')
+            # Pad/truncate to exactly `width` display cells (wide-char safe).
+            uni = textwidth.rjust(uni, width) if leftpad else textwidth.ljust(uni, width)
+            text = uni.encode('utf-8')
         else:
             text = uni.encode('utf-8')
 
         try:
             while y >= len(ns.texts):
                 ns.texts.append('')
-            ns.texts[y] = ns.texts[y][:x].ljust(x) + uni + ns.texts[y][x+len(uni):]
+            existing = ns.texts[y]
+            left = textwidth.ljust(textwidth.truncate(existing, x), x)
+            right_start = textwidth.cell_to_index(existing, x + textwidth.string_width(uni))
+            ns.texts[y] = left + uni + existing[right_start:]
             ns.pad.addstr(y, x, text, text_attr)
         except curses.error:
             # curses errors on drawing the last character on the screen; ignore
@@ -780,7 +779,9 @@ class ConsoleWindow:
         Called internally during :py:meth:`render_once` when in pick mode.
         """
         def get_text(pos: int) -> str:
-            return self.body.texts[pos][0:self.cols] if pos < len(self.body.texts) else ''
+            if pos >= len(self.body.texts):
+                return ''
+            return textwidth.truncate(self.body.texts[pos], self.cols)
 
         def get_attrs(pos: int) -> list:
             return self.body.text_attrs[pos] if pos < len(self.body.text_attrs) else None
@@ -790,7 +791,7 @@ class ConsoleWindow:
         pos0, pos1 = self.last_pick_pos, self.pick_pos
         if pos0 == -2: # special flag to clear all formatting
             for row in range(self.body.row_cnt):
-                text = get_text(row).ljust(self.get_pad_width())
+                text = textwidth.ljust(get_text(row), self.get_pad_width())
                 attrs = get_attrs(row)
                 self._draw_line_with_attrs(self.body.pad, row, 0, text, attrs, extra_attr=None)
         if pos0 != pos1:
@@ -798,7 +799,7 @@ class ConsoleWindow:
                 for i in range(self.pick_size):
                     row_idx = pos0 + i
                     if row_idx < len(self.body.texts):
-                        text = get_text(row_idx).ljust(self.get_pad_width())
+                        text = textwidth.ljust(get_text(row_idx), self.get_pad_width())
                         attrs = get_attrs(row_idx)
                         self._draw_line_with_attrs(self.body.pad, row_idx, 0, text, attrs, extra_attr=None)
             if 0 <= pos1 < self.body.row_cnt:
@@ -808,7 +809,7 @@ class ConsoleWindow:
                         text = get_text(row_idx)
                         if self.mod_pick:
                             text = self.mod_pick(text)
-                        text = text.ljust(self.get_pad_width())
+                        text = textwidth.ljust(text, self.get_pad_width())
                         attrs = get_attrs(row_idx)
 
                         self._draw_line_with_attrs(self.body.pad, row_idx, 0, text, attrs,
@@ -836,28 +837,36 @@ class ConsoleWindow:
                 # Apply extra_attr only to the specified range
                 start_col, end_col = extra_attr_range
                 max_width = self.get_pad_width() - col_offset
-                text = text[0:max_width]
+                text = textwidth.truncate(text, max_width)
+                start_idx = textwidth.cell_to_index(text, start_col)
+                end_idx = textwidth.cell_to_index(text, end_col)
 
                 # Before range
                 if start_col > 0:
-                    pad.addstr(row, col_offset, text[0:start_col], curses.A_NORMAL)
+                    pad.addstr(row, col_offset, text[:start_idx], curses.A_NORMAL)
                 # Inside range
-                range_text = text[start_col:end_col]
+                range_text = text[start_idx:end_idx]
                 if range_text:
                     pad.addstr(row, col_offset + start_col, range_text, extra_attr)
                 # After range
-                if end_col < len(text):
-                    pad.addstr(row, col_offset + end_col, text[end_col:], curses.A_NORMAL)
+                if end_idx < len(text):
+                    pad.addstr(row, col_offset + end_col, text[end_idx:], curses.A_NORMAL)
             else:
                 final_attr = extra_attr if extra_attr is not None else curses.A_NORMAL
-                pad.addstr(row, col_offset, text[0:self.get_pad_width()-col_offset], final_attr)
+                pad.addstr(row, col_offset,
+                           textwidth.truncate(text, self.get_pad_width() - col_offset),
+                           final_attr)
             return
 
-        # Handle run-length encoded attributes with optional range highlighting
+        # Handle run-length encoded attributes with optional range highlighting.
+        # Attr run lengths are measured in code points while the highlight range
+        # is measured in display cells, so convert the range to code-point indices.
         if extra_attr_range:
             range_start, range_end = extra_attr_range
         else:
-            range_start, range_end = 0, len(text)
+            range_start, range_end = 0, textwidth.string_width(text)
+        range_start = textwidth.cell_to_index(text, range_start)
+        range_end = textwidth.cell_to_index(text, range_end)
 
         col = col_offset
         pos = 0
@@ -901,14 +910,14 @@ class ConsoleWindow:
                 if extra_attr is not None and in_highlight:
                     final_attr = part_attr | extra_attr
 
-                # Ensure we don't exceed pad width
+                # Ensure we don't exceed pad width (measured in display cells)
                 max_len = self.get_pad_width() - col
                 if max_len <= 0:
                     break
-                part_text = part_text[0:max_len]
+                part_text = textwidth.truncate(part_text, max_len)
 
                 pad.addstr(row, col, part_text, final_attr)
-                col += len(part_text)
+                col += textwidth.string_width(part_text)
 
             pos += count
 
@@ -1288,15 +1297,22 @@ class ConsoleWindow:
                     indicator = '*' if debug_redraw_toggle else '+'
                     self.scr.addstr(row0, col0, indicator)
 
+                prompt_display = textwidth.truncate(prompt, text_win_width)
                 if prompt_attr is not None:
-                    self.scr.addstr(row0, col0 + 1, prompt[:text_win_width], prompt_attr | curses.A_BOLD)
+                    self.scr.addstr(row0, col0 + 1, prompt_display, prompt_attr | curses.A_BOLD)
                 else:
-                    self.scr.addstr(row0, col0 + 1, prompt[:text_win_width])
+                    self.scr.addstr(row0, col0 + 1, prompt_display)
 
                 # --- Core Display and Scroll Indicator Logic ---
+                # Wrapping, the padding and the cursor highlight are all measured
+                # in display cells, so wide (CJK/emoji) input stays aligned.
+                input_text = "".join(input_string)
+                wrapped_ranges = textwidth.wrap_ranges(input_text, text_win_width)
+                total_wrapped_lines = len(wrapped_ranges)
 
-                wrapped_line_idx = cursor_pos // text_win_width
-                cursor_offset_on_wrapped_line = cursor_pos % text_win_width
+                wrapped_line_idx, cursor_cell = textwidth.wrap_position(
+                    input_text, cursor_pos, text_win_width)
+                wrapped_line_idx = min(wrapped_line_idx, total_wrapped_lines - 1)
 
                 # Vertical scroll adjustment
                 if wrapped_line_idx < v_scroll_top:
@@ -1304,84 +1320,45 @@ class ConsoleWindow:
                 elif wrapped_line_idx >= v_scroll_top + height:
                     v_scroll_top = wrapped_line_idx - height + 1
 
-                # Horizontal scroll start calculation
-                h_scroll_start = max(0, cursor_offset_on_wrapped_line - text_win_width + 1)
-
-                # Calculate total wrapped lines for overflow detection
-                total_wrapped_lines = (len(input_string) + text_win_width - 1) // text_win_width
-                if len(input_string) == 0:
-                    total_wrapped_lines = 1
-
-                # Display the visible lines
+                # Display the visible lines (hard-wrapped at text_win_width cells)
                 for r in range(height):
                     current_wrapped_line_idx = v_scroll_top + r
 
-                    start_char_idx = current_wrapped_line_idx * text_win_width
-                    end_char_idx = start_char_idx + text_win_width
-
-                    if start_char_idx > len(input_string) and r > 0:
-                        break
-
-                    raw_wrapped_line = "".join(input_string[start_char_idx:end_char_idx])
-                    line_to_display = raw_wrapped_line
-                    current_h_scroll_start = 0
-
-                    is_cursor_line = (current_wrapped_line_idx == wrapped_line_idx)
-
-                    if is_cursor_line:
-                        line_to_display = raw_wrapped_line[h_scroll_start:]
-                        current_h_scroll_start = h_scroll_start
-
                     # 1. Clear the content area (important for redraw integrity)
                     self.scr.addstr(row0 + 1 + r, col0 + 1, ' ' * text_win_width)
-                    # 2. Display the text
-                    self.scr.addstr(row0 + 1 + r, col0 + 1, line_to_display[:text_win_width])
 
-                    # --- SCROLL INDICATOR LOGIC ---
-                    if is_cursor_line:
-                        left_indicator = curses.ACS_VLINE
-                        right_indicator = curses.ACS_VLINE
+                    if current_wrapped_line_idx >= total_wrapped_lines:
+                        continue
 
-                        # Left Indicator Check
-                        if current_h_scroll_start > 0:
-                            # If content is scrolled right, show '<'
-                            left_indicator = ord('<')
+                    start_char_idx, end_char_idx = wrapped_ranges[current_wrapped_line_idx]
+                    raw_wrapped_line = input_text[start_char_idx:end_char_idx]
 
-                        # Right Indicator Check
-                        full_line_len = len(raw_wrapped_line)
-                        if full_line_len > current_h_scroll_start + text_win_width:
-                            # If there's more content to the right, show '>'
-                            right_indicator = ord('>')
+                    # 2. Display the text (padded to full width so wide chars align)
+                    self.scr.addstr(row0 + 1 + r, col0 + 1,
+                                    textwidth.ljust(raw_wrapped_line, text_win_width))
 
-                        # Draw Indicators (overwrite the border's vertical line)
-                        self.scr.addch(row0 + 1 + r, col0, left_indicator)
-                        self.scr.addch(row0 + 1 + r, col0 + text_win_width + 1, right_indicator)
+                    # --- SCROLL INDICATOR LOGIC (cursor line only) ---
+                    if current_wrapped_line_idx == wrapped_line_idx:
+                        # Vertical border markers. Hard wrapping never overflows a
+                        # line, so there is no horizontal-scroll marker.
+                        self.scr.addch(row0 + 1 + r, col0, curses.ACS_VLINE)
+                        self.scr.addch(row0 + 1 + r, col0 + text_win_width + 1, curses.ACS_VLINE)
 
-                        # Highlight the cursor position
-                        display_cursor_pos = cursor_pos - start_char_idx - current_h_scroll_start
-                        char_at_cursor = line_to_display[display_cursor_pos] if display_cursor_pos < len(line_to_display) else " "
-
-                        self.scr.addstr(row0 + 1 + r, col0 + 1 + display_cursor_pos,
+                        # Highlight the cursor (position measured in cells)
+                        char_at_cursor = input_text[cursor_pos] if cursor_pos < len(input_text) else " "
+                        self.scr.addstr(row0 + 1 + r, col0 + 1 + cursor_cell,
                                         char_at_cursor, curses.A_REVERSE)
 
                         # Set the actual hardware cursor
-                        self.scr.move(row0 + 1 + r, col0 + 1 + display_cursor_pos)
+                        self.scr.move(row0 + 1 + r, col0 + 1 + cursor_cell)
 
                 # --- CORNER OVERFLOW INDICATORS ---
-                # Upper left (one line down): show if scrolled down or scrolled right
-                has_content_above = v_scroll_top > 0
-                has_content_left = h_scroll_start > 0
-                if has_content_above or has_content_left:
+                # Upper left (one line down): content scrolled above
+                if v_scroll_top > 0:
                     self.scr.addch(row0 + 1, col0, '◀', curses.A_BOLD)
 
-                # Lower right (one line up): show if there's content below or to the right
-                has_content_below = (v_scroll_top + height) < total_wrapped_lines
-                # Check if cursor line has content beyond the visible window
-                cursor_line_start = wrapped_line_idx * text_win_width
-                cursor_line_end = cursor_line_start + text_win_width
-                cursor_line_full_len = min(len(input_string), cursor_line_end) - cursor_line_start
-                has_content_right = cursor_line_full_len > (h_scroll_start + text_win_width)
-                if has_content_below or has_content_right:
+                # Lower right (one line up): content below the window
+                if (v_scroll_top + height) < total_wrapped_lines:
                     self.scr.addch(row9 - 1, col0 + text_win_width + 1, '▶', curses.A_BOLD)
 
                 # Footer and refresh
@@ -1391,8 +1368,8 @@ class ConsoleWindow:
                     abort = ' or ESC to abort'
                 elif dialog_abort == 'ESC-ESC':
                     abort = ' or ESC-ESC to abort'
-                ending = f'{submit_key} to submit{abort}'
-                self.scr.addstr(row9, col0 + 1 + text_win_width - len(ending), ending[:text_win_width])
+                ending = textwidth.truncate(f'{submit_key} to submit{abort}', text_win_width)
+                self.scr.addstr(row9, col0 + 1 + text_win_width - textwidth.string_width(ending), ending)
                 self.scr.noutrefresh()
                 curses.doupdate()
                 curses.curs_set(0)  # Hide hardware cursor; reverse video shows position
@@ -1424,12 +1401,16 @@ class ConsoleWindow:
                         # Single ESC - just update time and continue
 
                 elif key == curses.KEY_UP:
-                    target_pos = cursor_pos - text_win_width
-                    cursor_pos = max(0, target_pos)
+                    target_pos = textwidth.index_at_cell(
+                        input_text, wrapped_ranges, wrapped_line_idx - 1, cursor_cell)
+                    if target_pos is not None:
+                        cursor_pos = target_pos
 
                 elif key == curses.KEY_DOWN:
-                    target_pos = cursor_pos + text_win_width
-                    cursor_pos = min(len(input_string), target_pos)
+                    target_pos = textwidth.index_at_cell(
+                        input_text, wrapped_ranges, wrapped_line_idx + 1, cursor_cell)
+                    if target_pos is not None:
+                        cursor_pos = target_pos
 
                 # ... [KEY_LEFT, KEY_RIGHT, HOME, END, edits, ASCII] ...
                 elif key == curses.KEY_LEFT: cursor_pos = max(0, cursor_pos - 1)
@@ -1507,7 +1488,7 @@ class ConsoleWindow:
         # render and everything below draws from self.rows/self.cols.
         self._set_screen_dims()
 
-        if self.rows < 3 or self.cols < len(message) + 4:
+        if self.rows < 3 or self.cols < textwidth.string_width(message) + 4:
             return
 
         # Remember the timeout in effect so it can be restored on exit (curses
@@ -1516,8 +1497,8 @@ class ConsoleWindow:
 
         def draw_flash() -> None:
             """Paint the centered message box over a cleared screen."""
-            # Calculate centered position
-            msg_len = min(len(message), self.cols - 4)
+            # Calculate centered position (widths measured in display cells).
+            msg_len = min(textwidth.string_width(message), self.cols - 4)
             row = self.rows // 2
             col = max((self.cols - msg_len - 2) // 2, 0)
 
@@ -1526,8 +1507,8 @@ class ConsoleWindow:
                 # Top border
                 self.scr.addstr(row - 1, col, '┌' + '─' * msg_len + '┐',
                                 curses.A_BOLD | curses.A_REVERSE)
-                # Message
-                self.scr.addstr(row, col, '│' + message[:msg_len] + '│',
+                # Message (padded to msg_len cells so the box stays aligned)
+                self.scr.addstr(row, col, '│' + textwidth.ljust(message, msg_len) + '│',
                                 curses.A_BOLD | curses.A_REVERSE)
                 # Bottom border
                 self.scr.addstr(row + 1, col, '└' + '─' * msg_len + '┘',
@@ -1597,23 +1578,23 @@ class ConsoleWindow:
 
         # Determine if title fits on box border, or needs to go inside
         footer_text = 'Press ENTER to ack'
-        title_available_width = content_width - len(footer_text) - 2
+        title_available_width = content_width - textwidth.string_width(footer_text) - 2
 
         lines = []
-        if len(title) > title_available_width:
+        if textwidth.string_width(title) > title_available_width:
             # Title too long - use "alert" as box title, put real title inside
             box_title = 'alert'
-            # Wrap the actual title
-            title_lines = textwrap.wrap(title, width=content_width)
+            # Wrap the actual title (cell-aware)
+            title_lines = textwidth.wrap(title, content_width)
             lines.extend(title_lines)
             lines.append('')  # Blank line separator
         else:
             # Title fits on box border
             box_title = title
 
-        # Wrap message content
+        # Wrap message content (cell-aware)
         if message:
-            message_lines = textwrap.wrap(message, width=content_width)
+            message_lines = textwidth.wrap(message, content_width)
             lines.extend(message_lines)
 
         # Calculate box dimensions - use full height with 1-cell border
@@ -1646,11 +1627,11 @@ class ConsoleWindow:
             self.scr.addstr(row, col0+1, ' '*(col9-col0-1))
 
         # Add title on top border
-        self.scr.addstr(row0, col0+1, box_title[:content_width], curses.A_REVERSE)
+        self.scr.addstr(row0, col0+1, textwidth.truncate(box_title, content_width), curses.A_REVERSE)
 
         # Add footer on bottom border
-        footer_pos = col0 + 1 + content_width - len(footer_text)
-        self.scr.addstr(row9, footer_pos, footer_text[:content_width])
+        footer_pos = col0 + 1 + content_width - textwidth.string_width(footer_text)
+        self.scr.addstr(row9, footer_pos, textwidth.truncate(footer_text, content_width))
 
         # Create pad for scrollable content
         pad = curses.newpad(max(content_height, 1), content_width + 1)
@@ -1658,7 +1639,7 @@ class ConsoleWindow:
         # Add lines to pad
         for idx, line in enumerate(lines):
             if idx < content_height:
-                pad.addstr(idx, 0, line[:content_width])
+                pad.addstr(idx, 0, textwidth.truncate(line, content_width))
 
         # Refresh screen
         self.scr.refresh()
