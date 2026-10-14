@@ -48,6 +48,12 @@ class ConsoleWindow:
     # quickly rather than freezing the UI for ~20 s.
     render_retry_seconds: float = 2.0
     render_retry_interval: float = 0.16  # seconds to wait between retries
+    # flash() repaints the underlying screen from the pads when it finishes, so
+    # callers no longer have to re-render afterwards. Set False to make flash()
+    # purely additive (e.g. when the caller is about to redraw anyway).
+    flash_repaint: bool = True
+    # How often (milliseconds) flash() polls for a key while the message is up.
+    flash_poll_ms: int = 50
     static_scr: curses.window | None = None
     static_win: ConsoleWindow | None = None  # Reference to active ConsoleWindow instance for theme updates
     nav_keys: str = """
@@ -1479,35 +1485,83 @@ class ConsoleWindow:
     def flash(self, message: str = '', duration: float = 2.0) -> None:
         """
         Displays a brief flash message in the center of the screen.
-        Auto-dismisses after duration seconds without requiring user input.
+
+        Unlike a raw ``time.sleep`` banner, the flash is **non-destructive and
+        interruptible**:
+
+        * the message auto-dismisses after ``duration`` seconds;
+        * pressing any key dismisses it early, and that key is preserved in
+          :attr:`pending_keys` so the next :meth:`prompt` still delivers it
+          (keys are no longer silently swallowed);
+        * a terminal resize while the message is up redraws it at the new size;
+        * on exit the underlying screen is repainted from the header/body pads
+          (unless :attr:`flash_repaint` is False), so callers do **not** have to
+          re-render afterwards to avoid leaving a blank screen.
 
         :param message: The message to display
-        :param duration: How long to show the message in seconds (default 0.5)
+        :param duration: How long to show the message in seconds (default 2.0)
+        :type message: str
+        :type duration: float
         """
+        # Refresh cached dimensions: a resize may have happened since the last
+        # render and everything below draws from self.rows/self.cols.
+        self._set_screen_dims()
 
         if self.rows < 3 or self.cols < len(message) + 4:
             return
 
-        # Calculate centered position
-        msg_len = min(len(message), self.cols - 4)
-        row = self.rows // 2
-        col = (self.cols - msg_len - 2) // 2
+        # Remember the timeout in effect so it can be restored on exit (curses
+        # windows expose no gettimeout(); _set_scr_timeout tracks the last value).
+        prev_timeout_ms = getattr(self, '_scr_timeout_ms', ConsoleWindow.timeout_ms)
 
-        # Draw a simple box with the message
-        self.scr.clear()
+        def draw_flash() -> None:
+            """Paint the centered message box over a cleared screen."""
+            # Calculate centered position
+            msg_len = min(len(message), self.cols - 4)
+            row = self.rows // 2
+            col = max((self.cols - msg_len - 2) // 2, 0)
+
+            self.scr.clear()
+            try:
+                # Top border
+                self.scr.addstr(row - 1, col, '┌' + '─' * msg_len + '┐',
+                                curses.A_BOLD | curses.A_REVERSE)
+                # Message
+                self.scr.addstr(row, col, '│' + message[:msg_len] + '│',
+                                curses.A_BOLD | curses.A_REVERSE)
+                # Bottom border
+                self.scr.addstr(row + 1, col, '└' + '─' * msg_len + '┘',
+                                curses.A_BOLD | curses.A_REVERSE)
+            except curses.error:
+                pass  # Ignore if terminal too small
+            self.scr.noutrefresh()
+            curses.doupdate()
+
+        draw_flash()
+
+        # Poll for keys instead of time.sleep()ing: the wait is interruptible,
+        # resize-aware, and never swallows an application key.
+        deadline = time.monotonic() + max(duration, 0.0)
         try:
-            # Top border
-            self.scr.addstr(row - 1, col, '┌' + '─' * msg_len + '┐', curses.A_BOLD | curses.A_REVERSE)
-            # Message
-            self.scr.addstr(row, col, '│' + message[:msg_len] + '│', curses.A_BOLD | curses.A_REVERSE)
-            # Bottom border
-            self.scr.addstr(row + 1, col, '└' + '─' * msg_len + '┘', curses.A_BOLD | curses.A_REVERSE)
-        except curses.error:
-            pass  # Ignore if terminal too small
-
-        self.scr.noutrefresh()
-        curses.doupdate()
-        time.sleep(duration)
+            self._set_scr_timeout(self.flash_poll_ms)
+            while time.monotonic() < deadline:
+                key = self.scr.getch()
+                if key == curses.ERR:
+                    continue
+                if key == curses.KEY_RESIZE or curses.is_term_resized(self.rows, self.cols):
+                    self._set_screen_dims()
+                    draw_flash()
+                    continue
+                # Any real key dismisses the flash early, but is preserved so
+                # the application still sees it via the next prompt() call.
+                self.pending_keys.add(key)
+                break
+        finally:
+            self._set_scr_timeout(prev_timeout_ms)
+            if self.flash_repaint:
+                # redraw=True forces a full pad repaint so the cleared screen is
+                # fully restored (blank areas elsewhere stay blank).
+                self.render(redraw=True)
 
 
     def alert(self, message: str = '', title: str = 'ALERT',
