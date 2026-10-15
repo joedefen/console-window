@@ -3,6 +3,16 @@
 All notable changes to `console-window` are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Removed
+- `console_window/ConsoleWindow.py`, the compatibility facade. Its filename
+  shadowed the `ConsoleWindow` class and violated PEP 8 (ruff `N999`). The
+  public API is unchanged for package-root imports (`from console_window import
+  ...`), which is the documented style; only the legacy
+  `from console_window.ConsoleWindow import ...` path is gone. The interactive
+  self-test moved to `python -m console_window._selftest`.
+
 ## [2.0.1]
 
 Internal overhaul — modularization and tests. The public API is unchanged and

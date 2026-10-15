@@ -1,48 +1,21 @@
 #!/usr/bin/env python3
-"""Compatibility facade for :mod:`console_window`.
+"""Interactive, TTY-only self-test for console_window.
 
-Historically this module held the entire implementation.  It has been split
-into focused modules (``window``, ``theme``, ``context``, ``opts``, ``widgets``,
-``spinner``, ``screens``, ``keys``, ``signals``, ``geometry``); this module
-re-exports the public names so existing imports keep working::
+This is the original development self-test, kept runnable as::
 
-    from console_window import ConsoleWindow, OptionSpinner, ...
-    from console_window.ConsoleWindow import ConsoleWindow, OptionSpinner, ...
+    python -m console_window._selftest
 
-Running ``python -m console_window.ConsoleWindow`` still launches the original
-interactive self-test.
+It drives a live window (pads, pick mode, prompts and help screens) and is
+deliberately not part of the importable public API or the TTY-free test suite.
 """
 
 import sys
 import time
 import traceback
 
-from .context import Context
-from .header import HeaderLine, Span
-from .keys import NAVIGATION_KEYS
 from .opts import ConsoleWindowOpts
-from .screens import HOME_ST, BasicHelpScreen, Screen, ScreenStack
 from .spinner import OptionSpinner
-from .theme import Theme
-from .widgets import IncrementalSearchBar, InlineConfirmation
 from .window import ConsoleWindow
-
-__all__ = [
-    'HOME_ST',
-    'NAVIGATION_KEYS',
-    'BasicHelpScreen',
-    'ConsoleWindow',
-    'ConsoleWindowOpts',
-    'Context',
-    'HeaderLine',
-    'IncrementalSearchBar',
-    'InlineConfirmation',
-    'OptionSpinner',
-    'Screen',
-    'ScreenStack',
-    'Span',
-    'Theme',
-]
 
 dump_str = None
 

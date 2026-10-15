@@ -1,6 +1,6 @@
 """Guards for the public API and import compatibility after the module split."""
 
-import importlib
+import importlib.util
 
 import pytest
 
@@ -33,24 +33,27 @@ def test_package_all_matches_names():
     assert set(PUBLIC_NAMES) == set(pkg.__all__)
 
 
-def test_compatibility_module_exports_all_public_names():
-    # The historical import path must keep working.
-    shim = importlib.import_module('console_window.ConsoleWindow')
-    for name in PUBLIC_NAMES:
-        assert hasattr(shim, name), f'console_window.ConsoleWindow.{name} missing'
+def test_legacy_consolewindow_module_is_removed():
+    # The module name shadowed the class and violated PEP 8 (ruff N999); it was
+    # removed now that every consumer imports from the package root.
+    assert importlib.util.find_spec('console_window.ConsoleWindow') is None
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module('console_window.ConsoleWindow')
 
 
-def test_root_and_shim_reference_same_objects():
-    pkg = importlib.import_module('console_window')
-    shim = importlib.import_module('console_window.ConsoleWindow')
-    assert pkg.ConsoleWindow is shim.ConsoleWindow
-    assert pkg.OptionSpinner is shim.OptionSpinner
-    assert pkg.Theme is shim.Theme
+def test_consolewindow_attribute_is_the_class_not_a_module():
+    import console_window
+    # `console_window.ConsoleWindow` is the class re-exported from window.py.
+    assert isinstance(console_window.ConsoleWindow, type)
+    assert console_window.ConsoleWindow.__module__ == 'console_window.window'
+    assert console_window.OptionSpinner.__module__ == 'console_window.spinner'
+    assert console_window.Theme.__module__ == 'console_window.theme'
 
 
 def test_new_submodules_exist():
-    for mod in ('window', 'theme', 'context', 'opts', 'widgets',
-                'spinner', 'screens', 'keys', 'signals', 'geometry', 'backend'):
+    for mod in ('window', 'theme', 'context', 'opts', 'widgets', 'spinner',
+                'screens', 'keys', 'signals', 'geometry', 'backend',
+                'header', 'textwidth'):
         importlib.import_module(f'console_window.{mod}')
 
 
