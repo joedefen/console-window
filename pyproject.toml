@@ -46,6 +46,12 @@ classifiers = [
     "Topic :: Software Development :: User Interfaces",
 ]
 
+[project.urls]
+Homepage = "https://github.com/joedefen/console-window"
+Repository = "https://github.com/joedefen/console-window"
+Issues = "https://github.com/joedefen/console-window/issues"
+Changelog = "https://github.com/joedefen/console-window/blob/main/CHANGELOG.md"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 

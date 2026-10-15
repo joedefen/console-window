@@ -5,6 +5,10 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- `[project.urls]` in `pyproject.toml` (Homepage / Repository / Issues /
+  Changelog) so published package metadata carries project links.
+
 ### Removed
 - `console_window/ConsoleWindow.py`, the compatibility facade. Its filename
   shadowed the `ConsoleWindow` class and violated PEP 8 (ruff `N999`). The
