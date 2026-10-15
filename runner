@@ -1,14 +1,4 @@
 #!/usr/bin/env python3
-"""
-runner - Development wrapper for console-window.
-
-Located in the top-level console-window directory.  Runs the bundled
-ConsoleWindow demo from source so that live edits are picked up (no install or
-build step required).
-
-Usage:
-    ./runner
-"""
 
 import os
 import runpy

@@ -1,5 +1,3 @@
-"""Unit tests for IncrementalSearchBar and InlineConfirmation (no TTY required)."""
-
 import curses
 
 from console_window import IncrementalSearchBar, InlineConfirmation
@@ -103,7 +101,6 @@ def test_inline_min_abbrev_auto_calculation():
     c.start(choices=['alpha', 'beta', 'gamma'], mode='choices')
     # unique at first char -> 1 + 1 = 2, capped at longest (5)
     assert c._get_effective_min_abbrev_chars() == 2
-
 
 # --- IncrementalSearchBar --------------------------------------------------
 

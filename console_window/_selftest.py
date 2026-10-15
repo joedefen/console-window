@@ -1,13 +1,4 @@
 #!/usr/bin/env python3
-"""Interactive, TTY-only self-test for console_window.
-
-This is the original development self-test, kept runnable as::
-
-    python -m console_window._selftest
-
-It drives a live window (pads, pick mode, prompts and help screens) and is
-deliberately not part of the importable public API or the TTY-free test suite.
-"""
 
 import sys
 import time
@@ -19,10 +10,8 @@ from .window import ConsoleWindow
 
 dump_str = None
 
-
 if __name__ == '__main__':
     def main() -> None:
-        """Test program"""
         def do_key(key: int) -> object:
             nonlocal spin, win, opts, pick_values
             value = spin.do_key(key, win)

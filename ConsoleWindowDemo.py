@@ -1,35 +1,4 @@
 #!/usr/bin/env python3
-"""
-ConsoleWindow Comprehensive Demo
-
-This demo showcases the main features of ConsoleWindow:
-- OptionSpinner for cycling through choices and triggering actions
-- Screen classes (Main, Help, History, Theme)
-- IncrementalSearchBar for inline filtering in header
-- InlineConfirmation for inline prompts
-- Theme/color support
-- Flash and answer methods for user feedback
-
-Usage:
-    .venv/bin/python3 demo.py
-
-    Or activate the venv first:
-    source .venv/bin/activate
-    python3 demo.py
-
-Features demonstrated:
-    - Press q to quit
-    - Navigate with arrow keys or j/k
-    - Press v to cycle view modes (compact/detailed/full)
-    - Press s to cycle sort options (name/uid/home)
-    - Press / to filter items (inline search bar)
-    - Press SPACE to select an item (inline confirmation)
-    - Press a to demo the answer() prompt
-    - Press l to demo the alert() popup
-    - Press ? for help screen
-    - Press h for history screen
-    - Press t for themes (and cycle themes with t on theme screen)
-"""
 # python: disable=invalid-name
 
 import curses as cs
@@ -60,7 +29,6 @@ SCREEN_NAMES = ('MAIN', 'HELP', 'HISTORY', 'THEMES')
 
 
 class DemoApp:
-    """Main demo application"""
     singleton = None
 
     def __init__(self):
@@ -142,13 +110,10 @@ class DemoApp:
                      genre='action', scope={MAIN_ST})
         self.win.set_handled_keys(spin.keys)
 
-
-
         # Load sample data from /etc/passwd
         self._load_sample_data()
 
     def _load_sample_data(self):
-        """Load sample items from /etc/passwd"""
         try:
             with open('/etc/passwd', 'r', encoding='utf-8') as f:
                 for line in f:
@@ -176,22 +141,18 @@ class DemoApp:
             ]
 
     def _on_filter_change(self, text):
-        """Update filter as user types"""
         self.filter_text = text.lower()
 
     def _on_filter_accept(self, text):
-        """Filter accepted (ENTER pressed)"""
         self.filter_text = text.lower()
         self.win.passthrough_mode = False
         self.win.pick_pos = 0  # Move to top
 
     def _on_filter_cancel(self, original_text):
-        """Filter cancelled (ESC pressed)"""
         self.filter_text = original_text.lower() if original_text else ''
         self.win.passthrough_mode = False
 
     def _start_operation(self):
-        """Start operation after confirmation"""
         if self.confirmation.identity:
             item_name = self.confirmation.identity
             # Mark item as "processed"
@@ -203,7 +164,6 @@ class DemoApp:
         self.win.passthrough_mode = False
 
     def handle_key(self, key):
-        """Handle global key presses - ORDER MATTERS!"""
         # Handle filter bar FIRST (highest priority when active)
         if self.filter_bar.is_active:
             if self.filter_bar.handle_key(key):
@@ -232,7 +192,6 @@ class DemoApp:
         return None
 
     def get_filtered_items(self):
-        """Get items matching current filter"""
         if not self.filter_text:
             return self.items
         return [item for item in self.items
@@ -240,7 +199,6 @@ class DemoApp:
                    self.filter_text in item['home'].lower()]
 
     def do_key(self, key):
-        """ TBD """
         if not key:
             return
         # handle Inline confirmation / filter
@@ -248,8 +206,6 @@ class DemoApp:
             self.spin.do_key(key, self.win)
 
     def main_loop(self):
-        """Main application loop"""
-
         while True:
             current_screen = self.screens[self.stack.curr.num]
             current_screen.draw_screen()
@@ -263,7 +219,6 @@ class DemoApp:
 
 
 class DemoScreen(Screen):
-    """Base screen class for demo screens"""
     app: DemoApp
 
     def __init__(self, name, app):
@@ -271,16 +226,13 @@ class DemoScreen(Screen):
         self.app = app
 
     def get_spinner(self):
-        """Get the option spinner"""
         return self.app.spin if hasattr(self.app, 'spin') else None
 
     def escape_ACTION(self):
-        """ go back """
         app = self.app
         app.stack.pop()
 
     def quit_ACTION(self):
-        """Quit the application"""
         app = self.app
         win = app.win
 
@@ -294,20 +246,16 @@ class DemoScreen(Screen):
         sys.exit(0)
 
 class MainScreen(DemoScreen):
-    """Main screen showing user list"""
-
     def __init__(self, app):
         super().__init__('MAIN', app)
 
     def draw_screen(self):
-        """Draw main screen with item list"""
         self.app.win.set_pick_mode(True)
 
         self._draw_body()
         self._draw_header()
 
     def _draw_body(self):
-        """  Display items """
         app = self.app
         items = app.get_filtered_items()
         by = app.opts.sort_by
@@ -389,20 +337,17 @@ class MainScreen(DemoScreen):
         app.win.add_header(header, attr=cs.A_DIM | cs.A_UNDERLINE)
 
     def filter_ACTION(self):
-        """Activate filter search bar"""
         app = self.app
         app.filter_bar.start(app.filter_text)
         app.win.passthrough_mode = True
 
     def clear_filter_ACTION(self):
-        """Clear filter search bar"""
         app = self.app
         app.filter_bar._text = ''
         app.filter_text = ''
         app.win.pick_pos = 0
 
     def select_ACTION(self):
-        """Select/process the current item with confirmation"""
         app = self.app
         ctx = app.win.get_picked_context()
         if ctx and hasattr(ctx, 'item'):
@@ -413,7 +358,6 @@ class MainScreen(DemoScreen):
             app.win.passthrough_mode = True
 
     def answer_demo_ACTION(self):
-        """Demo the answer() method"""
         app = self.app
         win = app.win
         response = win.answer('Enter your name (or ESC to cancel): ',
@@ -424,7 +368,6 @@ class MainScreen(DemoScreen):
             win.flash('Cancelled', duration=1.0)
 
     def alert_demo_ACTION(self):
-        """Demo the alert() method - shows a simple modal message box"""
         ctx = self.app.win.get_picked_context()
         if ctx and hasattr(ctx, 'item'):
             item = ctx.item
@@ -443,30 +386,24 @@ class MainScreen(DemoScreen):
             )
 
     def help_screen_ACTION(self):
-        """Navigate to help screen"""
         self.app.stack.push(HELP_ST, self.app.win.pick_pos)
 
     def history_screen_ACTION(self):
-        """Navigate to history screen"""
         app = self.app
         win = app.win
         app.stack.push(HISTORY_ST, win.pick_pos)
 
     def theme_screen_ACTION(self):
-        """Navigate to theme screen"""
         app = self.app
         win = app.win
         app.stack.push(THEME_ST, win.pick_pos)
 
 
 class HelpScreen(DemoScreen):
-    """Help screen"""
-
     def __init__(self, app):
         super().__init__('HELP', app)
 
     def draw_screen(self):
-        """Draw help screen"""
         app = self.app
         app.win.set_pick_mode(False)
 
@@ -478,13 +415,10 @@ class HelpScreen(DemoScreen):
 
 
 class HistoryScreen(DemoScreen):
-    """History screen showing operation log"""
-
     def __init__(self, app):
         super().__init__('HISTORY', app)
 
     def draw_screen(self):
-        """Draw history screen"""
         app = self.app
         app.win.set_pick_mode(False)
 
@@ -512,13 +446,10 @@ class HistoryScreen(DemoScreen):
 
 
 class ThemeScreen(DemoScreen):
-    """Theme selection screen"""
-
     def __init__(self, app):
         super().__init__('THEMES', app)
 
     def draw_screen(self):
-        """Draw theme screen with color samples"""
         app = self.app
         win = app.win
         win.set_pick_mode(False)
@@ -549,7 +480,6 @@ class ThemeScreen(DemoScreen):
             win.add_body(line, attr=cs.color_pair(color_id))
 
     def theme_screen(self):
-        """Cycle to next theme"""
         themes = Theme.list_all()
         current = Theme.get_current()
         idx = themes.index(current) if current in themes else -1
@@ -557,7 +487,6 @@ class ThemeScreen(DemoScreen):
         Theme.set(next_theme)
 
 def main():
-    """Main entry point"""
     try:
         app = DemoApp()
         app.main_loop()
@@ -567,7 +496,6 @@ def main():
             app.win.stop_curses()
         print('exception: ', str(bummer))
         print(traceback.format_exc())
-
 
 if __name__ == '__main__':
     main()

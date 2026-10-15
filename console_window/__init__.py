@@ -1,10 +1,3 @@
-"""console-window: a robust curses wrapper for building TUIs.
-
-Public API, importable from the package root::
-
-    from console_window import ConsoleWindow, ConsoleWindowOpts, OptionSpinner
-"""
-
 __version__ = "2.0.1"
 
 from .context import Context

@@ -1,5 +1,3 @@
-"""Unit tests for the pure scroll/pick geometry helpers (no TTY required)."""
-
 from console_window import geometry
 
 # --- cook_abut -------------------------------------------------------------
@@ -27,7 +25,6 @@ def test_cook_abut_mixed_list_uses_extremes():
 def test_cook_abut_unparseable():
     assert geometry.cook_abut("nope") is None
 
-
 # --- compute_abut ----------------------------------------------------------
 
 def test_compute_abut_explicit_wins():
@@ -40,7 +37,6 @@ def test_compute_abut_auto_for_transient():
 
 def test_compute_abut_none_when_no_transient():
     assert geometry.compute_abut(None, 0) is None
-
 
 # --- calc_indicator --------------------------------------------------------
 
@@ -60,7 +56,6 @@ def test_calc_indicator_clamps_at_start_and_end():
 def test_calc_indicator_interior_is_bounded():
     ind = geometry.calc_indicator(50, 0, 100, 0, 80, max_scroll_pos=100)
     assert 1 <= ind <= 79
-
 
 # --- scroll indicator row/col ---------------------------------------------
 
@@ -82,7 +77,6 @@ def test_scroll_indicator_col_not_scrollable():
         pick_mode=False, pick_pos=0, scroll_pos=0, max_scroll_pos=0,
         body_row_cnt=10, cols=80) == -1
 
-
 # --- count_pickable_rows ---------------------------------------------------
 
 def test_count_pickable_rows_skips_non_pickable():
@@ -97,7 +91,6 @@ def test_count_pickable_rows_backwards():
     pickable = {0, 1, 4, 5, 6}
     is_pickable = lambda r: r in pickable
     assert geometry.count_pickable_rows(is_pickable, 7, 5, 2, direction=-1) == 1
-
 
 # --- find_pickable ---------------------------------------------------------
 

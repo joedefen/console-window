@@ -1,13 +1,3 @@
-"""TTY-free tests for :meth:`ConsoleWindow.render`'s wall-clock retry cap.
-
-Regression guard for the audit finding that ``render()`` retried a fixed 128
-times (~20 s of frozen UI) before giving up on a *persistent* ``curses.error``.
-The retry window is now bounded by ``render_retry_seconds``.
-
-The window is built with ``object.__new__`` so ``__init__`` never enters curses,
-and ``render_once`` is replaced on the instance so no real drawing happens.
-"""
-
 import curses
 import time
 from types import SimpleNamespace
@@ -20,8 +10,6 @@ from console_window.window import ConsoleWindow
 
 
 class FakeScreen:
-    """Minimal stand-in for a ``curses.window``."""
-
     def __init__(self, rows=24, cols=80):
         self._rows = rows
         self._cols = cols
@@ -34,7 +22,6 @@ class FakeScreen:
 
 
 def make_window(scr):
-    """Build a ConsoleWindow without running ``__init__`` (no curses)."""
     win = object.__new__(ConsoleWindow)
     win.scr = scr
     win.opts = ConsoleWindowOpts()

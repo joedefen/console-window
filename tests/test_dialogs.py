@@ -1,10 +1,3 @@
-"""TTY-free tests for the ``answer()``/``alert()`` robustness fixes.
-
-These drive :class:`ConsoleWindow` with a fake curses screen (constructed via
-``object.__new__`` so ``__init__`` never enters curses), which lets us assert on
-timeout bookkeeping and dimension refresh without a terminal.
-"""
-
 import curses
 
 import pytest
@@ -26,6 +19,8 @@ _ACS_STANDINS = {
 
 
 @pytest.fixture(autouse=True)
+
+
 def _provide_acs_constants(monkeypatch):
     for name, value in _ACS_STANDINS.items():
         if not hasattr(window_mod.curses, name):
@@ -33,8 +28,6 @@ def _provide_acs_constants(monkeypatch):
 
 
 class FakeScreen:
-    """Minimal stand-in for a ``curses.window``."""
-
     def __init__(self, rows=24, cols=80, keys=()):
         self._rows = rows
         self._cols = cols
@@ -75,14 +68,12 @@ class FakeTextbox:
 
 
 def make_window(scr, rows=None, cols=None, **opts_kwargs):
-    """Build a ConsoleWindow without running ``__init__`` (no curses)."""
     win = object.__new__(ConsoleWindow)
     win.scr = scr
     win.opts = ConsoleWindowOpts(**opts_kwargs)
     win.rows = scr._rows if rows is None else rows
     win.cols = scr._cols if cols is None else cols
     return win
-
 
 # --- the mod_key -> 7 Textbox sentinel -------------------------------------
 
@@ -94,7 +85,6 @@ def test_textbox_sentinel_maps_enter_to_seven():
 def test_textbox_sentinel_passes_other_keys_through():
     for key in (ord('a'), 27, curses.KEY_BACKSPACE, 32, 126):
         assert _textbox_edit_on_enter(key) == key
-
 
 # --- answer() timeout restoration ------------------------------------------
 
@@ -143,7 +133,6 @@ def test_answer_leaves_timeout_untouched_when_terminal_too_small():
     assert win.answer() is None
     assert scr.timeouts == []
     assert win._scr_timeout_ms == 999
-
 
 # --- alert() dimension refresh ---------------------------------------------
 

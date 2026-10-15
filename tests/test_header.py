@@ -1,10 +1,3 @@
-"""TTY-free tests for explicit header tokens (AUDIT.md §4.14).
-
-Covers the pure legacy scanner (:func:`parse_fancy_header`) and the explicit
-:class:`HeaderLine` builder, plus a headless render assertion proving that a
-:class:`HeaderLine` never misinterprets data as markup.
-"""
-
 import curses
 
 import pytest
@@ -17,7 +10,6 @@ from console_window.widgets import IncrementalSearchBar
 from console_window.window import ConsoleWindow
 
 KEY_ATTR = curses.A_UNDERLINE | curses.A_BOLD  # 'Underline' mode key styling
-
 
 # --- pure legacy scanner ----------------------------------------------------
 
@@ -46,7 +38,6 @@ def test_parse_leaves_embedded_lowercase_key_unstyled():
     # Only UPPERCASE 'WORD:' tokens were matched by the legacy scanner.
     spans = parse_fancy_header('l:alert')
     assert spans == [Span('l:alert', PLAIN)]
-
 
 # --- explicit builder -------------------------------------------------------
 
@@ -79,14 +70,12 @@ def test_builder_extend():
 def test_builder_ignores_empty_text():
     assert HeaderLine().text('').key('').spans == []
 
-
 # --- anti-misfire: structured text is never restyled ------------------------
 
 def test_plain_text_that_looks_like_markup_is_not_restyled():
     # '/etc/passwd' and 'NOTE:' look like markup but are declared as plain text.
     line = HeaderLine().text('/etc/passwd NOTE:ok [v]')
     assert line.spans == [Span('/etc/passwd NOTE:ok [v]', PLAIN)]
-
 
 # --- IncrementalSearchBar.as_header_line ------------------------------------
 
@@ -120,7 +109,6 @@ def test_get_display_string_keeps_prefix_spacer():
     disp = bar.get_display_string(prefix='/')
     assert disp.startswith('/ ')
     assert '█' in disp
-
 
 # --- headless render --------------------------------------------------------
 
@@ -177,5 +165,7 @@ def test_add_fancy_header_off_adds_raw_line():
 
 
 @pytest.mark.parametrize('role', [KEY, LABEL, SEARCH, PLAIN])
+
+
 def test_resolve_header_attr_off_is_plain(role):
     assert ConsoleWindow._resolve_header_attr(role, 'Off', None) is None

@@ -1,11 +1,3 @@
-"""ConsoleWindow: the curses pad/scroll/pick engine.
-
-This module contains the high-level window class.  Related pieces live in
-sibling modules: :mod:`console_window.theme`, :mod:`console_window.context`,
-:mod:`console_window.opts`, :mod:`console_window.keys`,
-:mod:`console_window.signals`, :mod:`console_window.geometry`, and
-:mod:`console_window.header` (explicit header-span tokens).
-"""
 # pylint: disable=too-many-instance-attributes,too-many-arguments
 # pylint: disable=invalid-name,broad-except,too-many-branches,global-statement
 # pylint: disable=line-too-long,too-many-statements,too-many-locals
@@ -17,14 +9,13 @@ from __future__ import annotations
 import atexit
 import curses
 import itertools
-import os
 import textwrap
 import time
 import weakref
 from collections.abc import Iterable
 from curses.textpad import Textbox, rectangle
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Callable, ClassVar
 
 from . import geometry, signals, textwidth
 from .backend import CursesBackend, RenderBackend
@@ -35,7 +26,6 @@ from .theme import Theme
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .context import Context
-
 
 # Live ConsoleWindow instances, held by weak reference and keyed by creation
 # order.  This replaces the old process-wide ``ConsoleWindow.static_scr`` /
@@ -52,14 +42,12 @@ _ATEXIT_REGISTERED = False
 
 
 def _register_window(win: ConsoleWindow) -> None:
-    """Track ``win`` in the live-window registry (weak reference)."""
     key = next(_WINDOW_IDS)
     win._registry_key = key
     _WINDOWS[key] = win
 
 
 def _unregister_window(win: ConsoleWindow) -> None:
-    """Drop ``win`` from the live-window registry, if present."""
     key = getattr(win, '_registry_key', None)
     if key is not None:
         _WINDOWS.pop(key, None)
@@ -67,7 +55,6 @@ def _unregister_window(win: ConsoleWindow) -> None:
 
 
 def _register_atexit() -> None:
-    """Register the one-shot process cleanup exactly once."""
     global _ATEXIT_REGISTERED
     if not _ATEXIT_REGISTERED:
         atexit.register(ConsoleWindow.stop_all)
@@ -75,15 +62,6 @@ def _register_atexit() -> None:
 
 
 class ConsoleWindow:
-    """
-    A high-level wrapper around the curses library that provides a structured
-    interface for terminal applications.
-
-    The screen is divided into a fixed-size **Header** area and a scrollable
-    **Body** area, separated by an optional line. It manages screen
-    initialization, cleanup, rendering, and user input including scrolling
-    and an optional item selection (pick) mode.
-    """
     timeout_ms: int = 2000
     # render() retries transient curses errors within this wall-clock budget
     # (seconds) instead of a fixed iteration count, so a persistent error aborts
@@ -112,26 +90,6 @@ class ConsoleWindow:
                  pick_mode: bool | None = None, pick_size: int | None = None,
                  mod_pick: Callable | None = None, ctrl_c_terminates: bool | None = None,
                  backend: RenderBackend | None = None) -> None:
-        """
-        Initializes the ConsoleWindow, sets up internal pads, and starts curses mode.
-
-        :param opts: ConsoleWindowOpts instance with all options (recommended)
-        :param head_line: DEPRECATED - use opts. If True, draws a horizontal line between header and body.
-        :param head_rows: DEPRECATED - use opts. Maximum capacity of internal header pad.
-        :param body_rows: DEPRECATED - use opts. Maximum capacity of internal body pad.
-        :param body_cols: DEPRECATED - use opts. Maximum width for content pads.
-        :param keys: DEPRECATED - use opts. Collection of key codes returned by prompt.
-        :param pick_mode: DEPRECATED - use opts. If True, enables item highlighting/selection.
-        :param pick_size: DEPRECATED - use opts. Number of rows highlighted as single pick unit.
-        :param mod_pick: DEPRECATED - use opts. Optional callable to modify highlighted text.
-        :param ctrl_c_terminates: DEPRECATED - use opts. If True, Ctrl-C terminates; if False, returns key 3.
-        :param backend: Optional :class:`~console_window.backend.RenderBackend`. Defaults to
-                        :class:`~console_window.backend.CursesBackend`; pass a
-                        :class:`~console_window.backend.HeadlessBackend` to build the window
-                        without a terminal (used by tests).
-        :type opts: ConsoleWindowOpts or None
-        :type backend: RenderBackend or None
-        """
         # Enforce either opts OR deprecated parameters, not both
         has_opts = opts is not None
         has_deprecated = any(p is not None for p in [head_line, head_rows, body_rows, body_cols,
@@ -227,14 +185,6 @@ class ConsoleWindow:
         self.calc()
 
     def set_handled_keys(self, keys: object) -> None:
-        """
-        Set or update the keys that prompt() should return to the application.
-
-        This allows keys to be set after initialization, breaking circular dependencies.
-
-        :param keys: Collection of key codes (set, list, or OptionSpinner with .keys attribute)
-        :type keys: set or list or OptionSpinner
-        """
         if hasattr(keys, 'keys'):
             # It's an OptionSpinner or similar object
             self.handled_keys = set(keys.keys) if keys.keys else set()
@@ -244,15 +194,6 @@ class ConsoleWindow:
             self.handled_keys = set()
 
     def set_demo_mode(self, enabled: bool | None) -> bool:
-        """
-        Enable or disable demo mode. Passing None will toggle it.
-
-        When demo mode is enabled, the last non-navigation key pressed is shown
-        in reverse video at the end of the first header line.
-
-        :param enabled: True to enable demo mode, False to disable
-        :type enabled: bool
-        """
         if enabled is None: # toggle if not explicit
             self.opts.demo_mode = not (self.opts.demo_mode)
         else:
@@ -262,14 +203,6 @@ class ConsoleWindow:
         return self.opts.demo_mode
 
     def _format_key_for_demo(self, key: int) -> str:
-        """
-        Format a key code as a 3-character string for demo mode display.
-
-        :param key: The key code to format
-        :type key: int
-        :returns: 3-character string representation of the key
-        :rtype: str
-        """
         # Special multi-character keys
         if key == 27:  # ESC
             return 'ESC'
@@ -291,23 +224,9 @@ class ConsoleWindow:
             return '???'
 
     def get_pad_width(self) -> int:
-        """
-        Returns the maximum usable column width for content drawing.
-
-        :returns: The width in columns.
-        :rtype: int
-        """
         return min(self.cols-1, self.body_cols)
 
     def _is_pickable(self, row: int) -> bool:
-        """
-        Check if a body row is pickable.
-
-        :param row: The row index to check
-        :type row: int
-        :returns: True if the row is pickable, False otherwise
-        :rtype: bool
-        """
         if row < 0 or row >= len(self.body.contexts):
             return True  # Default to pickable if no context
         ctx = self.body.contexts[row]
@@ -316,31 +235,10 @@ class ConsoleWindow:
         return ctx.pickable
 
     def _count_pickable_rows(self, start_pos: int, count: int, direction: int = 1) -> int:
-        """
-        Move through count pickable rows from start_pos in the given direction.
-
-        This skips non-pickable rows (DECOR, TRANSIENT) so that page-up/down
-        moves through a consistent number of actual content rows.
-
-        :param start_pos: Starting row position
-        :param count: Number of pickable rows to count
-        :param direction: 1 for forward, -1 for backward
-        :type start_pos: int
-        :type count: int
-        :type direction: int
-        :returns: The row position after counting pickable rows
-        :rtype: int
-        """
         return geometry.count_pickable_rows(
             self._is_pickable, self.body.row_cnt, start_pos, count, direction)
 
     def get_picked_context(self) -> Context | None:
-        """
-        Get the Context object for the currently picked line.
-
-        :returns: The Context object for the current pick position, or None
-        :rtype: Context or None
-        """
         if not self.pick_mode:
             return None
         if self.pick_pos < 0 or self.pick_pos >= len(self.body.contexts):
@@ -348,30 +246,9 @@ class ConsoleWindow:
         return self.body.contexts[self.pick_pos]
 
     def _cook_abut(self, abut_value: geometry.AbutSpec) -> tuple[int, int] | None:
-        """
-        Parse the abut attribute into [before, after] format.
-
-        :param abut_value: Can be:
-            - negative int: lines before (e.g., -3 -> [-3, 0])
-            - positive int: lines after (e.g., 7 -> [0, 7])
-            - list/tuple [before, after]: explicit range (e.g., [-5, 3])
-        :returns: Tuple (before, after) where before <= 0 and after >= 0
-        :rtype: tuple
-        """
         return geometry.cook_abut(abut_value)
 
     def _get_effective_abut(self, row: int) -> geometry.AbutSpec:
-        """
-        Get the effective abut value for a row, either explicit or auto-calculated.
-
-        For rows with TRANSIENT children, automatically calculates abut to show
-        all consecutive TRANSIENT rows below.
-
-        :param row: The row index to get abut for
-        :type row: int
-        :returns: Abut value (can be int, list, or None) suitable for _cook_abut()
-        :rtype: int or list or None
-        """
         if row < 0 or row >= len(self.body.contexts):
             return None
 
@@ -395,45 +272,19 @@ class ConsoleWindow:
 
     @staticmethod
     def get_nav_keys_blurb() -> str:
-        """
-        Returns a multiline string describing the default navigation key bindings
-        for use in help screens.
-
-        :returns: String of navigation keys.
-        :rtype: str
-        """
         return textwrap.dedent(ConsoleWindow.nav_keys)
 
     def _set_screen_dims(self) -> bool:
-        """Recalculate dimensions based on current terminal size."""
         rows, cols = self.scr.getmaxyx()
         same = bool(rows == self.rows and cols == self.cols)
         self.rows, self.cols = rows, cols
         return same
 
     def _set_scr_timeout(self, ms: int) -> None:
-        """Set the screen read timeout (milliseconds) and remember it.
-
-        ``curses.window`` has no ``gettimeout()``, so the last value applied is
-        tracked on the instance.  :meth:`answer` uses this to restore whatever
-        timeout was in effect before the dialog ran, rather than resetting to
-        the class default.
-
-        :param ms: Read timeout in milliseconds (negative = block forever,
-                   0 = non-blocking).
-        :type ms: int
-        """
         self._scr_timeout_ms = ms
         self.scr.timeout(ms)
 
     def _check_min_size(self) -> bool:
-        """
-        Checks if current terminal size meets minimum requirements.
-        Blocks with a message if too small, waiting for resize or ESC.
-
-        :returns: True if size is acceptable, False if user pressed ESC to abort
-        :rtype: bool
-        """
         min_cols, min_rows = self.opts.min_cols_rows
 
         while self.rows < min_rows or self.cols < min_cols:
@@ -458,34 +309,14 @@ class ConsoleWindow:
         return True
 
     def _start_curses(self) -> object:
-        """
-        Enter curses via this window's backend and return the main screen.
-
-        This sits behind the injectable :class:`~console_window.backend.RenderBackend`
-        so a headless backend can be swapped in for tests; it no longer stores the
-        screen in a process-wide singleton.
-        """
         return self._init_screen(self._backend)
 
     @classmethod
     def start_curses(cls, backend: RenderBackend | None = None) -> object:
-        """
-        Performs the Curses initial setup: initscr, noecho, cbreak, curs_set(0),
-        keypad(1), sets up the timeout, and initializes color pairs.
-
-        Kept as a compatibility hook that does *not* require constructing a
-        window.  It records no global "current screen" state: each window owns
-        its own screen (``self.scr``).
-
-        :param backend: Optional render backend; defaults to a real terminal.
-        :returns: The main screen object.
-        :rtype: _curses.window
-        """
         return cls._init_screen(backend if backend is not None else CursesBackend())
 
     @staticmethod
     def _init_screen(backend: RenderBackend) -> object:
-        """Shared screen setup used by both ``__init__`` and ``start_curses``."""
         _register_atexit()
         signals.setup_ctrl_c()
         scr = backend.start(ConsoleWindow.timeout_ms)
@@ -495,8 +326,10 @@ class ConsoleWindow:
             curses.start_color()
             curses.use_default_colors()  # Allow -1 for default terminal colors
 
-            # Select theme from environment variable or default
-            theme_name = os.environ.get('DWIPE_THEME', 'default')
+            # Select theme from the Theme registry (single source of truth) or
+            # fall back to the default.  No environment variable is involved:
+            # Theme.get_current() is the one place the active theme lives.
+            theme_name = Theme.get_current() or 'default'
             if theme_name not in Theme.THEMES:
                 theme_name = 'default'
             Theme.set_active(theme_name)
@@ -523,17 +356,6 @@ class ConsoleWindow:
         return scr
 
     def set_pick_mode(self, on: bool = True, pick_size: int = 1) -> None:
-        """
-        Toggles the item highlighting/selection mode for the body area.
-
-        If pick mode is enabled or the pick size changes, it forces a redraw
-        of all body lines to clear any previous highlighting attributes.
-
-        :param on: If True, enables pick mode.
-        :param pick_size: The number of consecutive rows to highlight as one unit.
-        :type on: bool
-        :type pick_size: int
-        """
         was_on, was_size = self.pick_mode, self.pick_size
         self.pick_mode = bool(on)
         self.pick_size = max(pick_size, 1)
@@ -541,14 +363,6 @@ class ConsoleWindow:
             self.last_pick_pos = -2 # indicates need to clear them all
 
     def set_pick_range(self, start_col: int | None = None, end_col: int | None = None) -> None:
-        """
-        Set the column range for pick highlighting.
-
-        :param start_col: Starting column (inclusive), None for full line
-        :param end_col: Ending column (exclusive), None for full line
-        :type start_col: int or None
-        :type end_col: int or None
-        """
         if start_col is None or end_col is None:
             self.opts.pick_range = None
         else:
@@ -558,14 +372,6 @@ class ConsoleWindow:
             self.last_pick_pos = -2
 
     def stop_curses(self) -> None:
-        """
-        Tear down *this* window's screen and de-register it.
-
-        Restores the terminal to its pre-curses state (on the real backend) and
-        releases the screen.  Because teardown is now per-instance, tearing down
-        one window leaves the others alone — it no longer nulls process-wide
-        singletons.  Safe to call more than once.
-        """
         scr = getattr(self, 'scr', None)
         if scr is None:
             return
@@ -578,7 +384,6 @@ class ConsoleWindow:
             signals.teardown_ctrl_c()
 
     def __enter__(self) -> ConsoleWindow:
-        """Support ``with ConsoleWindow(...) as win:`` for deterministic teardown."""
         return self
 
     def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
@@ -586,28 +391,20 @@ class ConsoleWindow:
 
     @classmethod
     def active_windows(cls) -> list[ConsoleWindow]:
-        """Return the live :class:`ConsoleWindow` instances in creation order."""
         return list(_WINDOWS.values())
 
     @classmethod
     def primary_window(cls) -> ConsoleWindow | None:
-        """Return the most recently created live window, or ``None``."""
         windows = cls.active_windows()
         return windows[-1] if windows else None
 
     @classmethod
     def stop_all(cls) -> None:
-        """Tear down every live window (registered once with :mod:`atexit`)."""
         for win in cls.active_windows():
             win.stop_curses()
 
     @classmethod
     def _apply_default_colors(cls, pair: int) -> None:
-        """Apply the default background color pair to every live window.
-
-        Used by :meth:`Theme.set` so a theme change reaches *all* windows rather
-        than a single global "static" one.
-        """
         for win in cls.active_windows():
             scr = getattr(win, 'scr', None)
             if scr is not None:
@@ -622,12 +419,6 @@ class ConsoleWindow:
                     pass
 
     def calc(self) -> bool:
-        """
-        Recalculates the screen geometry, viewable areas, and maximum scroll position.
-
-        :returns: True if the screen geometry has changed, False otherwise.
-        :rtype: bool
-        """
         same = self._set_screen_dims()
         self.head.view_cnt = min(self.rows - self.hor_line_cnt, self.head.row_cnt)
         self.scroll_view_size = self.rows - self.head.view_cnt - self.hor_line_cnt
@@ -637,7 +428,6 @@ class ConsoleWindow:
 
     def _add(self, ns: SimpleNamespace, text: str, attr: int | None = None,
              resume: bool = False, context: Context | None = None) -> None:
-        """Internal method to add text to a pad using its namespace."""
         is_body = bool(id(ns) == id(self.body))
         if ns.row_cnt < ns.rows:
             row = max(ns.row_cnt - (1 if resume else 0), 0)
@@ -671,63 +461,14 @@ class ConsoleWindow:
 
     def add_header(self, text: str, attr: int | None = None, resume: bool = False,
                    context: Context | None = None) -> None:
-        """
-        Adds a line of text to the header pad.
-
-        :param text: The text to add.
-        :param attr: Curses attribute (e.g., curses.A_BOLD).
-        :param resume: If True, adds the text to the current, incomplete line.
-        :param context: Optional Context object with metadata for this line.
-        :type text: str
-        :type attr: int or None
-        :type resume: bool
-        :type context: Context or None
-        """
         self._add(self.head, text, attr, resume, context)
 
     def add_body(self, text: str, attr: int | None = None, resume: bool = False,
                  context: Context | None = None) -> None:
-        """
-        Adds a line of text to the body pad.
-
-        :param text: The text to add.
-        :param attr: Curses attribute (e.g., curses.A_BOLD).
-        :param resume: If True, adds the text to the current, incomplete line.
-        :param context: Optional Context object with metadata for this line.
-        :type text: str
-        :type attr: int or None
-        :type resume: bool
-        :type context: Context or None
-        """
         self._add(self.body, text, attr, resume, context)
 
     def add_fancy_header(self, line: str | HeaderLine, mode: str = 'Underline',
                          search_pattern_attr: int | None = None) -> None:
-        """
-        Adds a header line, with optional "fancy" key/label markup.
-
-        .. note::
-            The *string* form re-parses its content at render time and can
-            misfire on data that merely looks like markup (``AUDIT.md`` §4.14).
-            Prefer :meth:`add_header_line` with a :class:`HeaderLine`, which
-            declares intent explicitly.  A :class:`HeaderLine` (or any iterable
-            of :class:`~console_window.header.Span`) is also accepted here and is
-            never re-parsed.
-
-        The legacy string form behaves exactly as before:
-
-        * ``[x]text`` → ``x`` is styled and the brackets removed,
-        * ``WORD:`` (at a token boundary) → ``WORD`` is styled,
-        * ``/pattern`` (at a token boundary) → the pattern is highlighted,
-        * the first word is bolded.
-
-        :param line: A legacy string to parse, or a :class:`HeaderLine` of spans.
-        :param mode: Formatting mode: ``'Off'``, ``'Underline'`` or ``'Reverse'``.
-        :param search_pattern_attr: Optional custom attribute for ``/pattern``.
-        :type line: str or HeaderLine
-        :type mode: str
-        :type search_pattern_attr: int or None
-        """
         if isinstance(line, str):
             if mode == 'Off':
                 # Legacy: no markup processing, add the raw line unchanged.
@@ -741,27 +482,11 @@ class ConsoleWindow:
     def add_header_line(self, header_line: HeaderLine | Iterable[Span],
                         mode: str = 'Underline',
                         search_pattern_attr: int | None = None) -> None:
-        """
-        Adds a header line built from explicit :class:`HeaderLine` spans.
-
-        Unlike :meth:`add_fancy_header`, nothing is guessed from the text: the
-        caller declares which runs are keys/labels/search patterns, so data can
-        never be misinterpreted as markup.
-
-        :param header_line: A :class:`HeaderLine` (or any iterable of
-                            :class:`~console_window.header.Span`).
-        :param mode: Formatting mode: ``'Off'``, ``'Underline'`` or ``'Reverse'``.
-        :param search_pattern_attr: Optional custom attribute for search spans.
-        :type header_line: HeaderLine or Iterable[Span]
-        :type mode: str
-        :type search_pattern_attr: int or None
-        """
         self._emit_header_spans(list(header_line), mode, search_pattern_attr)
 
     @staticmethod
     def _resolve_header_attr(role: str, mode: str,
                              search_pattern_attr: int | None) -> int | None:
-        """Map a span :data:`role` plus format ``mode`` to a curses attribute."""
         if mode == 'Off' or role == PLAIN:
             return None
         if role == LABEL:
@@ -777,7 +502,6 @@ class ConsoleWindow:
 
     def _emit_header_spans(self, spans: Iterable[Span], mode: str,
                            search_pattern_attr: int | None = None) -> None:
-        """Render :class:`Span` tokens to the header pad (shared by both entry points)."""
         result_sections = [
             (span.text, self._resolve_header_attr(span.role, mode, search_pattern_attr))
             for span in spans
@@ -809,27 +533,6 @@ class ConsoleWindow:
 
     def draw(self, y: int, x: int, text: str, text_attr: int | None = None,
              width: int | None = None, leftpad: bool = False, header: bool = False) -> None:
-        """
-        Draws the given text at a specific position (row=y, col=x) on a pad.
-
-        This method is useful for structured or overlay drawing, but is less
-        efficient than the standard add/put methods.
-
-        :param y: The row index on the pad.
-        :param x: The column index on the pad.
-        :param text: The text to draw (str or bytes).
-        :param text_attr: Optional curses attribute.
-        :param width: Optional fixed width for the drawn text (pads/truncates).
-        :param leftpad: If True and ``width`` is used, left-pads with spaces.
-        :param header: If True, draws to the header pad, otherwise to the body pad.
-        :type y: int
-        :type x: int
-        :type text: str or bytes
-        :type text_attr: int or None
-        :type width: int or None
-        :type leftpad: bool
-        :type header: bool
-        """
         ns = self.head if header else self.body
         text_attr = text_attr if text_attr else curses.A_NORMAL
         if y < 0 or y >= ns.rows or x < 0 or x >= ns.cols:
@@ -862,182 +565,166 @@ class ConsoleWindow:
 
 
     def highlight_picked(self) -> None:
-        """
-        Highlights the current selection and un-highlights the previous one.
-        Called internally during :py:meth:`render_once` when in pick mode.
-        """
-        def get_text(pos: int) -> str:
-            if pos >= len(self.body.texts):
-                return ''
-            return textwidth.truncate(self.body.texts[pos], self.cols)
-
-        def get_attrs(pos: int) -> list:
-            return self.body.text_attrs[pos] if pos < len(self.body.text_attrs) else None
-
         if not self.pick_mode:
             return
+
         pos0, pos1 = self.last_pick_pos, self.pick_pos
-        if pos0 == -2: # special flag to clear all formatting
-            for row in range(self.body.row_cnt):
-                text = textwidth.ljust(get_text(row), self.get_pad_width())
-                attrs = get_attrs(row)
-                self._draw_line_with_attrs(self.body.pad, row, 0, text, attrs, extra_attr=None)
+        if pos0 == -2:  # special flag to clear all formatting
+            self._redraw_rows(range(self.body.row_cnt))
         if pos0 != pos1:
             if 0 <= pos0 < self.body.row_cnt:
-                for i in range(self.pick_size):
-                    row_idx = pos0 + i
-                    if row_idx < len(self.body.texts):
-                        text = textwidth.ljust(get_text(row_idx), self.get_pad_width())
-                        attrs = get_attrs(row_idx)
-                        self._draw_line_with_attrs(self.body.pad, row_idx, 0, text, attrs, extra_attr=None)
+                self._redraw_rows(range(pos0, pos0 + self.pick_size))
             if 0 <= pos1 < self.body.row_cnt:
-                for i in range(self.pick_size):
-                    row_idx = pos1 + i
-                    if row_idx < len(self.body.texts):
-                        text = get_text(row_idx)
-                        if self.mod_pick:
-                            text = self.mod_pick(text)
-                        text = textwidth.ljust(text, self.get_pad_width())
-                        attrs = get_attrs(row_idx)
-
-                        self._draw_line_with_attrs(self.body.pad, row_idx, 0, text, attrs,
-                                                  extra_attr=self.opts.pick_attr,
-                                                  extra_attr_range=self.opts.pick_range)
+                self._draw_picked_rows(range(pos1, pos1 + self.pick_size))
                 self.last_pick_pos = pos1
+
+    def _body_text(self, pos: int) -> str:
+        if pos >= len(self.body.texts):
+            return ''
+        return textwidth.truncate(self.body.texts[pos], self.cols)
+
+    def _body_attrs(self, pos: int) -> list | None:
+        return self.body.text_attrs[pos] if pos < len(self.body.text_attrs) else None
+
+    def _redraw_rows(self, rows: Iterable[int]) -> None:
+        for row_idx in rows:
+            if row_idx < len(self.body.texts):
+                text = textwidth.ljust(self._body_text(row_idx), self.get_pad_width())
+                self._draw_line_with_attrs(self.body.pad, row_idx, 0, text,
+                                           self._body_attrs(row_idx), extra_attr=None)
+
+    def _draw_picked_rows(self, rows: Iterable[int]) -> None:
+        for row_idx in rows:
+            if row_idx < len(self.body.texts):
+                text = self._body_text(row_idx)
+                if self.mod_pick:
+                    text = self.mod_pick(text)
+                text = textwidth.ljust(text, self.get_pad_width())
+                self._draw_line_with_attrs(self.body.pad, row_idx, 0, text,
+                                           self._body_attrs(row_idx),
+                                           extra_attr=self.opts.pick_attr,
+                                           extra_attr_range=self.opts.pick_range)
 
     def _draw_line_with_attrs(self, pad: object, row: int, col_offset: int, text: str,
                               attrs: list, extra_attr: int | None = None,
                               extra_attr_range: tuple | None = None) -> None:
-        """
-        Draw a line using run-length encoded attributes.
-
-        :param pad: The pad to draw on
-        :param row: Row index in the pad
-        :param col_offset: Starting column
-        :param text: The text to draw
-        :param attrs: Run-length encoded attributes [(attr, count), ...] or None
-        :param extra_attr: Additional attribute to OR with each segment (e.g., A_REVERSE for highlighting)
-        :param extra_attr_range: [start_col, end_col] range to apply extra_attr; None applies to entire line
-        """
         if not attrs:
-            # No stored attributes - draw with normal or extra_attr
-            if extra_attr is not None and extra_attr_range:
-                # Apply extra_attr only to the specified range
-                start_col, end_col = extra_attr_range
-                max_width = self.get_pad_width() - col_offset
-                text = textwidth.truncate(text, max_width)
-                start_idx = textwidth.cell_to_index(text, start_col)
-                end_idx = textwidth.cell_to_index(text, end_col)
-
-                # Before range
-                if start_col > 0:
-                    pad.addstr(row, col_offset, text[:start_idx], curses.A_NORMAL)
-                # Inside range
-                range_text = text[start_idx:end_idx]
-                if range_text:
-                    pad.addstr(row, col_offset + start_col, range_text, extra_attr)
-                # After range
-                if end_idx < len(text):
-                    pad.addstr(row, col_offset + end_col, text[end_idx:], curses.A_NORMAL)
-            else:
-                final_attr = extra_attr if extra_attr is not None else curses.A_NORMAL
-                pad.addstr(row, col_offset,
-                           textwidth.truncate(text, self.get_pad_width() - col_offset),
-                           final_attr)
+            self._draw_plain_line(pad, row, col_offset, text, extra_attr, extra_attr_range)
             return
 
         # Handle run-length encoded attributes with optional range highlighting.
         # Attr run lengths are measured in code points while the highlight range
         # is measured in display cells, so convert the range to code-point indices.
-        if extra_attr_range:
-            range_start, range_end = extra_attr_range
-        else:
-            range_start, range_end = 0, textwidth.string_width(text)
-        range_start = textwidth.cell_to_index(text, range_start)
-        range_end = textwidth.cell_to_index(text, range_end)
+        range_start, range_end = self._highlight_range(text, extra_attr_range)
 
         col = col_offset
         pos = 0
         for attr, count in attrs:
             if pos >= len(text):
                 break
-
-            # Get the segment for this attribute run
-            segment = text[pos:pos+count]
-            segment_start = pos
-            segment_end = pos + len(segment)
-
-            # Split segment into parts: before range, in range, after range
-            parts = []
-
-            # Part before highlight range
-            if segment_start < range_start and segment_end > segment_start:
-                before_end = min(segment_end, range_start)
-                before_text = text[segment_start:before_end]
-                parts.append((before_text, attr, False))
-
-            # Part inside highlight range
-            in_range_start = max(segment_start, range_start)
-            in_range_end = min(segment_end, range_end)
-            if in_range_start < in_range_end:
-                in_range_text = text[in_range_start:in_range_end]
-                parts.append((in_range_text, attr, True))
-
-            # Part after highlight range
-            if segment_end > range_end and segment_start < segment_end:
-                after_start = max(segment_start, range_end)
-                after_text = text[after_start:segment_end]
-                parts.append((after_text, attr, False))
-
-            # Draw each part
-            for part_text, part_attr, in_highlight in parts:
-                if not part_text:
-                    continue
-
-                final_attr = part_attr
-                if extra_attr is not None and in_highlight:
-                    final_attr = part_attr | extra_attr
-
-                # Ensure we don't exceed pad width (measured in display cells)
-                max_len = self.get_pad_width() - col
-                if max_len <= 0:
-                    break
-                part_text = textwidth.truncate(part_text, max_len)
-
-                pad.addstr(row, col, part_text, final_attr)
-                col += textwidth.string_width(part_text)
-
+            col = self._draw_attr_run(pad, row, col, text, attr, pos, count,
+                                      range_start, range_end, extra_attr)
             pos += count
 
+    def _draw_plain_line(self, pad: object, row: int, col_offset: int, text: str,
+                         extra_attr: int | None, extra_attr_range: tuple | None) -> None:
+        if extra_attr is not None and extra_attr_range:
+            # Apply extra_attr only to the specified range
+            start_col, end_col = extra_attr_range
+            max_width = self.get_pad_width() - col_offset
+            text = textwidth.truncate(text, max_width)
+            start_idx = textwidth.cell_to_index(text, start_col)
+            end_idx = textwidth.cell_to_index(text, end_col)
+
+            # Before range
+            if start_col > 0:
+                pad.addstr(row, col_offset, text[:start_idx], curses.A_NORMAL)
+            # Inside range
+            range_text = text[start_idx:end_idx]
+            if range_text:
+                pad.addstr(row, col_offset + start_col, range_text, extra_attr)
+            # After range
+            if end_idx < len(text):
+                pad.addstr(row, col_offset + end_col, text[end_idx:], curses.A_NORMAL)
+        else:
+            final_attr = extra_attr if extra_attr is not None else curses.A_NORMAL
+            pad.addstr(row, col_offset,
+                       textwidth.truncate(text, self.get_pad_width() - col_offset),
+                       final_attr)
+
+    @staticmethod
+    def _highlight_range(text: str, extra_attr_range: tuple | None) -> tuple[int, int]:
+        if extra_attr_range:
+            range_start, range_end = extra_attr_range
+        else:
+            range_start, range_end = 0, textwidth.string_width(text)
+        return (textwidth.cell_to_index(text, range_start),
+                textwidth.cell_to_index(text, range_end))
+
+    def _draw_attr_run(self, pad: object, row: int, col: int, text: str, attr: int,
+                       pos: int, count: int, range_start: int, range_end: int,
+                       extra_attr: int | None) -> int:
+        segment = text[pos:pos+count]
+        segment_start = pos
+        segment_end = pos + len(segment)
+
+        parts = self._split_segment(text, segment_start, segment_end,
+                                    range_start, range_end, attr)
+        for part_text, part_attr, in_highlight in parts:
+            if not part_text:
+                continue
+
+            final_attr = part_attr
+            if extra_attr is not None and in_highlight:
+                final_attr = part_attr | extra_attr
+
+            # Ensure we don't exceed pad width (measured in display cells)
+            max_len = self.get_pad_width() - col
+            if max_len <= 0:
+                break
+            part_text = textwidth.truncate(part_text, max_len)
+
+            pad.addstr(row, col, part_text, final_attr)
+            col += textwidth.string_width(part_text)
+        return col
+
+    @staticmethod
+    def _split_segment(text: str, segment_start: int, segment_end: int,
+                       range_start: int, range_end: int, attr: int) -> list:
+        parts = []
+
+        # Part before highlight range
+        if segment_start < range_start and segment_end > segment_start:
+            before_end = min(segment_end, range_start)
+            parts.append((text[segment_start:before_end], attr, False))
+
+        # Part inside highlight range
+        in_range_start = max(segment_start, range_start)
+        in_range_end = min(segment_end, range_end)
+        if in_range_start < in_range_end:
+            parts.append((text[in_range_start:in_range_end], attr, True))
+
+        # Part after highlight range
+        if segment_end > range_end and segment_start < segment_end:
+            after_start = max(segment_start, range_end)
+            parts.append((text[after_start:segment_end], attr, False))
+
+        return parts
+
     def _scroll_indicator_row(self) -> int:
-        """Internal helper to compute the scroll indicator row position."""
         return geometry.scroll_indicator_row(
             self.scroll_pos, self.max_scroll_pos, self.scroll_view_size,
             self.body_base, self.rows)
 
     def _scroll_indicator_col(self) -> int:
-        """Internal helper to compute the scroll indicator column position."""
         return geometry.scroll_indicator_col(
             self.pick_mode, self.pick_pos, self.scroll_pos,
             self.max_scroll_pos, self.body.row_cnt, self.cols)
 
     def _calc_indicator(self, pos: int, pos0: int, pos9: int, ind0: int, ind9: int) -> int:
-        """Internal helper to calculate indicator position based on content position."""
         return geometry.calc_indicator(pos, pos0, pos9, ind0, ind9, self.max_scroll_pos)
 
     def render(self, redraw: bool = False) -> None:
-        """
-        Draws the content of the pads to the visible screen.
-
-        :param redraw: If True, forces a complete redraw of all pads and the screen
-                    to clear terminal corruption.
-
-        This method wraps :py:meth:`render_once` in a loop to handle spurious
-        ``curses.error`` exceptions that can occur during screen resizing.  The
-        retry window is bounded by wall-clock time (:attr:`render_retry_seconds`)
-        rather than a fixed iteration count, so a persistent/reproducible error
-        fails fast with a diagnostic dump instead of freezing the UI.
-        """
         deadline = time.monotonic() + ConsoleWindow.render_retry_seconds
         while time.monotonic() < deadline:
             try:
@@ -1069,15 +756,6 @@ class ConsoleWindow:
 
 
     def fix_positions(self, delta: int = 0) -> None:
-        """
-        Ensures the vertical scroll and pick positions are within valid boundaries,
-        adjusting the scroll position to keep the pick cursor visible.
-
-        :param delta: An optional change in position (e.g., from key presses).
-        :type delta: int
-        :returns: The indent amount for the body content (1 if pick mode is active, 0 otherwise).
-        :rtype: int
-        """
         self.calc()
 
         # Save old pick position to check for abut constraints before applying delta
@@ -1097,106 +775,14 @@ class ConsoleWindow:
             ind_pos = 0 if self.pick_mode else self._scroll_indicator_row()
             if self.pick_mode:
                 # First, get abut range from the PREVIOUS pick position (before delta was applied)
-                abut_range = None
-                if 0 <= old_pick_pos < len(self.body.contexts):
-                    effective_abut = self._get_effective_abut(old_pick_pos)
-                    if effective_abut is not None:
-                        cooked = self._cook_abut(effective_abut)
-                        if cooked:
-                            before, after = cooked
-                            # Calculate the valid line range based on old position
-                            min_line = max(0, old_pick_pos + before)
-                            max_line = min(self.body.row_cnt - 1, old_pick_pos + after)
-                            abut_range = (min_line, max_line)
+                abut_range = self._abut_range_at(old_pick_pos)
 
-                # Clamp pick_pos to valid bounds
-                self.pick_pos = max(self.pick_pos, 0)
-                self.pick_pos = min(self.pick_pos, self.body.row_cnt-1)
-
-                # If abut range exists, further constrain pick_pos within that range
-                if abut_range:
-                    min_line, max_line = abut_range
-                    self.pick_pos = max(self.pick_pos, min_line)
-                    self.pick_pos = min(self.pick_pos, max_line)
-
-                if self.pick_pos >= 0:
-                    self.pick_pos -= (self.pick_pos % self.pick_size)
-
-                # Ensure pick_pos is on a pickable line (skip DECOR lines)
-                if not self._is_pickable(self.pick_pos):
-                    self.pick_pos = geometry.find_pickable(
-                        self._is_pickable, self.body.row_cnt, self.pick_pos)
+                self._clamp_pick_pos(abut_range)
 
                 # Re-check for abut in the CURRENT pick position for scroll adjustment
-                abut_range = None
-                effective_abut = self._get_effective_abut(self.pick_pos)
-                if effective_abut is not None:
-                    cooked = self._cook_abut(effective_abut)
-                    if cooked:
-                        before, after = cooked
-                        # Calculate the valid line range: [min_line, max_line]
-                        min_line = max(0, self.pick_pos + before)
-                        max_line = min(self.body.row_cnt - 1, self.pick_pos + after)
-                        abut_range = (min_line, max_line)
+                abut_range = self._abut_range_at(self.pick_pos)
 
-                if self.pick_pos < 0:
-                    self.scroll_pos = 0
-                elif abut_range:
-                    # Apply abut constraints: "after trumps before"
-                    min_line, max_line = abut_range
-                    range_size = max_line - min_line + 1
-
-                    if range_size <= self.scroll_view_size:
-                        # Entire range fits: minimal scrolling to keep it visible
-                        # Only scroll if the range would go off-screen
-                        viewport_bottom = self.scroll_pos + self.scroll_view_size - 1
-
-                        # Check if the range would go below viewport (prioritize "after" lines)
-                        if max_line > viewport_bottom:
-                            # Scroll down just enough to show max_line at the bottom
-                            self.scroll_pos = max_line - self.scroll_view_size + 1
-                        # Check if the range would go above viewport (but allow scrolling to show DECOR above)
-                        elif min_line < self.scroll_pos and self.pick_pos < self.scroll_pos:
-                            # Only enforce min_line constraint if pick_pos would go off top
-                            # This allows scrolling up to show DECOR lines above the abut range
-                            self.scroll_pos = min_line
-                        # else: range is already fully visible, don't scroll
-                    else:
-                        # Range doesn't fit: minimal scrolling to keep picked line + abut lines visible
-                        # Priority: keep "after" lines visible (they take precedence over "before" lines)
-
-                        # Calculate the bottom of the current viewport
-                        viewport_bottom = self.scroll_pos + self.scroll_view_size - 1
-
-                        # Check if picked line + after lines would go below viewport
-                        if max_line > viewport_bottom:
-                            # Need to scroll down: position so max_line is at bottom of viewport
-                            self.scroll_pos = max_line - self.scroll_view_size + 1
-                        # Check if picked line + before lines would go above viewport
-                        elif min_line < self.scroll_pos and self.pick_pos < self.scroll_pos:
-                            # Need to scroll up: position so min_line is at top of viewport
-                            # But allow scrolling further up to show DECOR lines
-                            self.scroll_pos = min_line
-                        # else: picked line + abut range is already fully visible, don't scroll
-
-                        # Ensure we don't scroll too far down (beyond max_line)
-                        # but allow scrolling above min_line to show DECOR headers
-                        if self.pick_pos < self.scroll_pos:
-                            # pick_pos would be off top - enforce min_line
-                            self.scroll_pos = max(self.scroll_pos, min_line)
-                        max_scroll = max_line - self.scroll_view_size + 1
-                        self.scroll_pos = min(self.scroll_pos, max_scroll)
-                elif self.scroll_pos > self.pick_pos:
-                    # picked line would be above viewport - scroll up to show it
-                    self.scroll_pos = self.pick_pos
-                elif self.pick_pos >= self.scroll_pos + self.scroll_view_size:
-                    # picked line would be below viewport bottom - scroll down to show it
-                    self.scroll_pos = self.pick_pos - (self.scroll_view_size - self.pick_size)
-                # Note: We allow scroll_pos < pick_pos to show DECOR lines above the picked item
-
-                # Final clamping
-                self.scroll_pos = max(self.scroll_pos, 0)
-                self.scroll_pos = min(self.scroll_pos, self.max_scroll_pos)
+                self._adjust_scroll_for_abut(abut_range)
                 indent = 1
             else:
                 self.scroll_pos = max(self.scroll_pos, 0)
@@ -1205,47 +791,90 @@ class ConsoleWindow:
                 # indent = 1 if self.body.row_cnt > self.scroll_view_size else 0
         return indent
 
+    def _abut_range_at(self, pos: int) -> tuple[int, int] | None:
+        if not 0 <= pos < len(self.body.contexts):
+            return None
+        effective_abut = self._get_effective_abut(pos)
+        if effective_abut is None:
+            return None
+        cooked = self._cook_abut(effective_abut)
+        if not cooked:
+            return None
+        before, after = cooked
+        min_line = max(0, pos + before)
+        max_line = min(self.body.row_cnt - 1, pos + after)
+        return (min_line, max_line)
+
+    def _clamp_pick_pos(self, abut_range: tuple[int, int] | None) -> None:
+        self.pick_pos = max(self.pick_pos, 0)
+        self.pick_pos = min(self.pick_pos, self.body.row_cnt-1)
+
+        # If abut range exists, further constrain pick_pos within that range
+        if abut_range:
+            min_line, max_line = abut_range
+            self.pick_pos = max(self.pick_pos, min_line)
+            self.pick_pos = min(self.pick_pos, max_line)
+
+        if self.pick_pos >= 0:
+            self.pick_pos -= (self.pick_pos % self.pick_size)
+
+        # Ensure pick_pos is on a pickable line (skip DECOR lines)
+        if not self._is_pickable(self.pick_pos):
+            self.pick_pos = geometry.find_pickable(
+                self._is_pickable, self.body.row_cnt, self.pick_pos)
+
+    def _adjust_scroll_for_abut(self, abut_range: tuple[int, int] | None) -> None:
+        if self.pick_pos < 0:
+            self.scroll_pos = 0
+        elif abut_range:
+            # Apply abut constraints: "after trumps before"
+            self._scroll_to_fit_abut(abut_range)
+        elif self.scroll_pos > self.pick_pos:
+            # picked line would be above viewport - scroll up to show it
+            self.scroll_pos = self.pick_pos
+        elif self.pick_pos >= self.scroll_pos + self.scroll_view_size:
+            # picked line would be below viewport bottom - scroll down to show it
+            self.scroll_pos = self.pick_pos - (self.scroll_view_size - self.pick_size)
+        # Note: We allow scroll_pos < pick_pos to show DECOR lines above the picked item
+
+        # Final clamping
+        self.scroll_pos = max(self.scroll_pos, 0)
+        self.scroll_pos = min(self.scroll_pos, self.max_scroll_pos)
+
+    def _scroll_to_fit_abut(self, abut_range: tuple[int, int]) -> None:
+        min_line, max_line = abut_range
+        range_size = max_line - min_line + 1
+        viewport_bottom = self.scroll_pos + self.scroll_view_size - 1
+
+        # Scroll down if the range would go below the viewport (prioritize "after"
+        # lines), else scroll up if it would go above it (allowing DECOR lines above).
+        if max_line > viewport_bottom:
+            self.scroll_pos = max_line - self.scroll_view_size + 1
+        elif min_line < self.scroll_pos and self.pick_pos < self.scroll_pos:
+            self.scroll_pos = min_line
+
+        if range_size > self.scroll_view_size:
+            # Range doesn't fit: keep the picked line visible and don't scroll past
+            # max_line, while still allowing scrolling above min_line for DECOR.
+            if self.pick_pos < self.scroll_pos:
+                self.scroll_pos = max(self.scroll_pos, min_line)
+            max_scroll = max_line - self.scroll_view_size + 1
+            self.scroll_pos = min(self.scroll_pos, max_scroll)
+
     def render_once(self, redraw: bool = False) -> None:
-        """
-        Performs the actual rendering of header, horizontal line, and body pads.
-        Handles pick highlighting and scroll bar drawing.
-
-        :param redraw: If True, forces a complete redraw of all pads and the screen
-                    to clear terminal corruption.
-        """
-
         # --- 1. Preparation and Conditional Redrawwin ---
-
         if redraw:
-            # Mark the main screen and all pads as requiring a full repaint.
-            self.scr.redrawwin()
-            self.head.pad.redrawwin()
-            self.body.pad.redrawwin()
+            self._mark_pads_for_redraw()
 
         indent = self.fix_positions()
 
         # --- 2. Screen Drawing (Highlighting, Scrollbar, Separator) ---
 
         if indent > 0 and self.pick_mode:
-            self.scr.vline(self.body_base, 0, ' ', self.scroll_view_size)
-            if self.pick_pos >= 0:
-                pos = self.pick_pos - self.scroll_pos + self.body_base
-                self.scr.addstr(pos, 0, '>', curses.A_REVERSE)
+            self._draw_pick_gutter()
 
         if self.head.view_cnt < self.rows:
-            self.scr.hline(self.head.view_cnt, 0, curses.ACS_HLINE, self.cols)
-            ind_pos = self._scroll_indicator_col()
-            if ind_pos >= 0:
-                bot, cnt = ind_pos, 1
-                if not self.opts.single_cell_scroll_indicator and 0 < ind_pos < self.cols-1:
-                    # Proportional range indicator
-                    width = self.scroll_view_size/self.body.row_cnt*self.cols
-                    bot = max(round(ind_pos-width/2), 1)
-                    top = min(round(ind_pos+width/2), self.cols-1)
-                    cnt = max(top - bot, 1)
-
-                for idx in range(bot, bot+cnt):
-                    self.scr.addch(self.head.view_cnt, idx, curses.ACS_HLINE, curses.A_REVERSE)
+            self._draw_separator_and_indicator()
 
         # Instead of self.scr.refresh(), use pnoutrefresh/doupdate for efficiency.
         # The 'redrawwin' above handles the forced repaint, so we just call 'noutrefresh'.
@@ -1253,6 +882,41 @@ class ConsoleWindow:
 
         # --- 3. Pad Drawing (Body and Head) ---
 
+        self._refresh_pads(indent)
+
+        # --- 4. Final Update (Only one physical screen update) ---
+        curses.doupdate()
+
+    def _mark_pads_for_redraw(self) -> None:
+        self.scr.redrawwin()
+        self.head.pad.redrawwin()
+        self.body.pad.redrawwin()
+
+    def _draw_pick_gutter(self) -> None:
+        self.scr.vline(self.body_base, 0, ' ', self.scroll_view_size)
+        if self.pick_pos >= 0:
+            pos = self.pick_pos - self.scroll_pos + self.body_base
+            self.scr.addstr(pos, 0, '>', curses.A_REVERSE)
+
+    def _draw_separator_and_indicator(self) -> None:
+        self.scr.hline(self.head.view_cnt, 0, curses.ACS_HLINE, self.cols)
+        ind_pos = self._scroll_indicator_col()
+        if ind_pos < 0:
+            return
+        bot, cnt = self._scroll_indicator_span(ind_pos)
+        for idx in range(bot, bot+cnt):
+            self.scr.addch(self.head.view_cnt, idx, curses.ACS_HLINE, curses.A_REVERSE)
+
+    def _scroll_indicator_span(self, ind_pos: int) -> tuple[int, int]:
+        if self.opts.single_cell_scroll_indicator or not 0 < ind_pos < self.cols-1:
+            return ind_pos, 1
+        # Proportional range indicator
+        width = self.scroll_view_size/self.body.row_cnt*self.cols
+        bot = max(round(ind_pos-width/2), 1)
+        top = min(round(ind_pos+width/2), self.cols-1)
+        return bot, max(top - bot, 1)
+
+    def _refresh_pads(self, indent: int) -> None:
         if self.body_base < self.rows:
             if self.pick_mode:
                 self.highlight_picked()
@@ -1270,71 +934,24 @@ class ConsoleWindow:
                     0, indent, last_row, self.cols-1
                 )
 
-        # --- 4. Final Update (Only one physical screen update) ---
-        curses.doupdate()
-
 
     def answer(self, prompt: str = 'Type string [then Enter]', seed: str = '', width: int = 80,
-               height: int = 5, esc_abort: bool | None = None, prompt_attr: int | None = None) -> str | None:
-        """
-        Presents a modal dialog box with working horizontal scroll indicators.
-        Uses opts.dialog_abort to determine ESC behavior and opts.dialog_return for submit key.
 
-        :param esc_abort: DEPRECATED. Use opts.dialog_abort instead. If provided, overrides opts.dialog_abort.
-        :param prompt_attr: Optional curses attribute for the prompt text (e.g., curses.color_pair(COLOR_RED))
-        """
+
+               height: int = 5, esc_abort: bool | None = None, prompt_attr: int | None = None) -> str | None:
         # Handle deprecated esc_abort parameter for backward compatibility
-        if esc_abort is not None:
-            dialog_abort = 'ESC' if esc_abort else None
-        else:
-            dialog_abort = self.opts.dialog_abort
+        dialog_abort = self._resolve_abort_mode(esc_abort)
 
         # Remember the timeout in effect before the dialog so every exit path can
         # restore it; curses.window has no gettimeout(), so we track it ourselves.
         prev_timeout_ms = getattr(self, '_scr_timeout_ms', ConsoleWindow.timeout_ms)
-
-        def draw_rectangle(scr: object, r1: int, c1: int, r2: int, c2: int) -> None:
-            """Draws a box using standard curses characters."""
-            scr.border(0)
-            for r in range(r1, r2 + 1):
-                if r == r1 or r == r2:
-                    # Draw horizontal lines
-                    for c in range(c1 + 1, c2):
-                        scr.addch(r, c, curses.ACS_HLINE)
-                if r > r1 and r < r2:
-                    # Draw vertical lines
-                    scr.addch(r, c1, curses.ACS_VLINE)
-                    scr.addch(r, c2, curses.ACS_VLINE)
-            # Draw corners
-            scr.addch(r1, c1, curses.ACS_ULCORNER)
-            scr.addch(r1, c2, curses.ACS_URCORNER)
-            scr.addch(r2, c1, curses.ACS_LLCORNER)
-            scr.addch(r2, c2, curses.ACS_LRCORNER)
 
         input_string = list(seed)
         cursor_pos = len(input_string)
         v_scroll_top = 0
         last_esc_time = None  # For ESC-ESC tracking
 
-        def calculate_geometry(self: ConsoleWindow) -> None:
-            # ... (Geometry calculation logic remains the same) ...
-            self.rows, self.cols = self.scr.getmaxyx()
-            min_cols, min_rows = self.opts.min_cols_rows
-            min_height_needed = max(height + 4, min_rows)
-            min_cols_needed = max(30, min_cols)
-            if self.rows < min_height_needed or self.cols < min_cols_needed:
-                return False, None, None, None, None
-
-            max_display_width = self.cols - 6
-            text_win_width = min(width, max_display_width)
-            row0 = self.rows // 2 - (height // 2 + 1)
-            row9 = row0 + height + 1
-            col0 = (self.cols - (text_win_width + 2)) // 2
-
-            return True, row0, row9, col0, text_win_width
-
-        success, row0, row9, col0, text_win_width = calculate_geometry(self)
-        if not success:
+        if not self._dialog_geometry(height, width)[0]:
             # Terminal too small for dialog - return None to indicate failure
             # Returning seed here would be dangerous as it makes it appear the user accepted the default
             return None
@@ -1349,112 +966,40 @@ class ConsoleWindow:
 
         while True:
             try:
-                success, row0, row9, col0, text_win_width = calculate_geometry(self)
+                success, row0, row9, col0, text_win_width = self._dialog_geometry(height, width)
 
                 # --- RESIZE/TOO SMALL CHECK ---
                 if not success:
-                    min_cols, min_rows = self.opts.min_cols_rows
-                    min_height_needed = max(height + 4, min_rows)
-                    min_cols_needed = max(30, min_cols)
-                    self.scr.clear()
-                    msg = f"Min size: {min_cols_needed}x{min_height_needed}"
-                    try:
-                        self.scr.addstr(0, 0, msg, curses.A_REVERSE)
-                    except curses.error:
-                        pass  # Terminal too small even for message
-                    self.scr.noutrefresh()
-                    curses.doupdate()
-                    key = self.scr.getch()
-                    if key in [27]:
-                        self._set_scr_timeout(prev_timeout_ms)
+                    if self._show_too_small_dialog(height, prev_timeout_ms):
                         return None
-                    if key == curses.KEY_RESIZE: curses.update_lines_cols()
                     continue
 
                 self.scr.clear()
-
-                # Draw the box using the imported rectangle function
-                draw_rectangle(self.scr, row0, col0, row9, col0 + text_win_width + 1)
+                self._draw_dialog_box(row0, col0, row9, col0 + text_win_width + 1)
 
                 # DEBUG: Toggle indicator to visualize redraws
                 if debug_show_redraws:
-                    debug_redraw_toggle = not debug_redraw_toggle
-                    indicator = '*' if debug_redraw_toggle else '+'
-                    self.scr.addstr(row0, col0, indicator)
+                    debug_redraw_toggle = self._draw_debug_indicator(
+                        row0, col0, debug_redraw_toggle)
 
-                prompt_display = textwidth.truncate(prompt, text_win_width)
-                if prompt_attr is not None:
-                    self.scr.addstr(row0, col0 + 1, prompt_display, prompt_attr | curses.A_BOLD)
-                else:
-                    self.scr.addstr(row0, col0 + 1, prompt_display)
+                self._draw_dialog_prompt(prompt, prompt_attr, row0, col0, text_win_width)
 
                 # --- Core Display and Scroll Indicator Logic ---
                 # Wrapping, the padding and the cursor highlight are all measured
                 # in display cells, so wide (CJK/emoji) input stays aligned.
                 input_text = "".join(input_string)
                 wrapped_ranges = textwidth.wrap_ranges(input_text, text_win_width)
-                total_wrapped_lines = len(wrapped_ranges)
+                wrapped_line_idx, cursor_cell = self._resolve_cursor_line(
+                    input_text, cursor_pos, wrapped_ranges, text_win_width)
+                v_scroll_top = self._clamp_dialog_scroll(
+                    v_scroll_top, wrapped_line_idx, height)
 
-                wrapped_line_idx, cursor_cell = textwidth.wrap_position(
-                    input_text, cursor_pos, text_win_width)
-                wrapped_line_idx = min(wrapped_line_idx, total_wrapped_lines - 1)
+                self._draw_dialog_content(
+                    row0, row9, col0, text_win_width, height, input_text,
+                    wrapped_ranges, len(wrapped_ranges), wrapped_line_idx,
+                    cursor_cell, cursor_pos, v_scroll_top)
 
-                # Vertical scroll adjustment
-                if wrapped_line_idx < v_scroll_top:
-                    v_scroll_top = wrapped_line_idx
-                elif wrapped_line_idx >= v_scroll_top + height:
-                    v_scroll_top = wrapped_line_idx - height + 1
-
-                # Display the visible lines (hard-wrapped at text_win_width cells)
-                for r in range(height):
-                    current_wrapped_line_idx = v_scroll_top + r
-
-                    # 1. Clear the content area (important for redraw integrity)
-                    self.scr.addstr(row0 + 1 + r, col0 + 1, ' ' * text_win_width)
-
-                    if current_wrapped_line_idx >= total_wrapped_lines:
-                        continue
-
-                    start_char_idx, end_char_idx = wrapped_ranges[current_wrapped_line_idx]
-                    raw_wrapped_line = input_text[start_char_idx:end_char_idx]
-
-                    # 2. Display the text (padded to full width so wide chars align)
-                    self.scr.addstr(row0 + 1 + r, col0 + 1,
-                                    textwidth.ljust(raw_wrapped_line, text_win_width))
-
-                    # --- SCROLL INDICATOR LOGIC (cursor line only) ---
-                    if current_wrapped_line_idx == wrapped_line_idx:
-                        # Vertical border markers. Hard wrapping never overflows a
-                        # line, so there is no horizontal-scroll marker.
-                        self.scr.addch(row0 + 1 + r, col0, curses.ACS_VLINE)
-                        self.scr.addch(row0 + 1 + r, col0 + text_win_width + 1, curses.ACS_VLINE)
-
-                        # Highlight the cursor (position measured in cells)
-                        char_at_cursor = input_text[cursor_pos] if cursor_pos < len(input_text) else " "
-                        self.scr.addstr(row0 + 1 + r, col0 + 1 + cursor_cell,
-                                        char_at_cursor, curses.A_REVERSE)
-
-                        # Set the actual hardware cursor
-                        self.scr.move(row0 + 1 + r, col0 + 1 + cursor_cell)
-
-                # --- CORNER OVERFLOW INDICATORS ---
-                # Upper left (one line down): content scrolled above
-                if v_scroll_top > 0:
-                    self.scr.addch(row0 + 1, col0, '◀', curses.A_BOLD)
-
-                # Lower right (one line up): content below the window
-                if (v_scroll_top + height) < total_wrapped_lines:
-                    self.scr.addch(row9 - 1, col0 + text_win_width + 1, '▶', curses.A_BOLD)
-
-                # Footer and refresh
-                submit_key = self.opts.dialog_return
-                abort = ''
-                if dialog_abort == 'ESC':
-                    abort = ' or ESC to abort'
-                elif dialog_abort == 'ESC-ESC':
-                    abort = ' or ESC-ESC to abort'
-                ending = textwidth.truncate(f'{submit_key} to submit{abort}', text_win_width)
-                self.scr.addstr(row9, col0 + 1 + text_win_width - textwidth.string_width(ending), ending)
+                self._draw_dialog_footer(row9, col0, text_win_width, dialog_abort)
                 self.scr.noutrefresh()
                 curses.doupdate()
                 curses.curs_set(0)  # Hide hardware cursor; reverse video shows position
@@ -1462,113 +1007,284 @@ class ConsoleWindow:
                 key = self.scr.getch()
 
                 # --- Key Handling Logic ---
-                # Handle dialog_return (submit)
-                if self.opts.dialog_return == 'ENTER' and key in [10, 13]:
-                    curses.curs_set(0)
-                    self._set_scr_timeout(prev_timeout_ms)
-                    return "".join(input_string)
-                elif self.opts.dialog_return == 'TAB' and key == 9:
-                    curses.curs_set(0)
-                    self._set_scr_timeout(prev_timeout_ms)
-                    return "".join(input_string)
+                cursor_pos, last_esc_time, action = self._handle_dialog_key(
+                    key, input_string, cursor_pos, last_esc_time, dialog_abort,
+                    input_text, wrapped_ranges, wrapped_line_idx, cursor_cell)
 
-                # Handle dialog_abort (ESC and ESC-ESC)
-                if key == 27:
-                    if dialog_abort == 'ESC':
-                        self._set_scr_timeout(prev_timeout_ms)
+                if action is not None:
+                    curses.curs_set(0)
+                    self._set_scr_timeout(prev_timeout_ms)
+                    if action == 'submit':
+                        return "".join(input_string)
+                    if action == 'abort':
                         return None
-                    elif dialog_abort == 'ESC-ESC':
-                        current_time = time.time()
-                        if last_esc_time is not None and (current_time - last_esc_time) <= 1.0:
-                            self._set_scr_timeout(prev_timeout_ms)
-                            return None  # Double ESC within timeout
-                        last_esc_time = current_time
-                        # Single ESC - just update time and continue
-
-                elif key == curses.KEY_UP:
-                    target_pos = textwidth.index_at_cell(
-                        input_text, wrapped_ranges, wrapped_line_idx - 1, cursor_cell)
-                    if target_pos is not None:
-                        cursor_pos = target_pos
-
-                elif key == curses.KEY_DOWN:
-                    target_pos = textwidth.index_at_cell(
-                        input_text, wrapped_ranges, wrapped_line_idx + 1, cursor_cell)
-                    if target_pos is not None:
-                        cursor_pos = target_pos
-
-                # ... [KEY_LEFT, KEY_RIGHT, HOME, END, edits, ASCII] ...
-                elif key == curses.KEY_LEFT: cursor_pos = max(0, cursor_pos - 1)
-                elif key == curses.KEY_RIGHT: cursor_pos = min(len(input_string), cursor_pos + 1)
-                elif key == curses.KEY_HOME: cursor_pos = 0
-                elif key == curses.KEY_END: cursor_pos = len(input_string)
-                elif key in [curses.KEY_BACKSPACE, 127, 8]:
-                    if cursor_pos > 0:
-                        input_string.pop(cursor_pos - 1)
-                        cursor_pos -= 1
-                elif key == curses.KEY_DC:
-                    if cursor_pos < len(input_string):
-                        input_string.pop(cursor_pos)
-
-                # Map special characters to space unless they're the dialog_return key
-                elif key in [9, 10, 13]:
-                    # Check if this is the dialog_return key
-                    is_return_key = False
-                    if self.opts.dialog_return == 'TAB' and key == 9:
-                        is_return_key = True
-                    elif self.opts.dialog_return == 'ENTER' and key in [10, 13]:
-                        is_return_key = True
-
-                    if not is_return_key:
-                        # Convert to space
-                        input_string.insert(cursor_pos, ' ')
-                        cursor_pos += 1
-
-                elif 32 <= key <= 126:
-                    input_string.insert(cursor_pos, chr(key))
-                    cursor_pos += 1
-
-                # --- Explicit Resize Handler ---
-                elif key == curses.KEY_RESIZE:
-                    curses.update_lines_cols()
-                    continue
+                    continue  # 'resize'
 
             except curses.error:
                 # Catch exceptions from drawing outside bounds during resize
-                self.scr.clear()
-                curses.update_lines_cols()
-                self.rows, self.cols = self.scr.getmaxyx()
-                # Drain any pending resize events to prevent infinite loop
-                self.scr.nodelay(True)  # Make getch() non-blocking
-                while True:
-                    key = self.scr.getch()
-                    if key == -1:  # No more keys in queue
-                        break
-                self.scr.nodelay(False)  # Restore blocking mode
+                self._recover_from_resize()
                 continue
+
+    def _resolve_abort_mode(self, esc_abort: bool | None) -> str | None:
+        if esc_abort is not None:
+            return 'ESC' if esc_abort else None
+        return self.opts.dialog_abort
+
+    def _dialog_geometry(self, height: int, width: int) -> tuple[bool, int, int, int, int]:
+        self.rows, self.cols = self.scr.getmaxyx()
+        min_cols, min_rows = self.opts.min_cols_rows
+        if self.rows < max(height + 4, min_rows) or self.cols < max(30, min_cols):
+            return False, 0, 0, 0, 0
+
+        max_display_width = self.cols - 6
+        text_win_width = min(width, max_display_width)
+        row0 = self.rows // 2 - (height // 2 + 1)
+        row9 = row0 + height + 1
+        col0 = (self.cols - (text_win_width + 2)) // 2
+        return True, row0, row9, col0, text_win_width
+
+    def _show_too_small_dialog(self, height: int, prev_timeout_ms: int) -> bool:
+        min_cols, min_rows = self.opts.min_cols_rows
+        min_height_needed = max(height + 4, min_rows)
+        min_cols_needed = max(30, min_cols)
+        self.scr.clear()
+        msg = f"Min size: {min_cols_needed}x{min_height_needed}"
+        try:
+            self.scr.addstr(0, 0, msg, curses.A_REVERSE)
+        except curses.error:
+            pass  # Terminal too small even for message
+        self.scr.noutrefresh()
+        curses.doupdate()
+        key = self.scr.getch()
+        if key == 27:
+            self._set_scr_timeout(prev_timeout_ms)
+            return True
+        if key == curses.KEY_RESIZE:
+            curses.update_lines_cols()
+        return False
+
+    def _draw_debug_indicator(self, row0: int, col0: int, toggle: bool) -> bool:
+        toggle = not toggle
+        self.scr.addstr(row0, col0, '*' if toggle else '+')
+        return toggle
+
+    def _draw_dialog_box(self, row0: int, col0: int, row9: int, c2: int) -> None:
+        scr = self.scr
+        scr.border(0)
+        for r in range(row0, row9 + 1):
+            if r == row0 or r == row9:
+                # Draw horizontal lines
+                for c in range(col0 + 1, c2):
+                    scr.addch(r, c, curses.ACS_HLINE)
+            if row0 < r < row9:
+                # Draw vertical lines
+                scr.addch(r, col0, curses.ACS_VLINE)
+                scr.addch(r, c2, curses.ACS_VLINE)
+        # Draw corners
+        scr.addch(row0, col0, curses.ACS_ULCORNER)
+        scr.addch(row0, c2, curses.ACS_URCORNER)
+        scr.addch(row9, col0, curses.ACS_LLCORNER)
+        scr.addch(row9, c2, curses.ACS_LRCORNER)
+
+    def _draw_dialog_prompt(self, prompt: str, prompt_attr: int | None,
+                            row0: int, col0: int, text_win_width: int) -> None:
+        prompt_display = textwidth.truncate(prompt, text_win_width)
+        if prompt_attr is not None:
+            self.scr.addstr(row0, col0 + 1, prompt_display, prompt_attr | curses.A_BOLD)
+        else:
+            self.scr.addstr(row0, col0 + 1, prompt_display)
+
+    @staticmethod
+    def _resolve_cursor_line(input_text: str, cursor_pos: int,
+                             wrapped_ranges: list, text_win_width: int) -> tuple[int, int]:
+        wrapped_line_idx, cursor_cell = textwidth.wrap_position(
+            input_text, cursor_pos, text_win_width)
+        return min(wrapped_line_idx, len(wrapped_ranges) - 1), cursor_cell
+
+    @staticmethod
+    def _clamp_dialog_scroll(v_scroll_top: int, wrapped_line_idx: int, height: int) -> int:
+        if wrapped_line_idx < v_scroll_top:
+            return wrapped_line_idx
+        if wrapped_line_idx >= v_scroll_top + height:
+            return wrapped_line_idx - height + 1
+        return v_scroll_top
+
+    def _draw_dialog_content(self, row0: int, row9: int, col0: int, text_win_width: int,
+                             height: int, input_text: str, wrapped_ranges: list,
+                             total_wrapped_lines: int, wrapped_line_idx: int,
+                             cursor_cell: int, cursor_pos: int,
+                             v_scroll_top: int) -> None:
+        for r in range(height):
+            current_wrapped_line_idx = v_scroll_top + r
+
+            # 1. Clear the content area (important for redraw integrity)
+            self.scr.addstr(row0 + 1 + r, col0 + 1, ' ' * text_win_width)
+
+            if current_wrapped_line_idx >= total_wrapped_lines:
+                continue
+
+            start_char_idx, end_char_idx = wrapped_ranges[current_wrapped_line_idx]
+            raw_wrapped_line = input_text[start_char_idx:end_char_idx]
+
+            # 2. Display the text (padded to full width so wide chars align)
+            self.scr.addstr(row0 + 1 + r, col0 + 1,
+                            textwidth.ljust(raw_wrapped_line, text_win_width))
+
+            # --- SCROLL INDICATOR LOGIC (cursor line only) ---
+            if current_wrapped_line_idx == wrapped_line_idx:
+                self._draw_dialog_cursor(row0, col0, r, text_win_width,
+                                         cursor_cell, input_text, cursor_pos)
+
+        # --- CORNER OVERFLOW INDICATORS ---
+        # Upper left (one line down): content scrolled above
+        if v_scroll_top > 0:
+            self.scr.addch(row0 + 1, col0, '◀', curses.A_BOLD)
+
+        # Lower right (one line up): content below the window
+        if (v_scroll_top + height) < total_wrapped_lines:
+            self.scr.addch(row9 - 1, col0 + text_win_width + 1, '▶', curses.A_BOLD)
+
+    def _draw_dialog_cursor(self, row0: int, col0: int, r: int, text_win_width: int,
+                            cursor_cell: int, input_text: str, cursor_pos: int) -> None:
+        # Vertical border markers. Hard wrapping never overflows a line, so
+        # there is no horizontal-scroll marker.
+        self.scr.addch(row0 + 1 + r, col0, curses.ACS_VLINE)
+        self.scr.addch(row0 + 1 + r, col0 + text_win_width + 1, curses.ACS_VLINE)
+
+        # Highlight the cursor (position measured in cells)
+        char_at_cursor = input_text[cursor_pos] if cursor_pos < len(input_text) else " "
+        self.scr.addstr(row0 + 1 + r, col0 + 1 + cursor_cell,
+                        char_at_cursor, curses.A_REVERSE)
+
+        # Set the actual hardware cursor
+        self.scr.move(row0 + 1 + r, col0 + 1 + cursor_cell)
+
+    def _draw_dialog_footer(self, row9: int, col0: int, text_win_width: int,
+                            dialog_abort: str | None) -> None:
+        submit_key = self.opts.dialog_return
+        abort = ''
+        if dialog_abort == 'ESC':
+            abort = ' or ESC to abort'
+        elif dialog_abort == 'ESC-ESC':
+            abort = ' or ESC-ESC to abort'
+        ending = textwidth.truncate(f'{submit_key} to submit{abort}', text_win_width)
+        self.scr.addstr(row9, col0 + 1 + text_win_width - textwidth.string_width(ending), ending)
+
+    #: Simple single-keystroke cursor moves: key -> f(cursor_pos, text_len).
+    _DIALOG_SIMPLE_MOVES: ClassVar[dict] = {
+        curses.KEY_LEFT: lambda pos, n: max(0, pos - 1),
+        curses.KEY_RIGHT: lambda pos, n: min(n, pos + 1),
+        curses.KEY_HOME: lambda pos, n: 0,
+        curses.KEY_END: lambda pos, n: n,
+    }
+
+    def _handle_dialog_key(self, key: int, input_string: list, cursor_pos: int,
+                           last_esc_time: float | None, dialog_abort: str | None,
+                           input_text: str, wrapped_ranges: list,
+                           wrapped_line_idx: int, cursor_cell: int) -> tuple:
+        # Handle dialog_return (submit)
+        if self.opts.dialog_return == 'ENTER' and key in (10, 13):
+            return cursor_pos, last_esc_time, 'submit'
+        if self.opts.dialog_return == 'TAB' and key == 9:
+            return cursor_pos, last_esc_time, 'submit'
+
+        # Handle dialog_abort (ESC and ESC-ESC)
+        if key == 27:
+            action, last_esc_time = self._dialog_abort_action(dialog_abort, last_esc_time)
+            return cursor_pos, last_esc_time, action
+
+        cursor_pos, action = self._apply_dialog_edit(
+            key, input_string, cursor_pos, input_text, wrapped_ranges,
+            wrapped_line_idx, cursor_cell)
+        return cursor_pos, last_esc_time, action
+
+    @staticmethod
+    def _dialog_abort_action(dialog_abort: str | None,
+                             last_esc_time: float | None) -> tuple[str | None, float | None]:
+        if dialog_abort == 'ESC':
+            return 'abort', last_esc_time
+        if dialog_abort == 'ESC-ESC':
+            current_time = time.time()
+            if last_esc_time is not None and (current_time - last_esc_time) <= 1.0:
+                return 'abort', last_esc_time  # Double ESC within timeout
+            # Single ESC - just update time and continue
+            return None, current_time
+        return None, last_esc_time
+
+    def _apply_dialog_edit(self, key: int, input_string: list, cursor_pos: int,
+                           input_text: str, wrapped_ranges: list,
+                           wrapped_line_idx: int, cursor_cell: int) -> tuple[int, str | None]:
+        move = self._DIALOG_SIMPLE_MOVES.get(key)
+        if move is not None:
+            return move(cursor_pos, len(input_string)), None
+
+        if key in (curses.KEY_UP, curses.KEY_DOWN):
+            return self._move_dialog_cursor_vertically(
+                key, cursor_pos, input_text, wrapped_ranges,
+                wrapped_line_idx, cursor_cell), None
+
+        if key in (curses.KEY_BACKSPACE, 127, 8):
+            return self._dialog_delete(input_string, cursor_pos, forward=False), None
+
+        if key == curses.KEY_DC:
+            return self._dialog_delete(input_string, cursor_pos, forward=True), None
+
+        if key == curses.KEY_RESIZE:
+            curses.update_lines_cols()
+            return cursor_pos, 'resize'
+
+        return self._dialog_insert(key, input_string, cursor_pos), None
+
+    @staticmethod
+    def _dialog_delete(input_string: list, cursor_pos: int, forward: bool) -> int:
+        if forward:
+            if cursor_pos < len(input_string):
+                input_string.pop(cursor_pos)
+        elif cursor_pos > 0:
+            input_string.pop(cursor_pos - 1)
+            cursor_pos -= 1
+        return cursor_pos
+
+    def _dialog_insert(self, key: int, input_string: list, cursor_pos: int) -> int:
+        if key in (9, 10, 13):
+            # Map special characters to space unless they're the dialog_return key
+            if self._is_dialog_return_key(key):
+                return cursor_pos
+            char = ' '
+        elif 32 <= key <= 126:
+            char = chr(key)
+        else:
+            return cursor_pos
+        input_string.insert(cursor_pos, char)
+        return cursor_pos + 1
+
+    @staticmethod
+    def _move_dialog_cursor_vertically(key: int, cursor_pos: int, input_text: str,
+                                       wrapped_ranges: list, wrapped_line_idx: int,
+                                       cursor_cell: int) -> int:
+        delta = -1 if key == curses.KEY_UP else 1
+        target_pos = textwidth.index_at_cell(
+            input_text, wrapped_ranges, wrapped_line_idx + delta, cursor_cell)
+        return target_pos if target_pos is not None else cursor_pos
+
+    def _is_dialog_return_key(self, key: int) -> bool:
+        if self.opts.dialog_return == 'TAB' and key == 9:
+            return True
+        return self.opts.dialog_return == 'ENTER' and key in (10, 13)
+
+    def _recover_from_resize(self) -> None:
+        self.scr.clear()
+        curses.update_lines_cols()
+        self.rows, self.cols = self.scr.getmaxyx()
+        # Drain any pending resize events to prevent infinite loop
+        self.scr.nodelay(True)  # Make getch() non-blocking
+        while True:
+            if self.scr.getch() == -1:  # No more keys in queue
+                break
+        self.scr.nodelay(False)  # Restore blocking mode
 
 
     def flash(self, message: str = '', duration: float = 2.0) -> None:
-        """
-        Displays a brief flash message in the center of the screen.
-
-        Unlike a raw ``time.sleep`` banner, the flash is **non-destructive and
-        interruptible**:
-
-        * the message auto-dismisses after ``duration`` seconds;
-        * pressing any key dismisses it early, and that key is preserved in
-          :attr:`pending_keys` so the next :meth:`prompt` still delivers it
-          (keys are no longer silently swallowed);
-        * a terminal resize while the message is up redraws it at the new size;
-        * on exit the underlying screen is repainted from the header/body pads
-          (unless :attr:`flash_repaint` is False), so callers do **not** have to
-          re-render afterwards to avoid leaving a blank screen.
-
-        :param message: The message to display
-        :param duration: How long to show the message in seconds (default 2.0)
-        :type message: str
-        :type duration: float
-        """
         # Refresh cached dimensions: a resize may have happened since the last
         # render and everything below draws from self.rows/self.cols.
         self._set_screen_dims()
@@ -1581,7 +1297,6 @@ class ConsoleWindow:
         prev_timeout_ms = getattr(self, '_scr_timeout_ms', ConsoleWindow.timeout_ms)
 
         def draw_flash() -> None:
-            """Paint the centered message box over a cleared screen."""
             # Calculate centered position (widths measured in display cells).
             msg_len = min(textwidth.string_width(message), self.cols - 4)
             row = self.rows // 2
@@ -1631,20 +1346,9 @@ class ConsoleWindow:
 
 
     def alert(self, message: str = '', title: str = 'ALERT',
+
+
               _height: int | None = None, _width: int | None = None) -> None:
-        """
-        Displays a blocking, modal alert box with a title and message.
-        Auto-sizes based on content and terminal size with 1-cell border.
-
-        Waits for the user to press **ENTER** to acknowledge and dismiss the box.
-
-        :param message: The message body content.
-        :param title: The title text for the alert box (defaults to 'ALERT')
-        :param height: DEPRECATED - ignored
-        :param width: DEPRECATED - ignored
-        :type title: str
-        :type message: str
-        """
         # Refresh the cached dimensions from the live screen first: a resize may
         # have happened since the last render, and everything below draws from
         # self.rows/self.cols (answer() recomputes for the same reason).
@@ -1742,10 +1446,6 @@ class ConsoleWindow:
         return
 
     def clear(self) -> None:
-        """
-        Clears all content from both the header and body pads and resets internal
-        counters in preparation for adding new screen content.
-        """
         self.scr.clear()
         self.head.pad.clear()
         self.body.pad.clear()
@@ -1755,18 +1455,6 @@ class ConsoleWindow:
         self.head.row_cnt = self.body.row_cnt = 0
 
     def prompt(self, seconds: float = 1.0) -> int | None:
-        """
-        Waits for user input for up to ``seconds``.
-
-        Handles terminal resize events and built-in navigation keys, updating
-        scroll/pick position as needed.
-
-        :param seconds: The maximum time (float) to wait for input.
-        :type seconds: float
-        :returns: The key code if it is one of the application-defined ``keys``,
-                  or None on timeout or if a navigation key was pressed.
-        :rtype: int or None
-        """
         ctl_b, ctl_d, ctl_f, ctl_u = 2, 4, 6, 21
         begin_mono = time.monotonic()
         while True:
@@ -1788,7 +1476,6 @@ class ConsoleWindow:
 
             if key == curses.ERR:
                 continue
-
 
             if key in (curses.KEY_RESIZE, ) or curses.is_term_resized(self.rows, self.cols):
                 self._set_screen_dims()
@@ -1908,20 +1595,5 @@ class ConsoleWindow:
 
 
 def _textbox_edit_on_enter(key: int) -> int:
-    """Exit ``curses.textpad.Textbox.edit`` as soon as ENTER is pressed.
-
-    ``Textbox.edit(validator)`` has no dedicated "stop" return value: it keeps
-    reading keys until the *validator* returns the sentinel code ``7`` (Ctrl-G).
-    To make a single ENTER press acknowledge :meth:`ConsoleWindow.alert`, map the
-    Enter key codes (``10`` and ``curses.KEY_ENTER``) onto that sentinel and pass
-    every other key through untouched so ``Textbox`` still performs editing.
-
-    :param key: Key code delivered by ``Textbox`` to the validator.
-    :type key: int
-    :returns: ``7`` for ENTER (which stops editing), otherwise ``key`` unchanged.
-    :rtype: int
-    """
     # 7 is BEL / Ctrl-G, Textbox.do_command()'s "end edit" control code.
     return 7 if key in (10, curses.KEY_ENTER) else key
-
-

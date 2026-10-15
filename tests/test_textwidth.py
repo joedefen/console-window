@@ -1,16 +1,8 @@
-"""Unit tests for the stdlib-only display-cell width helpers.
-
-These are pure functions (no curses), covering wide CJK, combining marks,
-zero-width joiners, truncation, padding, wrapping and the index mapping used by
-the modal ``answer()`` editor.
-"""
-
 from console_window import textwidth as tw
 
 CJK = '世'          # U+4E16, East-Asian Wide -> 2 cells
 COMBINING = '\u0301'  # combining acute accent -> 0 cells
 ZWJ = '\u200d'     # zero-width joiner (Cf) -> 0 cells
-
 
 # --- char_width / string_width ----------------------------------------------
 
@@ -40,7 +32,6 @@ def test_string_width_mixed():
 def test_string_width_ignores_combining_and_zwj():
     assert tw.string_width(f'e{COMBINING}') == 1  # é as e + combining accent
     assert tw.string_width(f'{CJK}{ZWJ}{CJK}') == 4
-
 
 # --- truncate / ljust / rjust -----------------------------------------------
 
@@ -74,7 +65,6 @@ def test_rjust_pads_to_cells():
     assert tw.string_width(padded) == 4
     assert padded == '  ' + CJK
 
-
 # --- cell_to_index ----------------------------------------------------------
 
 def test_cell_to_index_ascii():
@@ -91,7 +81,6 @@ def test_cell_to_index_inside_wide_char_rounds_down():
 def test_cell_to_index_clamps():
     assert tw.cell_to_index('abc', 0) == 0
     assert tw.cell_to_index('abc', 99) == 3
-
 
 # --- wrap_ranges / wrap_position / index_at_cell ----------------------------
 
@@ -138,7 +127,6 @@ def test_index_at_cell_out_of_range():
     ranges = tw.wrap_ranges('abc', 3)
     assert tw.index_at_cell('abc', ranges, -1, 0) is None
     assert tw.index_at_cell('abc', ranges, 5, 0) is None
-
 
 # --- wrap (word wrapping) ---------------------------------------------------
 

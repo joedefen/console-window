@@ -1,10 +1,3 @@
-"""TTY-free tests for Context metadata (AUDIT.md §4.15).
-
-Context's metadata now has a minimal schema: ``abut`` is an explicit attribute,
-and an unknown kwarg that closely matches a known attribute warns (catching
-typos) instead of failing silently, while genuine custom attributes still work.
-"""
-
 import warnings
 
 import pytest

@@ -1,5 +1,3 @@
-"""Unit tests for OptionSpinner scoped key registration (no TTY required)."""
-
 from types import SimpleNamespace
 
 import pytest
@@ -9,7 +7,6 @@ from console_window.keys import NAVIGATION_KEYS
 
 
 class FakeScreen:
-    """Minimal Screen stand-in exposing optional *_ACTION methods."""
     def __init__(self, name, actions=()):
         self.name = name
         for action in actions:
@@ -17,7 +14,6 @@ class FakeScreen:
 
 
 class FakeStack:
-    """Minimal ScreenStack stand-in used for scope computation."""
     def __init__(self, screen_objects):
         self.screens = {i: f'SCR{i}' for i in screen_objects}
         self.screen_objects = screen_objects

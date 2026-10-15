@@ -1,5 +1,3 @@
-"""Guards for the public API and import compatibility after the module split."""
-
 import importlib.util
 
 import pytest

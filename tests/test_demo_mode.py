@@ -1,19 +1,8 @@
-"""TTY-free tests for :meth:`ConsoleWindow.set_demo_mode`.
-
-Regression guard for the audit finding that toggling demo mode *on* used to
-wipe ``last_demo_key`` because the code tested the ``enabled`` argument (which
-is ``None`` for a toggle) instead of the resulting ``opts.demo_mode`` state.
-
-The window is built with ``object.__new__`` so ``__init__`` never enters curses;
-``set_demo_mode`` only touches ``opts`` and ``last_demo_key``.
-"""
-
 from console_window.opts import ConsoleWindowOpts
 from console_window.window import ConsoleWindow
 
 
 def make_window(demo_mode=False, last_demo_key=''):
-    """Build a ConsoleWindow without running ``__init__`` (no curses)."""
     win = object.__new__(ConsoleWindow)
     win.opts = ConsoleWindowOpts(demo_mode=demo_mode)
     win.last_demo_key = last_demo_key

@@ -1,11 +1,3 @@
-"""TTY-free tests for the render backend + window registry (AUDIT.md §4.5).
-
-These exercise the fix for the "whole-process singletons" finding: a
-``ConsoleWindow`` can be built without a terminal (via
-:class:`~console_window.backend.HeadlessBackend`), several instances coexist, and
-tearing one down does not disturb the others or any process-wide state.
-"""
-
 import console_window.window as window_mod
 from console_window.backend import HeadlessBackend
 from console_window.opts import ConsoleWindowOpts

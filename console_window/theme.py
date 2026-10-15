@@ -1,21 +1,10 @@
-"""Theme and color-pair management for console_window.
-
-The active theme name is stored in the single attribute :attr:`Theme._current`
-and queried with :meth:`Theme.get_current`.  (Previously the startup path wrote a
-separate ``CURRENT_THEME`` attribute, leaving ``get_current()`` returning None
-after boot — that split has been removed.)
-"""
-
 from __future__ import annotations
 
 import curses
-import os
 from typing import ClassVar
 
 
 class Theme:
-    """Theme and color management for ConsoleWindow"""
-
     # Semantic color-pair IDs.  The pairs themselves are (re)initialized per theme
     # by Theme.set() and, at startup, by ConsoleWindow.start_curses().
     DEFAULT = 0      # Default terminal colors
@@ -137,24 +126,14 @@ class Theme:
 
     @classmethod
     def get_current(cls) -> str | None:
-        """Get the name of the currently active color theme."""
         return cls._current
 
     @classmethod
     def list_all(cls) -> list[str]:
-        """List all available color themes."""
         return list(cls.THEMES.keys())
 
     @classmethod
     def set(cls, theme_name: str) -> bool:
-        """Change the current theme and reinitialize color pairs.
-
-        Args:
-            theme_name: Name of theme from THEMES dict
-
-        Returns:
-            bool: True if theme was set, False if invalid theme or colors not supported
-        """
         if theme_name not in cls.THEMES:
             return False
 
@@ -162,8 +141,6 @@ class Theme:
             return False
 
         cls._current = theme_name
-        # Update environment variable so it persists for session
-        os.environ['DWIPE_THEME'] = theme_name
         theme = cls.THEMES[theme_name]
 
         # Late import to avoid a circular import at module load time.
@@ -191,38 +168,13 @@ class Theme:
 
     @classmethod
     def set_active(cls, theme_name: str) -> str:
-        """Record the active theme name without reinitializing color pairs.
-
-        Used by :meth:`ConsoleWindow.start_curses` once it has already applied
-        the theme's color pairs.
-
-        :param theme_name: Name of the theme to record as active
-        :returns: The recorded theme name
-        :rtype: str
-        """
         cls._current = theme_name
         return theme_name
 
     @classmethod
     def create_picker_screen(cls, base_class: type) -> type:
-        """
-        Create a theme picker screen class dynamically.
-
-        Args:
-            base_class: The Screen base class to inherit from
-
-        Returns:
-            A new class that displays all themes and allows cycling through them
-
-        Usage:
-            ThemeScreen = Theme.create_picker_screen(Screen)
-            screens[THEME_ST] = ThemeScreen(app)
-        """
         class ThemePickerScreen(base_class):
-            """Theme preview screen showing all available themes with color examples"""
-
             def draw_screen(self) -> None:
-                """Draw the theme screen with color examples for all themes"""
                 app = self.app
                 win = app.win
 
@@ -257,7 +209,6 @@ class Theme:
                     win.add_body(line, attr=attr)
 
             def spin_theme_ACTION(self) -> None:
-                """Handle 't' key - cycle through themes"""
                 vals = cls.list_all()
                 value = cls.get_current()
                 idx = vals.index(value) if value in vals else -1

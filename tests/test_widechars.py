@@ -1,11 +1,3 @@
-"""Integration tests for wide-character (display-cell) correctness.
-
-These drive the real render helpers with a fake curses pad/screen so the strings
-and columns handed to curses can be asserted without a terminal.  They cover the
-``_add`` truncation path, ``draw`` padding, pick-range highlighting, the
-run-length attribute drawing, and the ``flash`` box.
-"""
-
 import curses
 from types import SimpleNamespace
 
@@ -20,8 +12,6 @@ CJK = '世'  # 2 display cells
 
 
 class FakePad:
-    """Records addstr calls and tracks the cursor the way curses does (in cells)."""
-
     def __init__(self):
         self.calls = []
         self._yx = (0, 0)
@@ -45,8 +35,6 @@ class FakePad:
 
 
 class CaptureScreen:
-    """Minimal capturing screen for the ``flash`` box."""
-
     def __init__(self, rows=24, cols=40):
         self._rows = rows
         self._cols = cols
@@ -75,13 +63,14 @@ class CaptureScreen:
 
 
 @pytest.fixture(autouse=True)
+
+
 def _stub_curses(monkeypatch):
     monkeypatch.setattr(window_mod.curses, 'doupdate', lambda: None)
     monkeypatch.setattr(window_mod.curses, 'is_term_resized', lambda *a: False)
 
 
 def make_window(cols=10, body_cols=10):
-    """Build a ConsoleWindow without ``__init__`` (no curses), with fake pads."""
     win = object.__new__(ConsoleWindow)
     win.opts = ConsoleWindowOpts()
     win.pick_mode = False
@@ -92,7 +81,6 @@ def make_window(cols=10, body_cols=10):
             pad=FakePad(), rows=50, cols=body_cols, row_cnt=0,
             texts=[], text_attrs=[], contexts=[]))
     return win
-
 
 # --- _add truncation --------------------------------------------------------
 
@@ -130,7 +118,6 @@ def test_add_body_reserves_last_terminal_column():
     assert win.body.texts[0] == 'x' * 9
     assert tw.string_width(win.body.texts[0]) == win.get_pad_width()
 
-
 # --- draw padding -----------------------------------------------------------
 
 def test_draw_pads_to_cells():
@@ -149,7 +136,6 @@ def test_draw_leftpad_pads_on_the_left():
 
     text = win.body.pad.calls[-1][2].decode('utf-8')
     assert text == '  ' + CJK
-
 
 # --- pick-range highlighting ------------------------------------------------
 
@@ -183,7 +169,6 @@ def test_highlight_range_with_attr_runs_is_cell_based():
     # 'a' keeps its bold run un-highlighted; the wide char gets the extra attr.
     assert (0, 0, 'a', curses.A_BOLD) in pad.calls
     assert (0, 1, CJK, curses.A_NORMAL | curses.A_REVERSE) in pad.calls
-
 
 # --- flash box --------------------------------------------------------------
 

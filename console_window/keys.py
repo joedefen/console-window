@@ -1,16 +1,3 @@
-"""Key constants shared across console_window.
-
-Kept dependency-free (only ``curses``) so that both the window engine and the
-option spinner can import it without risking circular imports.
-
-:data:`NAVIGATION_KEYS` is the set of key codes reserved for cursor movement and
-scrolling.  These are rejected by :meth:`OptionSpinner.add_key` (which raises
-``ValueError``) and are skipped in demo-mode highlighting, so applications
-**cannot bind them**.  That reservation deliberately includes the bare keys
-``0``, ``$``, ``H``, ``M`` and ``L`` — surface this in your app's help/docs,
-because those characters are unavailable as single-key shortcuts.
-"""
-
 from __future__ import annotations
 
 import curses

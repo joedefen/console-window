@@ -10,6 +10,17 @@ This project follows [Semantic Versioning](https://semver.org/).
   Changelog) so published package metadata carries project links.
 
 ### Removed
+- All docstrings from the package, the test suite, the demo and the `runner`
+  script (305 in total, across 29 files). Nothing consumed them via `__doc__`,
+  `inspect.getdoc()` or `help()` (verified by grep), so runtime behaviour and the
+  public API are unchanged; statement order, bodies and the blank-line layout
+  around definitions were preserved.
+- The `DWIPE_THEME` environment variable. `Theme.set()` no longer exports it and
+  the startup path reads `Theme.get_current()` instead of `os.environ`, making
+  `Theme` state the single source of truth. The library no longer namespaces its
+  config under a downstream app's name (`dwipe` never read the variable) and no
+  longer leaks the theme value into child processes via the inherited
+  environment.
 - `console_window/ConsoleWindow.py`, the compatibility facade. Its filename
   shadowed the `ConsoleWindow` class and violated PEP 8 (ruff `N999`). The
   public API is unchanged for package-root imports (`from console_window import

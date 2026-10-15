@@ -1,11 +1,3 @@
-"""TTY-free tests for the non-destructive, interruptible ``flash()``.
-
-These drive :class:`ConsoleWindow` with a fake curses screen (built via
-``object.__new__`` so ``__init__`` never enters curses) and a stubbed
-``render()`` recorder, which lets us assert on the timeout bookkeeping, the
-key-preserving poll loop, and the guaranteed repaint — all without a terminal.
-"""
-
 import curses
 
 import pytest
@@ -16,8 +8,6 @@ from console_window.window import ConsoleWindow
 
 
 class FakeScreen:
-    """Minimal stand-in for a ``curses.window``."""
-
     def __init__(self, rows=24, cols=80, keys=()):
         self._rows = rows
         self._cols = cols
@@ -44,7 +34,6 @@ class FakeScreen:
 
 
 def make_window(scr, **opts_kwargs):
-    """Build a ConsoleWindow without running ``__init__`` (no curses)."""
     win = object.__new__(ConsoleWindow)
     win.scr = scr
     win.opts = ConsoleWindowOpts(**opts_kwargs)
@@ -58,11 +47,11 @@ def make_window(scr, **opts_kwargs):
 
 
 @pytest.fixture(autouse=True)
+
+
 def _stub_curses(monkeypatch):
-    """Stub the pieces of curses that would otherwise need a real terminal."""
     monkeypatch.setattr(window_mod.curses, 'doupdate', lambda: None)
     monkeypatch.setattr(window_mod.curses, 'is_term_resized', lambda *a: False)
-
 
 # --- non-destructive repaint + timeout bookkeeping --------------------------
 
@@ -90,7 +79,6 @@ def test_flash_repaint_can_be_disabled():
     # Timeout is still restored even when the repaint is skipped.
     assert scr.timeouts == [ConsoleWindow.flash_poll_ms, ConsoleWindow.timeout_ms]
 
-
 # --- interruptible, key-preserving wait -------------------------------------
 
 def test_flash_preserves_key_and_dismisses_early():
@@ -115,7 +103,6 @@ def test_flash_redraws_on_resize_then_dismisses():
     assert scr.clears == 2
     assert win.pending_keys == {ord('x')}
     assert win.rendered == [True]
-
 
 # --- degenerate terminals ---------------------------------------------------
 
