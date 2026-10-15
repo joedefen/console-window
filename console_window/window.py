@@ -11,6 +11,7 @@ import curses
 import itertools
 import textwrap
 import time
+import warnings
 import weakref
 from collections.abc import Iterable
 from curses.textpad import Textbox, rectangle
@@ -139,6 +140,7 @@ class ConsoleWindow:
             text_attrs = [],  # run-length encoded: [(attr, count), ...] per line
             contexts = [],  # Context object per line (or None)
             view_cnt=0,  # no. head rows viewable (NOT in body)
+            rows_dropped=0,  # rows discarded because the pad was full (see _add)
         )
         self.body = SimpleNamespace(
             pad = self._backend.newpad(self.opts.body_rows, self.opts.body_cols),
@@ -147,7 +149,8 @@ class ConsoleWindow:
             row_cnt = 0,
             texts = [],
             text_attrs = [],  # run-length encoded: [(attr, count), ...] per line
-            contexts = []  # Context object per line (or None)
+            contexts = [],  # Context object per line (or None)
+            rows_dropped = 0,  # rows discarded because the pad was full (see _add)
         )
 
         # Apply theme background to pads
@@ -225,6 +228,15 @@ class ConsoleWindow:
 
     def get_pad_width(self) -> int:
         return min(self.cols-1, self.body_cols)
+
+    @property
+    def rows_dropped(self) -> int:
+        # Rows handed to add_body()/add_header() after that pad had filled up.
+        # The pads are fixed-size (opts.body_rows/head_rows), so a caller that
+        # adds more rows than that used to lose the excess in silence; this
+        # counter, plus the one-shot warning in _add(), is how that is now
+        # observable without the library deciding to abort the app.
+        return self.head.rows_dropped + self.body.rows_dropped
 
     def _is_pickable(self, row: int) -> bool:
         if row < 0 or row >= len(self.body.contexts):
@@ -458,6 +470,30 @@ class ConsoleWindow:
                 ns.text_attrs.append([(attr, len(actual_text))])  # run-length encoded
                 ns.contexts.append(context)  # Context metadata (or None)
                 ns.row_cnt += 1
+        else:
+            self._warn_rows_dropped(ns)
+
+    def _warn_rows_dropped(self, ns: SimpleNamespace) -> None:
+        # The pad is full, so this row is discarded (as it always was).  Counted
+        # always, warned about once per fill episode -- clear() resets both, so
+        # a bulk overflow produces exactly one message instead of one per row --
+        # and never fatal: the app keeps running and can inspect
+        # ConsoleWindow.rows_dropped.  A caller that would rather treat this as
+        # an error can use the usual warnings machinery
+        # (python -W error::UserWarning, or pytest's filterwarnings ini setting).
+        ns.rows_dropped += 1
+        if ns.rows_dropped != 1:
+            return
+        which = 'body' if id(ns) == id(self.body) else 'head'
+        warnings.warn(
+            f'console-window: the {which} pad is full ({ns.rows} rows), so '
+            f'further {which} rows are being discarded.  Raise the '
+            f'{which}_rows option (ConsoleWindowOpts({which}_rows=...)) or add '
+            f'fewer rows per frame.',
+            # warn() <- _warn_rows_dropped() <- _add() <- add_body()/add_header()
+            # <- caller, so 4 is the application's own line.
+            stacklevel=4,
+        )
 
     def add_header(self, text: str, attr: int | None = None, resume: bool = False,
                    context: Context | None = None) -> None:
@@ -1453,6 +1489,7 @@ class ConsoleWindow:
         self.head.text_attrs, self.body.text_attrs = [], []
         self.head.contexts, self.body.contexts = [], []
         self.head.row_cnt = self.body.row_cnt = 0
+        self.head.rows_dropped = self.body.rows_dropped = 0
 
     def prompt(self, seconds: float = 1.0) -> int | None:
         ctl_b, ctl_d, ctl_f, ctl_u = 2, 4, 6, 21

@@ -8,8 +8,29 @@ This project follows [Semantic Versioning](https://semver.org/).
 ### Added
 - `[project.urls]` in `pyproject.toml` (Homepage / Repository / Issues /
   Changelog) so published package metadata carries project links.
+- `ConsoleWindow.rows_dropped`, counting the rows `add_body()`/`add_header()`
+  discard once that pad has reached `opts.body_rows` / `opts.head_rows`. The
+  first discarded row of each fill episode also emits a `UserWarning` naming the
+  pad and the option to raise. Overflow previously left no trace, so an
+  under-sized pad showed up only as missing content. The behaviour is
+  deliberately non-fatal: the excess is still discarded and the app keeps
+  running, `-W error::UserWarning` turns it into a hard failure for anyone who
+  wants that, and `clear()` re-arms the warning for the next fill.
+
+### Changed
+- Renamed `ConsoleWindowDemo.py` to `SampleApp.py`: the old name collided with
+  the library's own `set_demo_mode()` feature. Updated [`runner`](runner:1), the
+  README, the ruff per-file-ignores and the headless smoke tests
+  (`tests/test_sample_app.py`) to match. The classes inside are still named
+  `DemoApp`/`DemoScreen`.
 
 ### Removed
+- `console_window/_selftest.py`, the TTY-only dev self-test. The old
+  `python -m console_window._selftest` entry point is gone; the features it
+  demonstrated — multi-row picking, a prompt-style option, forced
+  `render(redraw=True)`, `Ctrl-C` as an application key, large-body stress and
+  `ConsoleWindow.primary_window()` recovery — were folded into `SampleApp.py`,
+  which is now covered by headless smoke tests (`tests/test_sample_app.py`).
 - All docstrings from the package, the test suite, the demo and the `runner`
   script (305 in total, across 29 files). Nothing consumed them via `__doc__`,
   `inspect.getdoc()` or `help()` (verified by grep), so runtime behaviour and the
@@ -27,6 +48,15 @@ This project follows [Semantic Versioning](https://semver.org/).
   ...`), which is the documented style; only the legacy
   `from console_window.ConsoleWindow import ...` path is gone. The interactive
   self-test moved to `python -m console_window._selftest`.
+
+### Fixed
+- `SampleApp.py` asked for `head_rows=4`, but the help screen's nav-key block is
+  five header rows, so the last line was being clipped in silence. Raised to 8,
+  and the pad-sizing comment now records what each pad has to hold. The bug was
+  found by the overflow signal above, which this project's own suite now
+  enforces (`filterwarnings = ["error::UserWarning"]` in `pyproject.toml`) so
+  that neither the sample app nor the library's own helpers can quietly regress
+  that way again.
 
 ## [2.0.1]
 

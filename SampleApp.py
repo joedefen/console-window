@@ -29,10 +29,7 @@ SCREEN_NAMES = ('MAIN', 'HELP', 'HISTORY', 'THEMES')
 
 
 class DemoApp:
-    singleton = None
-
-    def __init__(self):
-        DemoApp.singleton = self
+    def __init__(self, backend=None):
         self.win = None
         self.spin = None
         self.stack = None
@@ -66,14 +63,20 @@ class DemoApp:
         # Configure console window
         win_opts = ConsoleWindowOpts(
             head_line=True,
-            body_rows=200,
-            head_rows=4,
+            # Pad capacity: add_body()/add_header() discard rows past this (they
+            # are counted in ConsoleWindow.rows_dropped, and the first one of each
+            # fill is warned about), so each pad must be big enough for what the
+            # screens actually draw.
+            body_rows=4000,  # the 'z' stress mode appends 2000 filler rows
+            head_rows=8,  # the help screen's nav-key block is 5 header rows
             min_cols_rows=(60,10),
             pick_attr=cs.A_REVERSE,
-            ctrl_c_terminates=True,
+            # Ctrl-C arrives as an ordinary key code (bound to 'quit' below)
+            # instead of tearing down curses.
+            ctrl_c_terminates=False,
         )
 
-        self.win = ConsoleWindow(opts=win_opts,)
+        self.win = ConsoleWindow(opts=win_opts, backend=backend)
         # Pass self.opts as spins_obj so stack.obj points to the right object
         self.stack = ScreenStack(self.win, self.opts, SCREEN_NAMES, screens)
 
@@ -84,7 +87,7 @@ class DemoApp:
         # Add view mode and sort options
         # NOTE: settings shown on the HELP screen are scoped to HELP_ST as well,
         # so their spinner keys keep working while help is open.
-        spin.add_key('quit', 'q - quit', genre='action')
+        spin.add_key('quit', 'q,CTL-C - quit', genre='action', keys={0x3, ord('q')})
         spin.add_key('escape', 'ESC,ENTER - back',
                      keys=[27,10,cs.KEY_ENTER], genre='action')
         spin.add_key('view_mode', 'v - view mode',
@@ -108,7 +111,22 @@ class DemoApp:
                      genre='action', scope={MAIN_ST})
         spin.add_key('alert_demo', 'l - alert demo',
                      genre='action', scope={MAIN_ST})
+
+        # Folded in from the retired dev self-test.
+        # Scoped to MAIN and HELP, like view_mode/sort_by, so the keys keep
+        # working while the help screen is open.
+        spin.add_key('pick_size', 'p - rows per pick', vals=[1, 2, 3],
+                     scope={MAIN_ST, HELP_ST})
+        spin.add_key('name', 'n - set name', prompt='Your name:',
+                     scope={MAIN_ST, HELP_ST})
+        spin.add_key('force_redraw', 'r - force full redraw', vals=[False, True],
+                     scope={MAIN_ST, HELP_ST})
+        spin.add_key('stress', 'z - stress (2000 filler rows)', vals=[False, True],
+                     scope={MAIN_ST, HELP_ST})
         self.win.set_handled_keys(spin.keys)
+
+        # Seed the prompt option so the answer() dialog opens with empty text.
+        self.opts.name = ''
 
         # Load sample data from /etc/passwd
         self._load_sample_data()
@@ -209,7 +227,8 @@ class DemoApp:
         while True:
             current_screen = self.screens[self.stack.curr.num]
             current_screen.draw_screen()
-            self.win.render()
+            # redraw=True forces the full-repaint recovery path (toggled by 'r').
+            self.win.render(redraw=self.opts.force_redraw)
 
             key = self.win.prompt(seconds=3.0)
             if key:
@@ -250,7 +269,7 @@ class MainScreen(DemoScreen):
         super().__init__('MAIN', app)
 
     def draw_screen(self):
-        self.app.win.set_pick_mode(True)
+        self.app.win.set_pick_mode(True, self.app.opts.pick_size)
 
         self._draw_body()
         self._draw_header()
@@ -302,6 +321,13 @@ class MainScreen(DemoScreen):
                     context=Context(genre='DECOR')
                 )
 
+        if app.opts.stress:
+            # Non-pickable filler: exercises large pads and the scroll indicator,
+            # and shows DECOR rows being skipped by navigation.
+            for extra in range(2000):
+                app.win.add_body(f'  filler {extra + 1}', attr=cs.A_DIM,
+                                 context=Context(genre='DECOR'))
+
     def _draw_header(self):
         app = self.app
         # Build the header explicitly from HeaderLine tokens: intent is declared,
@@ -320,6 +346,10 @@ class MainScreen(DemoScreen):
         line.text(' ').bracket_key('a').text('nsDemo')
         line.text(' ').key('l').text(':alrtDemo')
         line.text(' ').key('SPC').text(':process')
+        line.text(' ').bracket_key('p').text(f'ick={app.opts.pick_size}')
+        line.text(' ').bracket_key('n').text(f'ame={app.opts.name or "-"}')
+        line.text(' ').key('r').text('edraw')
+        line.text(' ').key('z').text(':stress')
         line.text(' ').bracket_key('t').text('hemes')
         line.text(' ').bracket_key('h').text('ist')
         line.text(' ').key('?').text(':help')
@@ -486,14 +516,15 @@ class ThemeScreen(DemoScreen):
         next_theme = themes[(idx + 1) % len(themes)]
         Theme.set(next_theme)
 
-def main():
+def main(backend=None):
     try:
-        app = DemoApp()
+        app = DemoApp(backend=backend)
         app.main_loop()
     except Exception as bummer:
-        app = DemoApp.singleton
-        if app and app.win:
-            app.win.stop_curses()
+        # Leave the terminal usable no matter how we failed.
+        win = ConsoleWindow.primary_window()
+        if win:
+            win.stop_curses()
         print('exception: ', str(bummer))
         print(traceback.format_exc())
 

@@ -54,6 +54,11 @@ Changelog = "https://github.com/joedefen/console-window/blob/main/CHANGELOG.md"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Pad overflow is a UserWarning rather than an error, by design: a user's app
+# should be told and keep limping (AUDIT.md §3.8).  Our own code has no such
+# excuse, so within this suite any UserWarning fails the run -- which is how the
+# sample app's too-small head pad and its truncated help screen were found.
+filterwarnings = ["error::UserWarning"]
 
 # ----------------------------------------------------------------------
 # RUFF LINT CONFIGURATION
@@ -67,7 +72,7 @@ select = ["E", "F", "W", "I", "B", "C4", "ANN", "RUF"]
 ignore = ["E501", "E701", "E731"]
 
 [tool.ruff.lint.per-file-ignores]
-# Tests, the interactive demo, and the package self-test are not part of the
-# typed public API, so annotation rules do not apply there.
+# Tests and the interactive demo are not part of the typed public API, so
+# annotation rules do not apply there.
 "tests/**" = ["ANN"]
-"ConsoleWindowDemo.py" = ["ANN"]
+"SampleApp.py" = ["ANN"]
