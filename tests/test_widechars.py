@@ -112,6 +112,25 @@ def test_add_header_attr_run_counts_code_points():
     assert count == len(win.head.texts[0])
 
 
+def test_add_body_truncates_to_pad_width_not_terminal_width():
+    # body_cols (8) is narrower than cols-1 (9): get_pad_width() must win, so a
+    # fresh line is stored no wider than the pad (was previously truncated to the
+    # raw terminal width, self.cols == 10).
+    win = make_window(cols=10, body_cols=8)
+    win.add_body('x' * 20)
+    assert win.body.texts[0] == 'x' * 8
+    assert tw.string_width(win.body.texts[0]) <= win.get_pad_width()
+
+
+def test_add_body_reserves_last_terminal_column():
+    # get_pad_width() is cols-1 even when the pad is wider: the last terminal
+    # column is reserved, matching draw()/highlight_picked().
+    win = make_window(cols=10, body_cols=50)
+    win.add_body('x' * 20)
+    assert win.body.texts[0] == 'x' * 9
+    assert tw.string_width(win.body.texts[0]) == win.get_pad_width()
+
+
 # --- draw padding -----------------------------------------------------------
 
 def test_draw_pads_to_cells():

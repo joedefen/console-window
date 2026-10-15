@@ -16,7 +16,8 @@ from typing import ClassVar
 class Theme:
     """Theme and color management for ConsoleWindow"""
 
-    # Semantic color pair constants (initialized in start_curses based on theme)
+    # Semantic color-pair IDs.  The pairs themselves are (re)initialized per theme
+    # by Theme.set() and, at startup, by ConsoleWindow.start_curses().
     DEFAULT = 0      # Default terminal colors
     DANGER = 1       # For destructive operations (wipe prompts)
     SUCCESS = 2      # For completed operations
@@ -28,7 +29,8 @@ class Theme:
     HOTSWAP = 9      # For newly inserted devices (hot-swapped)
     OLD_SUCCESS = 10 # For completed operations (dimmer)
 
-    # Current theme name (set in start_curses / Theme.set)
+    # Current theme name — single source of truth, written by Theme.set() and by
+    # Theme.set_active() (called from ConsoleWindow.start_curses()).
     _current: ClassVar[str | None] = None
 
     # Available themes

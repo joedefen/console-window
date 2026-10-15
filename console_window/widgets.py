@@ -149,9 +149,10 @@ class InlineConfirmation:
 
         # Handle single-key modes
         if self.mode in ('Y', 'y'):
-            expected = self.identity if self.mode == 'identity' else self.mode
-            if key == ord(expected[0]):
-                self.input_buffer = expected
+            # Only 'Y'/'y' reach here, so the trigger key is always the mode's
+            # first character (the old `self.mode == 'identity'` test was dead).
+            if key == ord(self.mode[0]):
+                self.input_buffer = self.mode
                 return 'confirmed'
             return 'continue'
 

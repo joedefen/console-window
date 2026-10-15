@@ -659,7 +659,10 @@ class ConsoleWindow:
                         ns.text_attrs[row].append((attr, len(actual_text)))
                     # Note: context not updated on resume
             else:
-                actual_text = textwidth.truncate(text, self.cols)
+                # Truncate to the single "usable width" (get_pad_width), matching
+                # the resume branch, draw() and highlight_picked() — not the raw
+                # terminal width, which is one column wider and uncapped by the pad.
+                actual_text = textwidth.truncate(text, self.get_pad_width())
                 ns.pad.addstr(row, 0, actual_text, attr)
                 ns.texts.append(actual_text)  # text only history
                 ns.text_attrs.append([(attr, len(actual_text))])  # run-length encoded
@@ -1201,9 +1204,6 @@ class ConsoleWindow:
                 self.pick_pos = self.scroll_pos + ind_pos - self.body_base
                 # indent = 1 if self.body.row_cnt > self.scroll_view_size else 0
         return indent
-
-
-    # Assuming this function is part of a class with attributes like self.scr, self.head, self.body, etc.
 
     def render_once(self, redraw: bool = False) -> None:
         """
