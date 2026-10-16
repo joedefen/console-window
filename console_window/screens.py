@@ -124,6 +124,9 @@ class ScreenStack:
                   name=self.screens[screen], pick_pos=-1,
                                 scroll_pos=-1, prev_pos=-1)
         self.win.pick_pos = self.win.scroll_pos = 0
+        # Entering a screen starts a fresh pick/scroll pairing; drop any
+        # free-scroll state left over from the screen we came from.
+        self.win.free_scroll = False
 
     def get_curr_obj(self) -> Screen | None:
         if self.curr:

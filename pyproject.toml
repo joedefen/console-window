@@ -26,7 +26,7 @@ name = "console-window"
 version = "2.0.1"
 description = "A robust curses wrapper for creating Text User Interfaces (TUIs)."
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 license = {file = "LICENSE"}
 
 dependencies = [
@@ -63,7 +63,7 @@ filterwarnings = ["error::UserWarning"]
 # ----------------------------------------------------------------------
 # RUFF LINT CONFIGURATION
 [tool.ruff]
-target-version = "py38"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "C4", "ANN", "RUF"]

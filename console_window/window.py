@@ -175,6 +175,14 @@ class ConsoleWindow:
         self.last_pick_pos = -1 # last highlighted position
         self.pick_mode = self.opts.pick_mode # whether in highlight mode
         self.pick_size = self.opts.pick_size # whether in highlight mode
+        # True while the user has deliberately scrolled past the picked row (or
+        # before it) so that non-pickable DECOR rows become viewable: in that
+        # state the pick-visibility clamp in _adjust_scroll_for_abut() must not
+        # drag the viewport back to pick_pos.  Cleared when navigation moves the
+        # pick.  Without it, the trailing filler rows of the stress mode were
+        # created but unreachable (the view snapped back to the last pickable
+        # row every frame).
+        self.free_scroll = False
         self.rows, self.cols = 0, 0
         self.body_cols, self.body_rows = self.opts.body_cols, self.opts.body_rows
         self.scroll_view_size = 0  # no. viewable lines of the body
@@ -753,8 +761,11 @@ class ConsoleWindow:
             self.body_base, self.rows)
 
     def _scroll_indicator_col(self) -> int:
+        # While free-scrolling through DECOR rows the picked row no longer tracks
+        # the viewport, so show the scroll position rather than the (parked) pick.
+        pick_mode = self.pick_mode and not self.free_scroll
         return geometry.scroll_indicator_col(
-            self.pick_mode, self.pick_pos, self.scroll_pos,
+            pick_mode, self.pick_pos, self.scroll_pos,
             self.max_scroll_pos, self.body.row_cnt, self.cols)
 
     def _calc_indicator(self, pos: int, pos0: int, pos9: int, ind0: int, ind9: int) -> int:
@@ -865,6 +876,12 @@ class ConsoleWindow:
         elif abut_range:
             # Apply abut constraints: "after trumps before"
             self._scroll_to_fit_abut(abut_range)
+        elif self.free_scroll:
+            # The user deliberately scrolled past the picked row to reveal
+            # non-pickable DECOR rows (see prompt()); leave the viewport where
+            # they put it -- clamped to range below -- instead of dragging it
+            # back to the picked row.
+            pass
         elif self.scroll_pos > self.pick_pos:
             # picked line would be above viewport - scroll up to show it
             self.scroll_pos = self.pick_pos
@@ -932,7 +949,11 @@ class ConsoleWindow:
         self.scr.vline(self.body_base, 0, ' ', self.scroll_view_size)
         if self.pick_pos >= 0:
             pos = self.pick_pos - self.scroll_pos + self.body_base
-            self.scr.addstr(pos, 0, '>', curses.A_REVERSE)
+            # While free-scrolling through trailing/leading DECOR the picked row
+            # can sit outside the viewport; only mark it when it is on screen,
+            # so the '>' never spills into the header band.
+            if self.body_base <= pos < self.body_base + self.scroll_view_size:
+                self.scr.addstr(pos, 0, '>', curses.A_REVERSE)
 
     def _draw_separator_and_indicator(self) -> None:
         self.scr.hline(self.head.view_cnt, 0, curses.ACS_HLINE, self.cols)
@@ -1577,11 +1598,17 @@ class ConsoleWindow:
             elif key in (ord('L'), ):
                 pos = self.scroll_pos + self.scroll_view_size-1
 
-            # Skip non-pickable lines in pick mode
+            # Skip non-pickable lines in pick mode.  `target`/`requested` are the
+            # raw move the key asked for (before DECOR-skipping): when no
+            # pickable row lies in that direction we scroll by that same amount,
+            # so j/k, the page keys and HOME/END still reach trailing/leading
+            # DECOR instead of stalling on the last pickable row.
+            target = pos
+            requested = target - was_pos
             scroll_adjustment = 0  # Track if we should adjust scroll even when pick doesn't move
-            if self.pick_mode and pos != was_pos:
+            if self.pick_mode and target != was_pos:
                 # Determine direction of movement
-                direction = 1 if pos > was_pos else -1
+                direction = 1 if target > was_pos else -1
 
                 # Find next pickable line in the direction of movement
                 attempts = 0
@@ -1591,22 +1618,38 @@ class ConsoleWindow:
                     pos += direction
                     attempts += 1
 
-                # If we went out of bounds or found no pickable line, stay at current position
-                # BUT still allow scrolling to reveal DECOR lines
+                # If we went out of bounds or found no pickable line, stay at
+                # current position BUT still allow scrolling to reveal DECOR
+                # lines the key asked to cross (not just the adjacent row, so a
+                # page/HOME/END move over a DECOR block works too).
                 if pos < 0 or pos >= self.body.row_cnt or attempts >= max_attempts:
-                    # Check if there are non-pickable lines in the direction we're trying to go
-                    # that could be revealed by scrolling
-                    check_pos = was_pos + direction
-                    if 0 <= check_pos < self.body.row_cnt and not self._is_pickable(check_pos):
-                        # There's a DECOR/TRANSIENT line in that direction - allow scroll adjustment
-                        scroll_adjustment = direction
+                    limit = min(max(target, 0), self.body.row_cnt - 1)
+                    probe = was_pos + direction
+                    while 0 <= probe < self.body.row_cnt:
+                        if not self._is_pickable(probe):
+                            # There's a DECOR/TRANSIENT line in that direction -
+                            # allow scroll adjustment.
+                            scroll_adjustment = requested
+                            break
+                        if probe == limit:
+                            break
+                        probe += direction
                     pos = was_pos
 
             if self.pick_mode:
                 self.pick_pos = pos
-                # If pick_pos didn't move but there are DECOR lines to reveal, adjust scroll
+                # If pick_pos didn't move but there are DECOR lines to reveal,
+                # scroll instead; latch free-scroll only when the view actually
+                # moves so a blocked move at the very top/bottom is a no-op.
                 if scroll_adjustment != 0 and pos == was_pos:
-                    self.scroll_pos += scroll_adjustment
+                    new_scroll = max(0, min(self.scroll_pos + scroll_adjustment,
+                                            self.max_scroll_pos))
+                    if new_scroll != self.scroll_pos:
+                        self.free_scroll = True
+                    self.scroll_pos = new_scroll
+                elif pos != was_pos:
+                    # A genuine pick move re-synchronises the view with the pick.
+                    self.free_scroll = False
             else:
                 self.scroll_pos = pos
                 self.pick_pos = pos

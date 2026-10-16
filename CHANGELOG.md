@@ -16,8 +16,21 @@ This project follows [Semantic Versioning](https://semver.org/).
   deliberately non-fatal: the excess is still discarded and the app keeps
   running, `-W error::UserWarning` turns it into a hard failure for anyone who
   wants that, and `clear()` re-arms the warning for the next fill.
+- A headless harness for the interactive core: `HeadlessBackend.queue_keys()`
+  feeds ordered key codes to the screen's `getch()`, and the new
+  `tests/test_interactive.py` (43 tests) drives `prompt()` and its navigation,
+  `render()`/`draw()`, the `answer()` dialog and the resize-recovery path
+  without a TTY. Coverage of `window.py` rises from 55% to 84% (missing
+  statements 444 → 161), so the half of the engine users actually feel is now
+  smoke-tested in CI (AUDIT.md §3.2).
 
 ### Changed
+- Raised the minimum supported Python to **3.10** (was 3.8): `requires-python =
+  ">=3.10"`, the Ruff `target-version` is now `py310`, and the CI matrix drops
+  the 3.8/3.9 legs. The 3.8 floor was never real — [`backend.py`](console_window/backend.py:35)
+  calls `curses.set_escdelay()`, which is new in 3.9, so every
+  `ConsoleWindow()` raised `AttributeError` on 3.8. 3.10 is a deliberate floor
+  rather than the bare 3.9 that `set_escdelay` would have permitted.
 - Renamed `ConsoleWindowDemo.py` to `SampleApp.py`: the old name collided with
   the library's own `set_demo_mode()` feature. Updated [`runner`](runner:1), the
   README, the ruff per-file-ignores and the headless smoke tests
@@ -50,6 +63,19 @@ This project follows [Semantic Versioning](https://semver.org/).
   self-test moved to `python -m console_window._selftest`.
 
 ### Fixed
+- Scrolling could not reach non-pickable `DECOR` rows that sit past the last
+  pickable row (or before the first one).  In pick mode the frame's
+  pick-visibility clamp in [`_adjust_scroll_for_abut()`](console_window/window.py:862)
+  reset `scroll_pos` back to `pick_pos` every frame, so the SampleApp's `z`
+  "stress" mode created 2000 filler rows that were unreachable — the view showed
+  the last pickable row plus one screen of filler and the scroll indicator sat
+  near the start.  Movement is now allowed to scroll past the pick (a new
+  `free_scroll` state) while the pick can find no pickable row in the requested
+  direction; the clamp is skipped in that state and restored as soon as a real
+  pick move resynchronises the view.  The blocked-move scroll amount is now the
+  *requested* delta rather than a single row, so page keys and `HOME`/`END`
+  traverse a `DECOR` block too, and the scroll indicator follows the viewport
+  while free-scrolling instead of the parked pick.
 - `SampleApp.py` asked for `head_rows=4`, but the help screen's nav-key block is
   five header rows, so the last line was being clipped in silence. Raised to 8,
   and the pad-sizing comment now records what each pad has to hold. The bug was

@@ -64,6 +64,11 @@ class _NoopSurface:
         self._rows = rows
         self._cols = cols
         self.calls: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
+        # Ordered queue of key codes returned by getch().  It is empty by
+        # default, so getch() reports "no key" (curses.ERR, -1) exactly as
+        # before; tests push keys here to drive the interactive loops
+        # (prompt/answer/navigation) without a TTY (AUDIT.md §3.2).
+        self.keys: list[int] = []
 
     def __getattr__(self, name: str) -> Callable[..., object]:
         def _noop(*args: object, **kwargs: object) -> object:
@@ -72,10 +77,19 @@ class _NoopSurface:
                 return (self._rows, self._cols)
             if name == 'getyx':
                 return (0, 0)
-            if name in ('getch', 'get_wch'):
+            if name == 'get_wch':
                 return -1
             return None
         return _noop
+
+    def getch(self) -> int:
+        # A real method (not the generic no-op) so queued keys are handed back
+        # one call at a time instead of the constant -1.
+        self.calls.append(('getch', (), {}))
+        return self.keys.pop(0) if self.keys else -1
+
+    def queue_keys(self, *keys: int) -> None:
+        self.keys.extend(keys)
 
     def getmaxyx(self) -> tuple[int, int]:
         return (self._rows, self._cols)
@@ -107,6 +121,12 @@ class HeadlessBackend:
         pad = _NoopSurface(rows, cols)
         self.pads.append(pad)
         return pad
+
+    def queue_keys(self, *keys: int) -> None:
+        # Queue curses key codes for the next getch() calls.  This is the seam
+        # that lets the interactive core (prompt/answer/navigation) be exercised
+        # headlessly (AUDIT.md §3.2).
+        self.screen.queue_keys(*keys)
 
     def has_colors(self) -> bool:
         return self._colors
