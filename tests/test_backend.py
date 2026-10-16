@@ -1,5 +1,6 @@
+import console_window.backend as backend_mod
 import console_window.window as window_mod
-from console_window.backend import HeadlessBackend
+from console_window.backend import CursesBackend, HeadlessBackend
 from console_window.opts import ConsoleWindowOpts
 from console_window.window import ConsoleWindow
 
@@ -11,8 +12,37 @@ def _make(backend=None):
 
 def test_headless_backend_exposes_protocol_surface():
     backend = HeadlessBackend()
-    for meth in ('start', 'newpad', 'stop'):
+    for meth in ('start', 'newpad', 'doupdate', 'curs_set', 'update_lines_cols',
+                 'is_term_resized', 'stop'):
         assert callable(getattr(backend, meth))
+
+
+def test_headless_backend_records_process_global_calls():
+    backend = HeadlessBackend()
+    backend.doupdate()
+    backend.doupdate()
+    backend.curs_set(0)
+    backend.update_lines_cols()
+    assert backend.doupdates == 2
+    assert backend.curs_set_calls == [0]
+    assert backend.update_lines_cols_calls == 1
+    assert backend.is_term_resized(24, 80) is False
+
+
+def test_curses_backend_delegates_process_global_calls(monkeypatch):
+    calls = []
+    monkeypatch.setattr(backend_mod.curses, 'doupdate', lambda: calls.append('doupdate'))
+    monkeypatch.setattr(backend_mod.curses, 'curs_set', lambda v: calls.append(('curs_set', v)))
+    monkeypatch.setattr(backend_mod.curses, 'update_lines_cols',
+                        lambda: calls.append('update_lines_cols'))
+    monkeypatch.setattr(backend_mod.curses, 'is_term_resized', lambda rows, cols: True)
+
+    be = CursesBackend()
+    be.doupdate()
+    be.curs_set(0)
+    be.update_lines_cols()
+    assert be.is_term_resized(24, 80) is True
+    assert calls == ['doupdate', ('curs_set', 0), 'update_lines_cols']
 
 
 def test_window_can_be_constructed_headless():

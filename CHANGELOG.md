@@ -53,6 +53,13 @@ This project follows [Semantic Versioning](https://semver.org/).
   `tests/test_interactive.py`; the `Textbox` monkeypatch in `tests/test_dialogs.py`
   is gone, along with the now-unused `_textbox_edit_on_enter()` helper (AUDIT.md
   §3.3).
+- `answer()`, `flash()` and the shared render/dialog helpers no longer call the
+  process-global `curses.doupdate()`/`curs_set()`/`update_lines_cols()`/
+  `is_term_resized()` directly. Four matching methods were added to
+  `RenderBackend`, implemented by `CursesBackend` (delegating to curses) and
+  `HeadlessBackend` (recording no-ops), so the dialogs are backend-driven end to
+  end and the `curs_set`/`doupdate` monkeypatches are gone from `tests/test_dialogs.py`
+  (AUDIT.md §3.3).
 
 ### Removed
 - `console_window/_selftest.py`, the TTY-only dev self-test. The old

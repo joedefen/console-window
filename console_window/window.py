@@ -327,7 +327,7 @@ class ConsoleWindow:
             if key == 27:  # ESC to abort
                 return False
             if key == curses.KEY_RESIZE:
-                curses.update_lines_cols()
+                self._backend.update_lines_cols()
                 self._set_screen_dims()
 
         return True
@@ -942,7 +942,7 @@ class ConsoleWindow:
         self._refresh_pads(indent)
 
         # --- 4. Final Update (Only one physical screen update) ---
-        curses.doupdate()
+        self._backend.doupdate()
 
     def _mark_pads_for_redraw(self) -> None:
         self.scr.redrawwin()
@@ -1062,8 +1062,8 @@ class ConsoleWindow:
 
                 self._draw_dialog_footer(row9, col0, text_win_width, dialog_abort)
                 self.scr.noutrefresh()
-                curses.doupdate()
-                curses.curs_set(0)  # Hide hardware cursor; reverse video shows position
+                self._backend.doupdate()
+                self._backend.curs_set(0)  # Hide hardware cursor; reverse video shows position
 
                 key = self.scr.getch()
 
@@ -1073,7 +1073,7 @@ class ConsoleWindow:
                     input_text, wrapped_ranges, wrapped_line_idx, cursor_cell)
 
                 if action is not None:
-                    curses.curs_set(0)
+                    self._backend.curs_set(0)
                     self._set_scr_timeout(prev_timeout_ms)
                     if action == 'submit':
                         return "".join(input_string)
@@ -1115,13 +1115,13 @@ class ConsoleWindow:
         except curses.error:
             pass  # Terminal too small even for message
         self.scr.noutrefresh()
-        curses.doupdate()
+        self._backend.doupdate()
         key = self.scr.getch()
         if key == 27:
             self._set_scr_timeout(prev_timeout_ms)
             return True
         if key == curses.KEY_RESIZE:
-            curses.update_lines_cols()
+            self._backend.update_lines_cols()
         return False
 
     def _draw_debug_indicator(self, row0: int, col0: int, toggle: bool) -> bool:
@@ -1291,7 +1291,7 @@ class ConsoleWindow:
             return self._dialog_delete(input_string, cursor_pos, forward=True), None
 
         if key == curses.KEY_RESIZE:
-            curses.update_lines_cols()
+            self._backend.update_lines_cols()
             return cursor_pos, 'resize'
 
         return self._dialog_insert(key, input_string, cursor_pos), None
@@ -1335,7 +1335,7 @@ class ConsoleWindow:
 
     def _recover_from_resize(self) -> None:
         self.scr.clear()
-        curses.update_lines_cols()
+        self._backend.update_lines_cols()
         self.rows, self.cols = self.scr.getmaxyx()
         # Drain any pending resize events to prevent infinite loop
         self.scr.nodelay(True)  # Make getch() non-blocking
@@ -1377,7 +1377,7 @@ class ConsoleWindow:
             except curses.error:
                 pass  # Ignore if terminal too small
             self.scr.noutrefresh()
-            curses.doupdate()
+            self._backend.doupdate()
 
         draw_flash()
 
@@ -1390,7 +1390,7 @@ class ConsoleWindow:
                 key = self.scr.getch()
                 if key == curses.ERR:
                     continue
-                if key == curses.KEY_RESIZE or curses.is_term_resized(self.rows, self.cols):
+                if key == curses.KEY_RESIZE or self._backend.is_term_resized(self.rows, self.cols):
                     self._set_screen_dims()
                     draw_flash()
                     continue
@@ -1450,7 +1450,7 @@ class ConsoleWindow:
                     if key == curses.ERR:
                         # A polling getch() also notices a resize that arrived
                         # without a KEY_RESIZE (mirrors flash()).
-                        if curses.is_term_resized(self.rows, self.cols):
+                        if self._backend.is_term_resized(self.rows, self.cols):
                             break  # redraw from scratch
                         continue
                     if key in (10, 13, curses.KEY_ENTER):
@@ -1602,7 +1602,7 @@ class ConsoleWindow:
             if key == curses.ERR:
                 continue
 
-            if key in (curses.KEY_RESIZE, ) or curses.is_term_resized(self.rows, self.cols):
+            if key in (curses.KEY_RESIZE, ) or self._backend.is_term_resized(self.rows, self.cols):
                 self._set_screen_dims()
                 if not self._check_min_size():
                     # User pressed ESC to abort during size check

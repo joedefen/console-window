@@ -3,6 +3,7 @@ import curses
 import pytest
 
 import console_window.window as window_mod
+from console_window.backend import HeadlessBackend
 from console_window.opts import ConsoleWindowOpts
 from console_window.window import ConsoleWindow
 
@@ -36,6 +37,7 @@ class FakeScreen:
 def make_window(scr, **opts_kwargs):
     win = object.__new__(ConsoleWindow)
     win.scr = scr
+    win._backend = HeadlessBackend(scr._rows, scr._cols)
     win.opts = ConsoleWindowOpts(**opts_kwargs)
     win.rows = scr._rows
     win.cols = scr._cols

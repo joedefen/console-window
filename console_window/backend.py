@@ -22,6 +22,18 @@ class RenderBackend(Protocol):
     def newpad(self, rows: int, cols: int) -> Surface:
         ...
 
+    def doupdate(self) -> None:
+        ...
+
+    def curs_set(self, visibility: int) -> None:
+        ...
+
+    def update_lines_cols(self) -> None:
+        ...
+
+    def is_term_resized(self, rows: int, cols: int) -> bool:
+        ...
+
     def has_colors(self) -> bool:
         ...
 
@@ -43,6 +55,18 @@ class CursesBackend:
 
     def newpad(self, rows: int, cols: int) -> Surface:
         return curses.newpad(rows, cols)
+
+    def doupdate(self) -> None:
+        curses.doupdate()
+
+    def curs_set(self, visibility: int) -> None:
+        curses.curs_set(visibility)
+
+    def update_lines_cols(self) -> None:
+        curses.update_lines_cols()
+
+    def is_term_resized(self, rows: int, cols: int) -> bool:
+        return bool(curses.is_term_resized(rows, cols))
 
     def has_colors(self) -> bool:
         try:
@@ -112,6 +136,12 @@ class HeadlessBackend:
         self.pads: list[_NoopSurface] = []
         self.stopped = False
         self._colors = colors
+        # Process-global curses calls the window used to make directly are
+        # recorded here instead, so the dialog/render paths are backend-driven
+        # and observable headlessly (AUDIT.md §3.3).
+        self.doupdates = 0
+        self.curs_set_calls: list[int] = []
+        self.update_lines_cols_calls = 0
 
     def start(self, timeout_ms: int) -> Surface:
         self.screen.timeout(timeout_ms)
@@ -121,6 +151,18 @@ class HeadlessBackend:
         pad = _NoopSurface(rows, cols)
         self.pads.append(pad)
         return pad
+
+    def doupdate(self) -> None:
+        self.doupdates += 1
+
+    def curs_set(self, visibility: int) -> None:
+        self.curs_set_calls.append(visibility)
+
+    def update_lines_cols(self) -> None:
+        self.update_lines_cols_calls += 1
+
+    def is_term_resized(self, rows: int, cols: int) -> bool:
+        return False
 
     def queue_keys(self, *keys: int) -> None:
         # Queue curses key codes for the next getch() calls.  This is the seam

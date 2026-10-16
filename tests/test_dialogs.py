@@ -74,10 +74,7 @@ def test_set_scr_timeout_records_and_delegates():
     assert win._scr_timeout_ms == 456
 
 
-def test_answer_restores_previous_timeout_on_submit(monkeypatch):
-    monkeypatch.setattr(window_mod.curses, 'doupdate', lambda: None)
-    monkeypatch.setattr(window_mod.curses, 'curs_set', lambda *args: None)
-
+def test_answer_restores_previous_timeout_on_submit():
     scr = FakeScreen(rows=24, cols=80, keys=[10])  # ENTER submits
     win = make_window(scr)
     win._scr_timeout_ms = 250  # non-default timeout in effect before the call
@@ -88,12 +85,12 @@ def test_answer_restores_previous_timeout_on_submit(monkeypatch):
     # rather than the class default (ConsoleWindow.timeout_ms).
     assert scr.timeouts == [5000, 250]
     assert win._scr_timeout_ms == 250
+    # doupdate()/curs_set() now go through the backend, not global curses.
+    assert win._backend.doupdates >= 1
+    assert 0 in win._backend.curs_set_calls
 
 
-def test_answer_restores_previous_timeout_on_esc(monkeypatch):
-    monkeypatch.setattr(window_mod.curses, 'doupdate', lambda: None)
-    monkeypatch.setattr(window_mod.curses, 'curs_set', lambda *args: None)
-
+def test_answer_restores_previous_timeout_on_esc():
     scr = FakeScreen(rows=24, cols=80, keys=[27])  # ESC aborts
     win = make_window(scr)
     win._scr_timeout_ms = 111
@@ -117,7 +114,6 @@ def test_answer_leaves_timeout_untouched_when_terminal_too_small():
 def test_alert_refreshes_dimensions_after_resize(monkeypatch):
     # rectangle() is the only helper that needs a live terminal (curses.ACS_*).
     monkeypatch.setattr(window_mod, 'rectangle', lambda *a, **k: None)
-    monkeypatch.setattr(window_mod.curses, 'is_term_resized', lambda rows, cols: False)
 
     # Live screen is 24x100, but the cached dims are stale (a resize happened).
     scr = FakeScreen(rows=24, cols=100, keys=[10])  # ENTER acknowledges

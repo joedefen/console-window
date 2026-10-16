@@ -23,15 +23,13 @@ _ACS_STANDINS = {
 
 @pytest.fixture(autouse=True)
 def _headless_curses(monkeypatch):
-    # The four curses calls the render/dialog path makes that genuinely require a
-    # terminal.  Everything else goes through the backend's no-op surfaces.
+    # The only curses names the drawing helpers still need are the ACS_* box
+    # glyphs, which are unbound until initscr().  The process-global calls
+    # (doupdate/curs_set/update_lines_cols/is_term_resized) now go through
+    # HeadlessBackend, so they need no monkeypatching here (AUDIT.md §3.3).
     for name, value in _ACS_STANDINS.items():
         if not hasattr(window_mod.curses, name):
             monkeypatch.setattr(window_mod.curses, name, value, raising=False)
-    monkeypatch.setattr(window_mod.curses, 'doupdate', lambda *a, **k: None)
-    monkeypatch.setattr(window_mod.curses, 'curs_set', lambda *a, **k: None)
-    monkeypatch.setattr(window_mod.curses, 'is_term_resized', lambda rows, cols: False)
-    monkeypatch.setattr(window_mod.curses, 'update_lines_cols', lambda *a, **k: None)
 
 
 @pytest.fixture

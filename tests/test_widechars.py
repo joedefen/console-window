@@ -5,6 +5,7 @@ import pytest
 
 import console_window.window as window_mod
 from console_window import textwidth as tw
+from console_window.backend import HeadlessBackend
 from console_window.opts import ConsoleWindowOpts
 from console_window.window import ConsoleWindow
 
@@ -72,6 +73,7 @@ def _stub_curses(monkeypatch):
 
 def make_window(cols=10, body_cols=10):
     win = object.__new__(ConsoleWindow)
+    win._backend = HeadlessBackend(cols, body_cols)
     win.opts = ConsoleWindowOpts()
     win.pick_mode = False
     win.cols = cols
@@ -176,6 +178,7 @@ def test_flash_wide_message_box_is_aligned():
     scr = CaptureScreen(cols=20)
     win = object.__new__(ConsoleWindow)
     win.scr = scr
+    win._backend = HeadlessBackend(scr._rows, scr._cols)
     win.opts = ConsoleWindowOpts()
     win.rows = scr._rows
     win.cols = scr._cols
