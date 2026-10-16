@@ -2,6 +2,7 @@ import console_window.backend as backend_mod
 import console_window.window as window_mod
 from console_window.backend import CursesBackend, HeadlessBackend
 from console_window.opts import ConsoleWindowOpts
+from console_window.theme import Theme
 from console_window.window import ConsoleWindow
 
 
@@ -112,7 +113,7 @@ def test_theme_broadcast_reaches_all_windows():
     try:
         # A color-pair integer is enough here: the headless surfaces record the
         # call without needing an initialised curses terminal.
-        ConsoleWindow._apply_default_colors(8 << 8)
+        ConsoleWindow._apply_default_colors(Theme.DEFAULT_BG << 8)
         assert first.scr.calls_named('bkgd')
         assert second.scr.calls_named('bkgd')
         assert first.body.pad.calls_named('bkgd')

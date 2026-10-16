@@ -367,12 +367,13 @@ class ConsoleWindow:
                 # Note: Can't change pair 0, so we set screen background directly
                 if default_fg != -1 or default_bg != -1:
                     # Create a color pair for default colors and set screen background
-                    curses.init_pair(8, default_fg, default_bg)
-                    scr.bkgd(' ', curses.color_pair(8))
+                    curses.init_pair(Theme.DEFAULT_BG, default_fg, default_bg)
+                    scr.bkgd(' ', curses.color_pair(Theme.DEFAULT_BG))
 
-            # Initialize semantic color pairs based on selected theme
-            for color_id in [Theme.DANGER, Theme.SUCCESS, Theme.WARNING,
-                           Theme.INFO, Theme.EMPHASIS, Theme.ERROR, Theme.PROGRESS, Theme.HOTSWAP]:
+            # Initialize semantic color pairs based on selected theme.  The set is
+            # the shared Theme.SEMANTIC_PAIRS, so startup and Theme.set() always
+            # agree (it used to omit OLD_SUCCESS here — AUDIT.md §3.9).
+            for color_id in Theme.SEMANTIC_PAIRS:
                 if color_id in theme:
                     fg, bg = theme[color_id]
                     curses.init_pair(color_id, fg, bg)

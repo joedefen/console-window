@@ -18,6 +18,19 @@ class Theme:
     HOTSWAP = 9      # For newly inserted devices (hot-swapped)
     OLD_SUCCESS = 10 # For completed operations (dimmer)
 
+    # The pair used for the theme's default fg/bg (screen and pad background).
+    # It is not a semantic role, but it shares the pair-id space above and used
+    # to be the bare literal ``8`` in two places.
+    DEFAULT_BG = 8
+
+    # The semantic roles, in initialisation order.  Both startup
+    # (ConsoleWindow._init_screen) and Theme.set() reinitialise exactly this set,
+    # so the two paths cannot drift apart (AUDIT.md §3.9): startup used to omit
+    # OLD_SUCCESS, leaving it on an uninitialised pair until a theme change.
+    SEMANTIC_PAIRS: ClassVar[tuple[int, ...]] = (
+        DANGER, SUCCESS, OLD_SUCCESS, WARNING, INFO, EMPHASIS, ERROR, PROGRESS, HOTSWAP,
+    )
+
     # Current theme name — single source of truth, written by Theme.set() and by
     # Theme.set_active() (called from ConsoleWindow.start_curses()).
     _current: ClassVar[str | None] = None
@@ -152,14 +165,13 @@ class Theme:
             default_bg = theme['default_bg']
             # Always update the default color pair and screen background
             # (even when -1, -1 to reset to terminal defaults)
-            curses.init_pair(8, default_fg, default_bg)
+            curses.init_pair(cls.DEFAULT_BG, default_fg, default_bg)
             # Broadcast to *every* live window — there is no longer a single
             # process-wide "static" window to update.
-            ConsoleWindow._apply_default_colors(curses.color_pair(8))
+            ConsoleWindow._apply_default_colors(curses.color_pair(cls.DEFAULT_BG))
 
         # Reinitialize color pairs with new theme
-        for color_id in [cls.DANGER, cls.SUCCESS, cls.OLD_SUCCESS, cls.WARNING,
-                       cls.INFO, cls.EMPHASIS, cls.ERROR, cls.PROGRESS, cls.HOTSWAP]:
+        for color_id in cls.SEMANTIC_PAIRS:
             if color_id in theme:
                 fg, bg = theme[color_id]
                 curses.init_pair(color_id, fg, bg)

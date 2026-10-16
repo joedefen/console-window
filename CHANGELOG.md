@@ -60,6 +60,12 @@ This project follows [Semantic Versioning](https://semver.org/).
   `HeadlessBackend` (recording no-ops), so the dialogs are backend-driven end to
   end and the `curs_set`/`doupdate` monkeypatches are gone from `tests/test_dialogs.py`
   (AUDIT.md §3.3).
+- `ConsoleWindow` startup and `Theme.set()` now (re)initialise the same semantic
+  colour pairs from the single `Theme.SEMANTIC_PAIRS` constant. Startup previously
+  omitted `OLD_SUCCESS`, so it rendered on an uninitialised pair (effectively pair
+  0) until the user changed theme. The magic pair id `8` is now the named
+  `Theme.DEFAULT_BG`. `tests/test_theme.py` pins the shared list, the historic id
+  and that both init paths agree (AUDIT.md §3.9).
 
 ### Removed
 - `console_window/_selftest.py`, the TTY-only dev self-test. The old
