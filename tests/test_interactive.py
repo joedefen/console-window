@@ -516,6 +516,98 @@ def test_answer_returns_none_when_terminal_too_small(make):
     assert win.answer() is None
 
 
+# --- alert(): the scrollable message box ------------------------------------
+
+def _tall_message(lines=50, width=60):
+    # wrap() splits on whitespace, so each `width`-cell word takes its own line
+    # in the 76-cell content column (60 + 1 + 60 > 76): `lines` wrapped rows.
+    return ' '.join(['y' * width] * lines)
+
+
+def _drawn_chars(backend):
+    return [c[1][2] for c in backend.screen.calls_named('addch') if len(c[1]) >= 3]
+
+
+def test_alert_runs_headless_and_acknowledges(make):
+    win, backend = make()
+    backend.queue_keys(10)  # ENTER
+    win.alert(message='hello', title='T')  # must not raise or block
+
+
+def test_alert_scrolls_tall_message_one_row_per_j(make):
+    win, backend = make()
+    backend.queue_keys(ord('j'), ord('j'), 10)
+    win.alert(message=_tall_message())
+    pad = backend.pads[-1]  # the alert content pad (head/body are pads 0/1)
+    assert pad.calls_named('refresh')[-1][1][0] == 2
+
+
+def test_alert_page_down_scrolls_a_full_visible_page(make):
+    win, backend = make()
+    backend.queue_keys(curses.KEY_NPAGE, 10)
+    win.alert(message=_tall_message())
+    pad = backend.pads[-1]
+    assert pad.calls_named('refresh')[-1][1][0] == 20  # box_height - 2 borders
+
+
+def test_alert_end_jumps_to_the_bottom(make):
+    win, backend = make()
+    backend.queue_keys(curses.KEY_END, 10)
+    win.alert(message=_tall_message())
+    pad = backend.pads[-1]
+    assert pad.calls_named('refresh')[-1][1][0] == 30  # 50 rows - 20 visible
+
+
+def test_alert_draws_more_and_up_markers_while_scrolling(make):
+    win, backend = make()
+    backend.queue_keys(ord('j'), 10)
+    win.alert(message=_tall_message())
+    drawn = _drawn_chars(backend)
+    assert '▼' in drawn  # content continues below the fold
+    assert '▲' in drawn  # one row scrolled above the fold
+
+
+def test_alert_short_message_does_not_scroll(make):
+    win, backend = make()
+    backend.queue_keys(10)
+    win.alert(message='hello')
+    pad = backend.pads[-1]
+    assert pad.calls_named('refresh')[-1][1][0] == 0
+    drawn = _drawn_chars(backend)
+    assert '▼' not in drawn and '▲' not in drawn
+
+
+def test_alert_height_cap_makes_a_short_message_scrollable(make):
+    win, backend = make()
+    backend.queue_keys(ord('j'), 10)
+    win.alert(message=_tall_message(lines=10), _height=3)  # 3 visible rows
+    pad = backend.pads[-1]
+    assert pad.calls_named('refresh')[-1][1][0] == 1
+
+
+def test_alert_non_scroll_key_is_ignored(make):
+    win, backend = make()
+    backend.queue_keys(ord('x'), 10)  # 'x' is not a scroll command
+    win.alert(message=_tall_message())
+    pad = backend.pads[-1]
+    assert pad.calls_named('refresh')[-1][1][0] == 0
+
+
+def test_alert_redraws_after_resize_then_acknowledges(make):
+    win, backend = make()
+    before = len(backend.pads)
+    backend.queue_keys(curses.KEY_RESIZE, 10)
+    win.alert(message='hello')
+    # The initial draw plus one rebuild of the pad after the resize event.
+    assert len(backend.pads) == before + 2
+
+
+def test_alert_returns_without_blocking_when_terminal_too_small(make):
+    win, _backend = make(HeadlessBackend(rows=4, cols=10))
+    win.alert(message='hi')  # no keys queued: must return on the size check
+    assert win._scr_timeout_ms == ConsoleWindow.timeout_ms  # timeout restored
+
+
 # --- resize recovery --------------------------------------------------------
 
 def test_recover_from_resize_drains_pending_keys(make):

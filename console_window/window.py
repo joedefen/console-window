@@ -14,7 +14,7 @@ import time
 import warnings
 import weakref
 from collections.abc import Iterable
-from curses.textpad import Textbox, rectangle
+from curses.textpad import rectangle
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Callable, ClassVar
 
@@ -75,6 +75,10 @@ class ConsoleWindow:
     flash_repaint: bool = True
     # How often (milliseconds) flash() polls for a key while the message is up.
     flash_poll_ms: int = 50
+    # How often (milliseconds) alert() polls for a key while its box is up.  A
+    # finite interval keeps the modal resize-aware (and lets a headless backend
+    # drive the loop) without changing what the user sees (AUDIT.md §3.3).
+    alert_poll_ms: int = 250
     # NOTE: these used to be ``static_scr``/``static_win`` process-wide class
     # attributes.  Live instances are now tracked in the module ``_WINDOWS``
     # registry (see start_curses/stop_curses/active_windows) — no singleton.
@@ -1403,104 +1407,167 @@ class ConsoleWindow:
 
 
     def alert(self, message: str = '', title: str = 'ALERT',
-
-
               _height: int | None = None, _width: int | None = None) -> None:
-        # Refresh the cached dimensions from the live screen first: a resize may
-        # have happened since the last render, and everything below draws from
-        # self.rows/self.cols (answer() recomputes for the same reason).
-        self._set_screen_dims()
+        # Modal, scrollable message box.  Content taller than the box is
+        # reachable with the usual navigation keys (j/k, arrows, PageUp/Down,
+        # Home/End, Space); ENTER acknowledges and returns.  Everything is drawn
+        # through self._backend/self.scr, so there is no curses.newpad()/newwin()/
+        # Textbox escape and the dialog is exercisable headlessly (AUDIT.md §3.3).
+        prev_timeout_ms = getattr(self, '_scr_timeout_ms', ConsoleWindow.timeout_ms)
+        try:
+            self._set_scr_timeout(self.alert_poll_ms)
+            while True:
+                # Refresh the cached dimensions from the live screen first: a
+                # resize may have happened since the last render, and everything
+                # below draws from self.rows/self.cols.
+                self._set_screen_dims()
 
-        # Auto-calculate dimensions with 1-cell border on all sides
-        # Leave 1 cell on each side for reverse video border
-        max_box_width = self.cols - 2  # 1 cell left, 1 cell right
+                layout = self._alert_layout(message, title, _height, _width)
+                if layout is None:
+                    return  # Terminal too small
+                (box_title, footer_text, lines, box_height,
+                 content_width, row0, row9, col0, col9) = layout
+
+                visible_rows = max(box_height - 2, 1)  # subtract top/bottom borders
+                max_scroll = max(len(lines) - visible_rows, 0)
+
+                # Build the content pad once (all lines); scrolling only moves
+                # the viewport via pad.refresh(scroll_top, ...), so a message
+                # taller than the box is reachable instead of being clipped.
+                pad = self._backend.newpad(max(len(lines), 1), content_width + 1)
+                for idx, line in enumerate(lines):
+                    pad.addstr(idx, 0, textwidth.truncate(line, content_width))
+
+                self._draw_alert_frame(box_title, footer_text, row0, row9, col0, col9,
+                                       content_width)
+                scroll_top = 0
+                self._paint_alert(pad, scroll_top, visible_rows, len(lines),
+                                  row0, row9, col0, col9)
+
+                # Inner key loop: scroll until the user acknowledges the alert.
+                while True:
+                    key = self.scr.getch()
+                    if key == curses.ERR:
+                        # A polling getch() also notices a resize that arrived
+                        # without a KEY_RESIZE (mirrors flash()).
+                        if curses.is_term_resized(self.rows, self.cols):
+                            break  # redraw from scratch
+                        continue
+                    if key in (10, 13, curses.KEY_ENTER):
+                        return  # acknowledged
+                    if key == curses.KEY_RESIZE:
+                        break  # redraw from scratch
+                    new_top = self._alert_scroll_target(key, scroll_top, visible_rows, max_scroll)
+                    if new_top != scroll_top:
+                        scroll_top = new_top
+                        self._paint_alert(pad, scroll_top, visible_rows, len(lines),
+                                          row0, row9, col0, col9)
+        finally:
+            self._set_scr_timeout(prev_timeout_ms)
+
+    @staticmethod
+    def _alert_scroll_target(key: int, scroll_top: int, visible_rows: int,
+                             max_scroll: int) -> int:
+        # "vim"-style scroll commands, matching the navigation family prompt()
+        # honours.  Any other key is not a scroll command and leaves the view put.
+        if key in (ord('k'), curses.KEY_UP):
+            target = scroll_top - 1
+        elif key in (ord('j'), curses.KEY_DOWN):
+            target = scroll_top + 1
+        elif key in (2, curses.KEY_PPAGE):            # Ctrl-B / PageUp
+            target = scroll_top - visible_rows
+        elif key in (6, curses.KEY_NPAGE, ord(' ')):  # Ctrl-F / PageDown / Space
+            target = scroll_top + visible_rows
+        elif key in (ord('0'), curses.KEY_HOME):
+            target = 0
+        elif key in (ord('$'), curses.KEY_END):
+            target = max_scroll
+        else:
+            return scroll_top
+        return min(max(target, 0), max_scroll)
+
+    def _alert_layout(self, message: str, title: str, _height: int | None,
+                      _width: int | None) -> tuple | None:
+        # Auto-calculate dimensions with a 1-cell reverse-video border on all
+        # sides.  _height/_width (content rows / content columns) cap the box so
+        # a caller can force a scrollable dialog; None keeps the full box.  With
+        # both None this reproduces the old full-box, 1-cell-margin geometry.
+        max_box_width = self.cols - 2   # 1 cell left, 1 cell right
         max_box_height = self.rows - 2  # 1 cell top, 1 cell bottom
-
         if max_box_width < 20 or max_box_height < 5:
-            return  # Terminal too small
+            return None  # terminal too small
 
-        # Calculate content width (box interior minus borders)
-        content_width = max_box_width - 2  # Subtract box borders
+        content_width = max_box_width - 2  # subtract the box borders
+        if _width is not None:
+            content_width = max(1, min(content_width, _width))
 
-        # Determine if title fits on box border, or needs to go inside
+        # Determine if the title fits on the box border, or needs to go inside.
         footer_text = 'Press ENTER to ack'
         title_available_width = content_width - textwidth.string_width(footer_text) - 2
 
-        lines = []
+        lines: list[str] = []
         if textwidth.string_width(title) > title_available_width:
-            # Title too long - use "alert" as box title, put real title inside
+            # Title too long - use "alert" as the box title, put the real title inside.
             box_title = 'alert'
-            # Wrap the actual title (cell-aware)
-            title_lines = textwidth.wrap(title, content_width)
-            lines.extend(title_lines)
-            lines.append('')  # Blank line separator
+            lines.extend(textwidth.wrap(title, content_width))
+            lines.append('')  # blank line separator
         else:
-            # Title fits on box border
             box_title = title
 
-        # Wrap message content (cell-aware)
+        # Wrap the message content (cell-aware).
         if message:
-            message_lines = textwidth.wrap(message, content_width)
-            lines.extend(message_lines)
+            lines.extend(textwidth.wrap(message, content_width))
 
-        # Calculate box dimensions - use full height with 1-cell border
-        content_height = len(lines)
-        box_height = max_box_height  # Use full available height
+        if _height is not None:
+            box_height = min(max_box_height, max(3, _height + 2))
+        else:
+            box_height = max_box_height
+        box_width = content_width + 2
 
-        # Calculate box position - 1 cell border on all sides
-        row0 = 1  # 1 cell from top
-        row9 = self.rows - 2  # 1 cell from bottom
-        col0 = 1  # 1 cell from left
-        col9 = self.cols - 2  # 1 cell from right
+        # Centre the (possibly capped) box inside the reverse-video frame; with
+        # the full box this is exactly the old 1-cell margin on every side.
+        row0 = max(1, (self.rows - box_height) // 2)
+        row9 = row0 + box_height - 1
+        col0 = max(1, (self.cols - box_width) // 2)
+        col9 = col0 + box_width - 1
+        return box_title, footer_text, lines, box_height, content_width, row0, row9, col0, col9
 
-        # Clear screen normally (no reverse video)
-        self.scr.clear()
+    def _draw_alert_frame(self, box_title: str, footer_text: str, row0: int, row9: int,
+                          col0: int, col9: int, content_width: int) -> None:
+        scr = self.scr
+        scr.clear()
+        # 1-cell reverse-video frame around the whole screen.
+        scr.insstr(0, 0, ' ' * self.cols, curses.A_REVERSE)
+        scr.insstr(self.rows - 1, 0, ' ' * self.cols, curses.A_REVERSE)
+        for row in range(1, self.rows - 1):
+            scr.addch(row, 0, ' ', curses.A_REVERSE)
+            scr.addch(row, self.cols - 1, ' ', curses.A_REVERSE)
 
-        # Draw 1-cell reverse video border around the box area
-        # Top and bottom borders (full width)
-        self.scr.insstr(0, 0, ' '*self.cols, curses.A_REVERSE)
-        self.scr.insstr(self.rows-1, 0, ' '*self.cols, curses.A_REVERSE)
-        # Left and right borders
-        for row in range(1, self.rows-1):
-            self.scr.addch(row, 0, ' ', curses.A_REVERSE)
-            self.scr.addch(row, self.cols-1, ' ', curses.A_REVERSE)
+        rectangle(scr, row0, col0, row9, col9)
+        # Fill the box interior with the normal background (over the reverse video).
+        for row in range(row0 + 1, row9):
+            scr.addstr(row, col0 + 1, ' ' * (col9 - col0 - 1))
 
-        # Draw box
-        rectangle(self.scr, row0, col0, row9, col9)
-
-        # Fill box interior with normal background (to override any reverse video)
-        for row in range(row0+1, row9):
-            self.scr.addstr(row, col0+1, ' '*(col9-col0-1))
-
-        # Add title on top border
-        self.scr.addstr(row0, col0+1, textwidth.truncate(box_title, content_width), curses.A_REVERSE)
-
-        # Add footer on bottom border
+        scr.addstr(row0, col0 + 1, textwidth.truncate(box_title, content_width), curses.A_REVERSE)
         footer_pos = col0 + 1 + content_width - textwidth.string_width(footer_text)
-        self.scr.addstr(row9, footer_pos, textwidth.truncate(footer_text, content_width))
+        scr.addstr(row9, footer_pos, textwidth.truncate(footer_text, content_width))
 
-        # Create pad for scrollable content
-        pad = curses.newpad(max(content_height, 1), content_width + 1)
+    def _paint_alert(self, pad: object, scroll_top: int, visible_rows: int,
+                     content_height: int, row0: int, row9: int,
+                     col0: int, col9: int) -> None:
+        scr = self.scr
+        # Scroll affordances on the box's left border.  Both cells are always
+        # repainted (marker or plain border) so a marker does not linger once
+        # the viewport scrolls back to that edge.
+        top_char = '▲' if scroll_top > 0 else curses.ACS_VLINE
+        bottom_char = '▼' if scroll_top + visible_rows < content_height else curses.ACS_VLINE
+        for row, char in ((row0 + 1, top_char), (row0 + visible_rows, bottom_char)):
+            scr.addch(row, col0, char, curses.A_BOLD if char in ('▲', '▼') else curses.A_NORMAL)
 
-        # Add lines to pad
-        for idx, line in enumerate(lines):
-            if idx < content_height:
-                pad.addstr(idx, 0, textwidth.truncate(line, content_width))
-
-        # Refresh screen
-        self.scr.refresh()
-
-        # Display content (scrollable if needed)
-        visible_rows = box_height - 2  # Subtract top and bottom borders
-        pad.refresh(0, 0, row0+1, col0+1, row0+visible_rows, col9-1)
-
-        # Wait for ENTER using dummy Textbox.  Textbox.edit() only stops when
-        # its validator returns the sentinel 7; _textbox_edit_on_enter maps the
-        # ENTER key codes onto that sentinel so any ENTER acknowledges the alert.
-        win = curses.newwin(1, 1, row9-1, col9-2)
-        curses.curs_set(0)  # Ensure cursor is off
-        Textbox(win).edit(_textbox_edit_on_enter).strip()
-        return
+        scr.noutrefresh()
+        # Move the pad viewport: pad row scroll_top maps to the box's first
+        # interior row, so content below the fold becomes reachable.
+        pad.refresh(scroll_top, 0, row0 + 1, col0 + 1, row0 + visible_rows, col9 - 1)
 
     def clear(self) -> None:
         self.scr.clear()
@@ -1672,8 +1739,3 @@ class ConsoleWindow:
                         self.last_demo_key = self._format_key_for_demo(key)
                     return key
         return None
-
-
-def _textbox_edit_on_enter(key: int) -> int:
-    # 7 is BEL / Ctrl-G, Textbox.do_command()'s "end edit" control code.
-    return 7 if key in (10, curses.KEY_ENTER) else key

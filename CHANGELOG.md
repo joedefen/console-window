@@ -37,6 +37,23 @@ This project follows [Semantic Versioning](https://semver.org/).
   (`tests/test_sample_app.py`) to match. The classes inside are still named
   `DemoApp`/`DemoScreen`.
 
+### Fixed
+- `ConsoleWindow.alert()` now actually scrolls. It used to build a pad sized to
+  the whole message but always refresh it at offset 0, so content taller than the
+  box was silently unreachable despite the "scrollable if needed" comment. The
+  content is now reachable with `j`/`k`, the arrow keys, PageUp/PageDown (and
+  Ctrl-B/Ctrl-F/Space) and Home/End, and the box's left border shows `▲`/`▼`
+  markers when content extends past the fold. The `_height`/`_width` parameters,
+  previously accepted and ignored, now cap the (centred) box; passing `None`
+  keeps the previous full-box, 1-cell-margin geometry.
+- `alert()` no longer reaches around the backend seam: it builds its content pad
+  through `RenderBackend.newpad()` and drives its own key loop rather than calling
+  module-level `curses.newpad()`/`curses.newwin()`/`Textbox`. It therefore runs
+  under `HeadlessBackend` and is covered by the new `alert()` tests in
+  `tests/test_interactive.py`; the `Textbox` monkeypatch in `tests/test_dialogs.py`
+  is gone, along with the now-unused `_textbox_edit_on_enter()` helper (AUDIT.md
+  §3.3).
+
 ### Removed
 - `console_window/_selftest.py`, the TTY-only dev self-test. The old
   `python -m console_window._selftest` entry point is gone; the features it

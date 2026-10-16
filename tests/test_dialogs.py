@@ -1,10 +1,9 @@
-import curses
-
 import pytest
 
 import console_window.window as window_mod
+from console_window.backend import HeadlessBackend
 from console_window.opts import ConsoleWindowOpts
-from console_window.window import ConsoleWindow, _textbox_edit_on_enter
+from console_window.window import ConsoleWindow
 
 # ``curses.ACS_*`` attributes only exist once curses has been initialized (i.e.
 # after ``initscr()``).  Provide stand-ins so the drawing code can run headless.
@@ -54,37 +53,16 @@ class FakeScreen:
     def refresh(self): pass
 
 
-class FakePad:
-    def addstr(self, *args, **kwargs): pass
-    def clear(self): pass
-    def refresh(self, *args, **kwargs): pass
-
-
-class FakeTextbox:
-    def __init__(self, *args, **kwargs): pass
-
-    def edit(self, validate=None):
-        return ''
-
-
 def make_window(scr, rows=None, cols=None, **opts_kwargs):
     win = object.__new__(ConsoleWindow)
     win.scr = scr
+    # alert()/answer() draw through the backend seam now; give the bare instance
+    # a headless one so no curses.newpad()/newwin() is required (AUDIT.md §3.3).
+    win._backend = HeadlessBackend(scr._rows, scr._cols)
     win.opts = ConsoleWindowOpts(**opts_kwargs)
     win.rows = scr._rows if rows is None else rows
     win.cols = scr._cols if cols is None else cols
     return win
-
-# --- the mod_key -> 7 Textbox sentinel -------------------------------------
-
-def test_textbox_sentinel_maps_enter_to_seven():
-    assert _textbox_edit_on_enter(10) == 7
-    assert _textbox_edit_on_enter(curses.KEY_ENTER) == 7
-
-
-def test_textbox_sentinel_passes_other_keys_through():
-    for key in (ord('a'), 27, curses.KEY_BACKSPACE, 32, 126):
-        assert _textbox_edit_on_enter(key) == key
 
 # --- answer() timeout restoration ------------------------------------------
 
@@ -137,15 +115,12 @@ def test_answer_leaves_timeout_untouched_when_terminal_too_small():
 # --- alert() dimension refresh ---------------------------------------------
 
 def test_alert_refreshes_dimensions_after_resize(monkeypatch):
-    # Stub the pieces that need a real TTY.
-    monkeypatch.setattr(window_mod.curses, 'newpad', lambda *a, **k: FakePad())
-    monkeypatch.setattr(window_mod.curses, 'newwin', lambda *a, **k: FakeScreen())
-    monkeypatch.setattr(window_mod.curses, 'curs_set', lambda *a: None)
+    # rectangle() is the only helper that needs a live terminal (curses.ACS_*).
     monkeypatch.setattr(window_mod, 'rectangle', lambda *a, **k: None)
-    monkeypatch.setattr(window_mod, 'Textbox', FakeTextbox)
+    monkeypatch.setattr(window_mod.curses, 'is_term_resized', lambda rows, cols: False)
 
     # Live screen is 24x100, but the cached dims are stale (a resize happened).
-    scr = FakeScreen(rows=24, cols=100)
+    scr = FakeScreen(rows=24, cols=100, keys=[10])  # ENTER acknowledges
     win = make_window(scr, rows=3, cols=5)
 
     win.alert(message='hello', title='T')
