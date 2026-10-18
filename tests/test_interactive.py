@@ -40,7 +40,8 @@ def make():
 
     def _make(backend=None, **opts):
         backend = backend if backend is not None else HeadlessBackend(rows=24, cols=80)
-        win = ConsoleWindow(opts=ConsoleWindowOpts(**opts), backend=backend)
+        win = ConsoleWindow(opts=ConsoleWindowOpts(**opts), backend=backend,
+                            singleton=False)
         created.append(win)
         return win, backend
 

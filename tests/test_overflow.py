@@ -9,6 +9,7 @@ def _make(head_rows=3, body_rows=5):
     return ConsoleWindow(
         opts=ConsoleWindowOpts(head_rows=head_rows, body_rows=body_rows),
         backend=HeadlessBackend(rows=24, cols=80),
+        singleton=False,
     )
 
 

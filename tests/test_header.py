@@ -116,6 +116,7 @@ def _make_window():
     return ConsoleWindow(
         opts=ConsoleWindowOpts(head_rows=3, body_rows=5),
         backend=HeadlessBackend(rows=24, cols=80),
+        singleton=False,
     )
 
 

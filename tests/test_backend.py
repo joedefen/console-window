@@ -1,3 +1,5 @@
+import subprocess
+import sys
 import warnings
 
 import pytest
@@ -11,8 +13,10 @@ from console_window.window import ConsoleWindow
 
 
 def _make(backend=None):
+    # The suite needs independent windows (and per-instance teardown), so it
+    # latches the process-wide mode to per-instance on the first construction.
     return ConsoleWindow(opts=ConsoleWindowOpts(body_rows=10, head_rows=3),
-                         backend=backend or HeadlessBackend())
+                         backend=backend or HeadlessBackend(), singleton=False)
 
 
 def test_headless_backend_exposes_protocol_surface():
@@ -151,7 +155,7 @@ def test_noop_surface_history_is_bounded():
 def test_deprecated_constructor_kwargs_warn():
     backend = HeadlessBackend()
     with pytest.warns(DeprecationWarning, match='opts='):
-        win = ConsoleWindow(body_rows=10, backend=backend)
+        win = ConsoleWindow(body_rows=10, backend=backend, singleton=False)
     try:
         assert win.opts.body_rows == 10
     finally:
@@ -163,7 +167,7 @@ def test_opts_constructor_does_not_warn():
     with warnings.catch_warnings():
         warnings.simplefilter('error', DeprecationWarning)
         win = ConsoleWindow(opts=ConsoleWindowOpts(body_rows=10, head_rows=3),
-                            backend=backend)
+                            backend=backend, singleton=False)
     try:
         assert win.opts.body_rows == 10
     finally:
@@ -217,6 +221,15 @@ def test_stop_curses_is_idempotent():
     assert backend.stopped is True
 
 
+def test_unbound_stop_curses_is_rejected_in_per_instance_mode():
+    win = _make()
+    try:
+        with pytest.raises(AssertionError, match='singleton'):
+            ConsoleWindow.stop_curses()
+    finally:
+        win.stop_curses()
+
+
 def test_context_manager_tears_down():
     backend = HeadlessBackend()
     with _make(backend) as win:
@@ -246,10 +259,52 @@ def test_theme_broadcast_reaches_all_windows():
         second.stop_curses()
 
 
-def test_no_process_wide_screen_singletons():
-    # Regression guard: the class-level singletons must be gone.
-    assert not hasattr(ConsoleWindow, 'static_scr')
-    assert not hasattr(ConsoleWindow, 'static_win')
+def test_singleton_mode_shares_the_process_screen_and_tears_down_globally():
+    # Singleton mode is process-wide, so prove it in a fresh interpreter rather
+    # than perturb the per-instance mode this test session has latched.
+    code = '''
+from console_window.backend import HeadlessBackend
+from console_window.opts import ConsoleWindowOpts
+from console_window.window import ConsoleWindow
+
+first_backend = HeadlessBackend()
+first = ConsoleWindow(opts=ConsoleWindowOpts(body_rows=3, head_rows=2),
+                      backend=first_backend, singleton=True)
+second = ConsoleWindow(opts=ConsoleWindowOpts(body_rows=3, head_rows=2),
+                       backend=HeadlessBackend())
+assert ConsoleWindow.static_scr is first.scr
+assert second.scr is first.scr
+assert ConsoleWindow.static_win is second
+assert ConsoleWindow.primary_window() is second
+ConsoleWindow.stop_curses()   # the pre-2.0 unbound call
+assert first.scr is None and second.scr is None
+assert ConsoleWindow.static_scr is None and ConsoleWindow.static_win is None
+assert first_backend.stopped is True
+assert ConsoleWindow.active_windows() == []
+'''
+    subprocess.run([sys.executable, '-c', code], check=True)
+
+
+def test_mixing_singleton_modes_asserts():
+    code = '''
+from console_window.backend import HeadlessBackend
+from console_window.opts import ConsoleWindowOpts
+from console_window.window import ConsoleWindow
+
+win = ConsoleWindow(opts=ConsoleWindowOpts(body_rows=3, head_rows=2),
+                    backend=HeadlessBackend(), singleton=True)
+try:
+    try:
+        ConsoleWindow(opts=ConsoleWindowOpts(body_rows=3, head_rows=2),
+                      backend=HeadlessBackend(), singleton=False)
+    except AssertionError as exc:
+        assert 'singleton' in str(exc)
+    else:
+        raise SystemExit('expected AssertionError')
+finally:
+    win.stop_curses()
+'''
+    subprocess.run([sys.executable, '-c', code], check=True)
 
 
 def test_atexit_is_registered():

@@ -53,7 +53,7 @@ def test_startup_initialises_every_semantic_pair(monkeypatch):
 
     backend = HeadlessBackend(colors=True)
     win = ConsoleWindow(opts=ConsoleWindowOpts(body_rows=10, head_rows=3),
-                        backend=backend)
+                        backend=backend, singleton=False)
     try:
         assert backend.start_color_calls == 1
         assert backend.use_default_colors_calls == 1

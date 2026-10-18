@@ -29,7 +29,7 @@ SCREEN_NAMES = ('MAIN', 'HELP', 'HISTORY', 'THEMES')
 
 
 class DemoApp:
-    def __init__(self, backend=None):
+    def __init__(self, backend=None, singleton=True):
         self.win = None
         self.spin = None
         self.stack = None
@@ -76,7 +76,7 @@ class DemoApp:
             ctrl_c_terminates=False,
         )
 
-        self.win = ConsoleWindow(opts=win_opts, backend=backend)
+        self.win = ConsoleWindow(opts=win_opts, backend=backend, singleton=singleton)
         # Pass self.opts as spins_obj so stack.obj points to the right object
         self.stack = ScreenStack(self.win, self.opts, SCREEN_NAMES, screens)
 
@@ -516,9 +516,9 @@ class ThemeScreen(DemoScreen):
         next_theme = themes[(idx + 1) % len(themes)]
         Theme.set(next_theme)
 
-def main(backend=None):
+def main(backend=None, singleton=True):
     try:
-        app = DemoApp(backend=backend)
+        app = DemoApp(backend=backend, singleton=singleton)
         app.main_loop()
     except Exception as bummer:
         # Leave the terminal usable no matter how we failed.

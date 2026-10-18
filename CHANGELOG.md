@@ -14,6 +14,13 @@ This project follows [Semantic Versioning](https://semver.org/).
   (AUDIT.md §3.4).
 - `[project.urls]` in `pyproject.toml` (Homepage / Repository / Issues /
   Changelog) so published package metadata carries project links.
+- `ConsoleWindow(..., singleton=True)` restores the historical process-wide
+  window model for applications that relied on it: `static_scr`/`static_win`
+  are populated, every window shares one process screen and backend, and the
+  unbound `ConsoleWindow.stop_curses()` tears it down. The first successful
+  construction latches the mode; constructing another window with a different
+  `singleton` value raises `AssertionError`. Pass `singleton=False` for
+  independent per-instance screens and teardown (the test suite does).
 - `ConsoleWindow.rows_dropped`, counting the rows `add_body()`/`add_header()`
   discard once that pad has reached `opts.body_rows` / `opts.head_rows`. The
   first discarded row of each fill episode also emits a `UserWarning` naming the

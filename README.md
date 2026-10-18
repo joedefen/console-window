@@ -149,6 +149,27 @@ For anything beyond a single list, subclass `Screen` and drive it with
 `ScreenStack` — that is what the sample app does, and it is the paradigm the
 library is designed around.
 
+### Singleton vs. per-instance windows
+
+`ConsoleWindow` supports two process-wide models, selected by the constructor's
+`singleton` argument:
+
+* **`singleton=True` (default)** — the historical process-wide model. Every
+  window draws through one shared screen, `ConsoleWindow.static_scr` and
+  `ConsoleWindow.static_win` are populated, and the unbound
+  `ConsoleWindow.stop_curses()` tears that screen down. Calling
+  `win.stop_curses()` on any singleton window does the same. A second window
+  reuses the first window's screen and backend.
+* **`singleton=False`** — per-instance windows. Each window owns its screen,
+  pads and teardown; `win.stop_curses()` stops only that window,
+  `ConsoleWindow.stop_all()` stops every live window, and the unbound
+  `ConsoleWindow.stop_curses()` is an error.
+
+The first successful construction latches the mode for the whole process.
+Mixing the two values raises `AssertionError` rather than silently changing what
+teardown means. Use `singleton=False` in tests and in applications that create
+independent windows (for example, one real window plus a headless one).
+
 ## Versioning and Deprecation
 
 `console-window` follows semantic versioning: patch releases fix behaviour

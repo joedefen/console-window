@@ -57,12 +57,18 @@ _PASSTHROUGH_EDITING_KEYS = frozenset({
 })
 
 # Live ConsoleWindow instances, held by weak reference and keyed by creation
-# order.  This replaces the old process-wide ``ConsoleWindow.static_scr`` /
-# ``ConsoleWindow.static_win`` singletons: several windows may now coexist (e.g.
-# a real one plus a headless one in a test), the registry keeps creation order
-# (so ``primary_window()`` is deterministic) and never keeps a window alive.
+# order.  The registry keeps creation order (so ``primary_window()`` is
+# deterministic) and never keeps a window alive.  It serves both models:
+# singleton windows share one process screen, while per-instance windows own
+# their own screen; the first successful construction latches which model this
+# process uses, because mixing them would make teardown ambiguous.
 _WINDOWS: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
 _WINDOW_IDS = itertools.count()
+
+# None until the first ConsoleWindow is constructed.  The value is process-wide
+# and deliberately never reset: ConsoleWindow(singleton=...) must agree on every
+# construction or the assertion in __init__ fires.
+_SINGLETON_MODE: bool | None = None
 
 # ``atexit`` teardown is registered once for the whole process, not once per
 # window, so creating multiple windows does not stack up duplicate handlers.
@@ -106,7 +112,27 @@ class TerminalTooSmallError(RuntimeError):
             f'{required_cols}x{required_rows}, have {actual_cols}x{actual_rows}')
 
 
+class _StopCurses:
+    """Dual-mode ``stop_curses`` descriptor.
+
+    Pre-2.0 exposed ``stop_curses`` as a static method, so apps called
+    ``ConsoleWindow.stop_curses()``; the per-instance model needs the bound
+    window.  A descriptor distinguishes the two call shapes, which a plain
+    method with ``self=None`` cannot do without lying to type checkers.
+    """
+
+    def __get__(self, obj: ConsoleWindow | None,
+                objtype: type[ConsoleWindow]) -> Callable[[], None]:
+        def stop() -> None:
+            if obj is None:
+                objtype._stop_legacy()
+            else:
+                obj._stop_instance()
+        return stop
+
+
 class ConsoleWindow:
+    stop_curses = _StopCurses()
     timeout_ms: int = 2000
     # Set by _register_window(); None once stop_curses() unregisters the window.
     _registry_key: int | None = None
@@ -125,16 +151,21 @@ class ConsoleWindow:
     # finite interval keeps the modal resize-aware (and lets a headless backend
     # drive the loop) without changing what the user sees.
     alert_poll_ms: int = 250
-    # NOTE: these used to be ``static_scr``/``static_win`` process-wide class
-    # attributes.  Live instances are now tracked in the module ``_WINDOWS``
-    # registry (see start_curses/stop_curses/active_windows) — no singleton.
+    # Populated only in singleton mode (the default).  The old API exposed these
+    # as the process-wide screen and active window; they are kept for the apps
+    # that relied on that model and remain None in per-instance mode.
+    static_scr: CursesSurface | None = None
+    static_win: ConsoleWindow | None = None
+    # Backend that created ``static_scr``; teardown must use it even after a
+    # later instance (with a different backend) has replaced ``static_win``.
+    _static_backend: RenderBackend | None = None
     nav_keys: str = '\n'.join(NAV_KEY_LINES)
     def __init__(self, opts: ConsoleWindowOpts | None = None, head_line: bool | None = None,
                  head_rows: int | None = None, body_rows: int | None = None,
                  body_cols: int | None = None, keys: set | list | None = None,
                  pick_mode: bool | None = None, pick_size: int | None = None,
                  mod_pick: Callable | None = None, ctrl_c_terminates: bool | None = None,
-                 backend: RenderBackend | None = None) -> None:
+                 backend: RenderBackend | None = None, singleton: bool = True) -> None:
         # Enforce either opts OR deprecated parameters, not both
         has_opts = opts is not None
         has_deprecated = any(p is not None for p in [head_line, head_rows, body_rows, body_cols,
@@ -142,6 +173,19 @@ class ConsoleWindow:
 
         if has_opts and has_deprecated:
             raise ValueError("Cannot use both 'opts' and deprecated parameters. Use opts only.")
+
+        # The singleton choice is process-wide: mixing modes would make screen
+        # ownership and teardown ambiguous, so the first successful construction
+        # latches it and any later disagreement is a programming error.
+        global _SINGLETON_MODE
+        mode = bool(singleton)
+        if _SINGLETON_MODE is None:
+            _SINGLETON_MODE = mode
+        else:
+            assert mode == _SINGLETON_MODE, (
+                f'ConsoleWindow(singleton={mode}) conflicts with this process '
+                f'(singleton={_SINGLETON_MODE}); every window must use the same value')
+        self.singleton = mode
 
         # Use opts or create default
         if has_opts:
@@ -183,7 +227,17 @@ class ConsoleWindow:
         # drawing API is described by CursesSurface, which is only a cast target
         # (curses.window and HeadlessBackend's no-op surface both satisfy it at
         # runtime).  This keeps addstr/border/insstr/... type-checked.
-        self.scr: CursesSurface = cast(CursesSurface, self._start_curses())
+        if self.singleton and ConsoleWindow.static_scr is not None:
+            # Singleton mode: every instance draws through the process screen
+            # and the backend that owns it, even if a different backend was
+            # passed to this constructor.
+            self._backend = ConsoleWindow._static_backend or self._backend
+            self.scr = ConsoleWindow.static_scr
+        else:
+            self.scr = self._start_curses()
+            if self.singleton:
+                ConsoleWindow.static_scr = self.scr
+                ConsoleWindow._static_backend = self._backend
         # curses.window exposes no gettimeout(), so every place that sets a read
         # timeout records it here (via _set_scr_timeout).  This lets modal
         # dialogs such as answer() restore the timeout that was in effect before
@@ -223,8 +277,10 @@ class ConsoleWindow:
                     self.body.pad.bkgd(' ', self._backend.color_pair(Theme.DEFAULT_BG))
 
         # Register this instance so theme broadcasts and process teardown reach
-        # it (replaces the old ``ConsoleWindow.static_win = self``).
+        # it.  Singleton mode also republishes the old ``static_win`` pointer.
         _register_window(self)
+        if self.singleton:
+            ConsoleWindow.static_win = self
 
         self.mod_pick = self.opts.mod_pick # call back to modify highlighted row
         self.hor_line_cnt = 1 if self.opts.head_line else 0 # no. h-lines in header
@@ -399,7 +455,16 @@ class ConsoleWindow:
 
     @classmethod
     def start_curses(cls, backend: RenderBackend | None = None) -> CursesSurface:
-        return cls._init_screen(backend if backend is not None else CursesBackend())
+        # Legacy class-level entry point: in singleton mode it shares the one
+        # process screen rather than starting a second terminal session.
+        if _SINGLETON_MODE and cls.static_scr is not None:
+            return cls.static_scr
+        screen_backend = backend if backend is not None else CursesBackend()
+        scr = cls._init_screen(screen_backend)
+        if _SINGLETON_MODE:
+            cls.static_scr = scr
+            cls._static_backend = screen_backend
+        return scr
 
     @staticmethod
     def _init_screen(backend: RenderBackend) -> CursesSurface:
@@ -459,7 +524,12 @@ class ConsoleWindow:
         if self.pick_mode:
             self._pick_clear_pending = True
 
-    def stop_curses(self) -> None:
+    def _stop_instance(self) -> None:
+        """Stop this window (and, in singleton mode, the shared screen)."""
+        if getattr(self, 'singleton', False):
+            self._stop_singleton()
+            return
+
         scr = getattr(self, 'scr', None)
         if scr is None:
             return
@@ -469,6 +539,36 @@ class ConsoleWindow:
         finally:
             self.scr = cast(CursesSurface, None)
             _unregister_window(self)
+            signals.teardown_ctrl_c()
+
+    @classmethod
+    def _stop_legacy(cls) -> None:
+        """The pre-2.0 ``ConsoleWindow.stop_curses()`` call."""
+        assert _SINGLETON_MODE is not False, (
+            'ConsoleWindow.stop_curses() without an instance is only valid '
+            'in singleton mode; use win.stop_curses() or ConsoleWindow.stop_all()')
+        win = cls.static_win
+        if win is not None:
+            win.stop_curses()
+
+    @classmethod
+    def _stop_singleton(cls) -> None:
+        """Tear down the shared screen and mark every window stopped."""
+        scr = ConsoleWindow.static_scr
+        if scr is None:
+            return
+        backend = ConsoleWindow._static_backend or CursesBackend()
+        windows = list(_WINDOWS.values())
+        ConsoleWindow.static_scr = None
+        ConsoleWindow.static_win = None
+        ConsoleWindow._static_backend = None
+        for win in windows:
+            win.scr = cast(CursesSurface, None)
+        try:
+            backend.stop(scr)
+        finally:
+            for win in windows:
+                _unregister_window(win)
             signals.teardown_ctrl_c()
 
     def __enter__(self) -> ConsoleWindow:
@@ -483,6 +583,10 @@ class ConsoleWindow:
 
     @classmethod
     def primary_window(cls) -> ConsoleWindow | None:
+        # Singleton mode restores the old "the last constructed window is the
+        # active one" pointer; per-instance mode keeps the creation-order rule.
+        if _SINGLETON_MODE:
+            return cls.static_win
         windows = cls.active_windows()
         return windows[-1] if windows else None
 
