@@ -61,6 +61,13 @@ This project follows [Semantic Versioning](https://semver.org/).
   `DemoApp`/`DemoScreen`.
 
 ### Fixed
+- Navigation keys are responsive again. 2.0.0 made every body row pass through
+  wide-character-aware `textwidth.truncate()`, which ran three `unicodedata`
+  lookups per character on every full redraw; a 2,000-row screen spent ~39 ms
+  of a ~41 ms frame there. Printable ASCII now takes a direct one-cell path,
+  repeated `string_width()`/`truncate()` calls are memoised (a TUI redraws the
+  same rows on each keypress), and non-ASCII glyph widths are cached. The same
+  headless redraw is now ~4 ms, including mixed `✔`/`─`/`◆` rows.
 - Hygiene debt from AUDIT.md §3.14: removed blank lines inside the
   `index_at_cell()`/`answer()` signatures and the commented-out assignment in
   `fix_positions()`; replaced `render()`'s `print()`/`except Exception` failure

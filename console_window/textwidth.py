@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unicodedata
+from functools import lru_cache
 
 __all__ = [
     'cell_to_index',
@@ -20,9 +21,21 @@ __all__ = [
 _ZERO_WIDTH_CATEGORIES = frozenset({'Mn', 'Me', 'Cf', 'Cc'})
 
 
-def char_width(ch: str) -> int:
-    if not ch:
-        return 0
+def _is_plain_ascii(text: str) -> bool:
+    # Fast path for the overwhelmingly common terminal case.  Printable ASCII
+    # occupies exactly one cell per code point, so the per-character
+    # unicodedata scan in char_width() can be skipped entirely.  Control
+    # characters are excluded because this module treats them as zero-width.
+    # The checks themselves are C-level string scans, and keep add_body() on
+    # the same cost profile as the pre-2.0 plain slicing it replaced.
+    return text.isascii() and text.isprintable()
+
+
+@lru_cache(maxsize=4096)
+def _non_ascii_char_width(ch: str) -> int:
+    # Only reached for non-printable-ASCII characters.  A terminal UI reuses a
+    # small alphabet (box drawing, check marks, CJK, emoji), so caching turns
+    # the three unicodedata lookups into one dict hit after the first sighting.
     if unicodedata.combining(ch):
         return 0
     if unicodedata.category(ch) in _ZERO_WIDTH_CATEGORIES:
@@ -32,13 +45,33 @@ def char_width(ch: str) -> int:
     return 1
 
 
+def char_width(ch: str) -> int:
+    if not ch:
+        return 0
+    # Printable ASCII is one cell.  This branch is what keeps mixed text (the
+    # common case: ASCII rows with a ✔/─/◆ glyph) from paying unicodedata
+    # costs for every ordinary character.
+    if ' ' <= ch <= '~':
+        return 1
+    return _non_ascii_char_width(ch)
+
+
+# A TUI redraws the same body rows on every keypress, so these pure functions
+# otherwise repeat the same unicode scan for every navigation key.  Bounded
+# caches turn that into a dict hit while keeping memory predictable.
+@lru_cache(maxsize=4096)
 def string_width(text: str) -> int:
+    if _is_plain_ascii(text):
+        return len(text)
     return sum(char_width(ch) for ch in text)
 
 
+@lru_cache(maxsize=4096)
 def truncate(text: str, max_width: int) -> str:
     if max_width <= 0:
         return ''
+    if _is_plain_ascii(text):
+        return text if len(text) <= max_width else text[:max_width]
     total = 0
     for i, ch in enumerate(text):
         w = char_width(ch)
@@ -61,6 +94,8 @@ def rjust(text: str, width: int) -> str:
 def cell_to_index(text: str, col: int) -> int:
     if col <= 0:
         return 0
+    if _is_plain_ascii(text):
+        return min(col, len(text))
     total = 0
     for i, ch in enumerate(text):
         w = char_width(ch)

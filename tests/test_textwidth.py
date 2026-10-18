@@ -41,6 +41,27 @@ def test_truncate_narrow():
     assert tw.truncate('abc', 10) == 'abc'
 
 
+def test_ascii_fast_path_keeps_control_chars_zero_width():
+    # Printable ASCII takes the fast path; control characters must still fall
+    # back to the unicodedata rules and occupy no cells.
+    assert tw.string_width('a\tb') == 2
+    assert tw.truncate('a\tb', 10) == 'a\tb'
+    assert tw.cell_to_index('a\tb', 1) == 2
+
+
+def test_ascii_fast_path_skips_unicodedata(monkeypatch):
+    def unexpected(ch):
+        raise AssertionError(f'unicodedata called for ASCII {ch!r}')
+
+    monkeypatch.setattr(tw.unicodedata, 'combining', unexpected)
+    monkeypatch.setattr(tw.unicodedata, 'category', unexpected)
+    monkeypatch.setattr(tw.unicodedata, 'east_asian_width', unexpected)
+    tw.string_width.cache_clear()
+    tw.truncate.cache_clear()
+    assert tw.string_width('plain ascii') == 11
+    assert tw.truncate('plain ascii', 5) == 'plain'
+
+
 def test_truncate_never_splits_wide_char():
     # 3 cells can hold one wide (2) char but not two (4).
     assert tw.truncate(CJK * 2, 3) == CJK
