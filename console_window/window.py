@@ -42,12 +42,25 @@ NAV_KEY_LINES: tuple[str, ...] = (
     '  Ctrl-d:  half-page down     Ctrl-f, NPAGE:  page down',
 )
 
+# Control keys that drive the same movements as the page keys.  They live here
+# rather than inside `prompt()` so the navigation map and the help text above
+# cannot drift apart silently.
+_CTRL_PAGE_UP, _CTRL_HALF_DOWN, _CTRL_PAGE_DOWN, _CTRL_HALF_UP = 2, 4, 6, 21
+
+# Editing keys that passthrough mode hands to the application unchanged, in
+# addition to printable characters, navigation keys and `handled_keys`.
+_PASSTHROUGH_EDITING_KEYS = frozenset({
+    curses.KEY_BACKSPACE, 127, 8, 263,  # backspace variants
+    curses.KEY_LEFT, curses.KEY_RIGHT,
+    curses.KEY_HOME, curses.KEY_END,
+    1, 5,  # Ctrl-A, Ctrl-E
+})
+
 # Live ConsoleWindow instances, held by weak reference and keyed by creation
 # order.  This replaces the old process-wide ``ConsoleWindow.static_scr`` /
 # ``ConsoleWindow.static_win`` singletons: several windows may now coexist (e.g.
 # a real one plus a headless one in a test), the registry keeps creation order
-# (so ``primary_window()`` is deterministic) and never keeps a window alive
-# (AUDIT.md §4.5).
+# (so ``primary_window()`` is deterministic) and never keeps a window alive.
 _WINDOWS: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
 _WINDOW_IDS = itertools.count()
 
@@ -81,7 +94,7 @@ class TerminalTooSmallError(RuntimeError):
     # opts.min_cols_rows or the requested box size.  This is deliberately a
     # RuntimeError (not a curses.error) so the dialog's own recovery loop cannot
     # swallow it, and it is distinct from answer() returning None, which means
-    # the user aborted (AUDIT.md §3.5).
+    # the user aborted (AUDIT.md §3.6).
     def __init__(self, required_rows: int, required_cols: int,
                  actual_rows: int, actual_cols: int) -> None:
         self.required_rows = required_rows
@@ -110,7 +123,7 @@ class ConsoleWindow:
     flash_poll_ms: int = 50
     # How often (milliseconds) alert() polls for a key while its box is up.  A
     # finite interval keeps the modal resize-aware (and lets a headless backend
-    # drive the loop) without changing what the user sees (AUDIT.md §3.3).
+    # drive the loop) without changing what the user sees.
     alert_poll_ms: int = 250
     # NOTE: these used to be ``static_scr``/``static_win`` process-wide class
     # attributes.  Live instances are now tracked in the module ``_WINDOWS``
@@ -135,7 +148,17 @@ class ConsoleWindow:
             assert opts is not None  # guaranteed by has_opts
             self.opts = opts
         elif has_deprecated:
-            # Backward compatibility: create opts from deprecated parameters
+            # Backward compatibility: create opts from deprecated parameters.
+            # Warn so applications get a migration signal before these are
+            # removed; stacklevel=2 points at the caller, not this module.
+            warnings.warn(
+                'ConsoleWindow(head_line=..., head_rows=..., body_rows=..., '
+                'body_cols=..., keys=..., pick_mode=..., pick_size=..., '
+                'mod_pick=..., ctrl_c_terminates=...) is deprecated; pass '
+                'ConsoleWindowOpts through opts= instead.',
+                DeprecationWarning,
+                stacklevel=2,
+            )
             self.opts = ConsoleWindowOpts(
                 head_line=head_line if head_line is not None else True,
                 head_rows=head_rows if head_rows is not None else 50,
@@ -196,8 +219,8 @@ class ConsoleWindow:
                 default_fg = theme['default_fg']
                 default_bg = theme['default_bg']
                 if default_fg != -1 or default_bg != -1:
-                    self.head.pad.bkgd(' ', curses.color_pair(8))
-                    self.body.pad.bkgd(' ', curses.color_pair(8))
+                    self.head.pad.bkgd(' ', self._backend.color_pair(Theme.DEFAULT_BG))
+                    self.body.pad.bkgd(' ', self._backend.color_pair(Theme.DEFAULT_BG))
 
         # Register this instance so theme broadcasts and process teardown reach
         # it (replaces the old ``ConsoleWindow.static_win = self``).
@@ -384,10 +407,11 @@ class ConsoleWindow:
         signals.setup_ctrl_c()
         scr = cast(CursesSurface, backend.start(ConsoleWindow.timeout_ms))
 
-        # Initialize color support with theme
+        # Initialize color support with theme.  Every colour call goes through
+        # the backend, so a non-curses backend that reports colours can use it.
         if backend.has_colors():
-            curses.start_color()
-            curses.use_default_colors()  # Allow -1 for default terminal colors
+            backend.start_color()
+            backend.use_default_colors()  # Allow -1 for default terminal colors
 
             # Select theme from the Theme registry (single source of truth) or
             # fall back to the default.  No environment variable is involved:
@@ -406,16 +430,16 @@ class ConsoleWindow:
                 # Note: Can't change pair 0, so we set screen background directly
                 if default_fg != -1 or default_bg != -1:
                     # Create a color pair for default colors and set screen background
-                    curses.init_pair(Theme.DEFAULT_BG, default_fg, default_bg)
-                    scr.bkgd(' ', curses.color_pair(Theme.DEFAULT_BG))
+                    backend.init_pair(Theme.DEFAULT_BG, default_fg, default_bg)
+                    scr.bkgd(' ', backend.color_pair(Theme.DEFAULT_BG))
 
             # Initialize semantic color pairs based on selected theme.  The set is
             # the shared Theme.SEMANTIC_PAIRS, so startup and Theme.set() always
-            # agree (it used to omit OLD_SUCCESS here — AUDIT.md §3.9).
+            # agree (it used to omit OLD_SUCCESS here).
             for color_id in Theme.SEMANTIC_PAIRS:
                 if color_id in theme:
                     fg, bg = theme[color_id]
-                    curses.init_pair(color_id, fg, bg)
+                    backend.init_pair(color_id, fg, bg)
 
         return scr
 
@@ -1053,7 +1077,7 @@ class ConsoleWindow:
         if not self._dialog_geometry(height, width)[0]:
             # No dialog can be shown at all.  Raise instead of returning None:
             # None means the user aborted, and callers must not act on a cancel
-            # the user never made (AUDIT.md §3.5).
+            # the user never made (AUDIT.md §3.6).
             raise self._too_small_error(height)
 
         # Set longer timeout for dialog - redraw every 5s for screen recovery
@@ -1470,7 +1494,7 @@ class ConsoleWindow:
         # reachable with the usual navigation keys (j/k, arrows, PageUp/Down,
         # Home/End, Space); ENTER acknowledges and returns.  Everything is drawn
         # through self._backend/self.scr, so there is no curses.newpad()/newwin()/
-        # Textbox escape and the dialog is exercisable headlessly (AUDIT.md §3.3).
+        # Textbox escape and the dialog is exercisable headlessly.
         prev_timeout_ms = getattr(self, '_scr_timeout_ms', ConsoleWindow.timeout_ms)
         try:
             self._set_scr_timeout(self.alert_poll_ms)
@@ -1639,163 +1663,217 @@ class ConsoleWindow:
         self.head.row_cnt = self.body.row_cnt = 0
         self.head.rows_dropped = self.body.rows_dropped = 0
 
+    # --- prompt(): key intake, special keys, app passthrough, navigation ------
+    #
+    # `prompt()` used to be a single 160-line function with a cyclomatic
+    # complexity of 43 (AUDIT.md §3.5).  The seams below mirror the ones already
+    # used by `answer()` and the two `handle_key()` implementations: read a key,
+    # classify it, then act.  Each helper is small enough for `C901` to protect.
+
+    def _pop_pending_key(self) -> int | None:
+        """Return the next queued key that this window handles, if any."""
+        while self.pending_keys:
+            key = self.pending_keys.pop()
+            if key in self.handled_keys:
+                return key
+        return None
+
+    def _handle_prompt_key(self, key: int) -> tuple[bool, int | None]:
+        """Classify one key.  The flag is True when prompt() should return."""
+        if signals.ctrl_c_flag or key == curses.ERR or self._is_resize(key):
+            return self._handle_prompt_control(key)
+        return self._handle_prompt_app_or_navigation(key)
+
+    def _is_resize(self, key: int) -> bool:
+        return key == curses.KEY_RESIZE or self._backend.is_term_resized(self.rows, self.cols)
+
+    def _handle_prompt_control(self, key: int) -> tuple[bool, int | None]:
+        if signals.ctrl_c_flag:
+            return self._handle_prompt_ctrl_c(key)
+        if key == curses.ERR:
+            # Nothing was typed; keep waiting for input.
+            return False, None
+        return True, self._handle_prompt_resize()
+
+    def _handle_prompt_ctrl_c(self, key: int) -> tuple[bool, int | None]:
+        # Re-queue the key that raced the signal so the app still sees it.
+        if key in self.handled_keys:
+            self.pending_keys.add(key)
+        signals.ctrl_c_flag = False  # Reset flag
+        if 0x3 in self.handled_keys:
+            return True, 0x3  # Return the ETX key code
+        return False, None
+
+    def _handle_prompt_resize(self) -> int | None:
+        self._set_screen_dims()
+        if not self._check_min_size() and 27 in self.handled_keys:
+            # User pressed ESC to abort during size check.
+            return 27
+        # Return to the caller so it can redraw at the new size.
+        return None
+
+    def _record_demo_key(self, key: int) -> None:
+        if self.opts.demo_mode and key not in NAVIGATION_KEYS:
+            self.last_demo_key = self._format_key_for_demo(key)
+
+    def _clear_demo_indicator(self) -> None:
+        if self.opts.demo_mode:
+            self.last_demo_key = ''
+
+    def _is_passthrough_key(self, key: int) -> bool:
+        return (32 <= key <= 126 or key in _PASSTHROUGH_EDITING_KEYS
+                or key in NAVIGATION_KEYS or key in self.handled_keys)
+
+    def _passthrough_result(self, key: int) -> int | None:
+        if not self.passthrough_mode or not self._is_passthrough_key(key):
+            return None
+        self._record_demo_key(key)
+        return key
+
+    def _handle_prompt_app_or_navigation(self, key: int) -> tuple[bool, int | None]:
+        done, result = self._handle_prompt_app_key(key)
+        if done:
+            return done, result
+        return self._handle_prompt_navigation(key)
+
+    def _handle_prompt_app_key(self, key: int) -> tuple[bool, int | None]:
+        passed = self._passthrough_result(key)
+        if passed is not None:
+            return True, passed
+        if key in self.handled_keys and not self.relax_handled_keys:
+            self._record_demo_key(key)
+            return True, key  # return for handling
+        if key in NAVIGATION_KEYS:
+            self._clear_demo_indicator()
+        return False, None
+
+    def _navigation_target(self, key: int) -> int | None:
+        """Map a navigation key to the row it asks for, or None if it is not one."""
+        pos = self.pick_pos if self.pick_mode else self.scroll_pos
+        delta = self.pick_size if self.pick_mode else 1
+        half = self.scroll_view_size // 2
+        moves: dict[int, Callable[[], int]] = {
+            ord('k'): lambda: pos - delta,
+            curses.KEY_UP: lambda: pos - delta,
+            ord('j'): lambda: pos + delta,
+            curses.KEY_DOWN: lambda: pos + delta,
+            _CTRL_PAGE_UP: lambda: pos - self.scroll_view_size,
+            curses.KEY_PPAGE: lambda: pos - self.scroll_view_size,
+            _CTRL_HALF_UP: lambda: pos - half,
+            _CTRL_HALF_DOWN: lambda: pos + half,
+            _CTRL_PAGE_DOWN: lambda: pos + self.scroll_view_size,
+            curses.KEY_NPAGE: lambda: pos + self.scroll_view_size,
+            ord('0'): lambda: 0,
+            curses.KEY_HOME: lambda: 0,
+            ord('$'): lambda: self.body.row_cnt - 1,
+            curses.KEY_END: lambda: self.body.row_cnt - 1,
+            ord('H'): lambda: self.scroll_pos,
+            ord('M'): lambda: self.scroll_pos + half,
+            ord('L'): lambda: self.scroll_pos + self.scroll_view_size - 1,
+        }
+        move = moves.get(key)
+        return None if move is None else move()
+
+    def _in_body(self, pos: int) -> bool:
+        return 0 <= pos < self.body.row_cnt
+
+    def _skip_to_pickable(self, pos: int, direction: int) -> tuple[int, bool]:
+        """Advance to the next pickable row; report if none was found."""
+        attempts = 0
+        max_attempts = self.body.row_cnt + 1  # Prevent infinite loop
+        while self._in_body(pos) and not self._is_pickable(pos) and attempts < max_attempts:
+            pos += direction
+            attempts += 1
+        exhausted = not self._in_body(pos) or attempts >= max_attempts
+        return pos, exhausted
+
+    def _decor_scroll_adjustment(self, was_pos: int, target: int, direction: int) -> int:
+        """Scroll by the raw move when a DECOR block blocks the pick.
+
+        `target`/`was_pos` are the raw move the key asked for (before
+        DECOR-skipping): when no pickable row lies in that direction we scroll by
+        that same amount, so j/k, the page keys and HOME/END still reach
+        trailing/leading DECOR instead of stalling on the last pickable row.
+        """
+        limit = min(max(target, 0), self.body.row_cnt - 1)
+        probe = was_pos + direction
+        while self._in_body(probe):
+            if not self._is_pickable(probe):
+                return target - was_pos
+            if probe == limit:
+                return 0
+            probe += direction
+        return 0
+
+    def _resolve_prompt_move(self, target: int, was_pos: int) -> tuple[int, int]:
+        """Apply pickability rules to a requested move.
+
+        Returns the row the pick should land on and the scroll adjustment to
+        apply when a DECOR block made the requested move impossible.
+        """
+        if not self.pick_mode or target == was_pos:
+            return target, 0
+        direction = 1 if target > was_pos else -1
+        pos, exhausted = self._skip_to_pickable(target, direction)
+        if not exhausted:
+            return pos, 0
+        return was_pos, self._decor_scroll_adjustment(was_pos, target, direction)
+
+    def _apply_pick_scroll(self, pos: int, was_pos: int, scroll_adjustment: int) -> None:
+        # If pick_pos didn't move but there are DECOR lines to reveal, scroll
+        # instead; latch free-scroll only when the view actually moves so a
+        # blocked move at the very top/bottom is a no-op.
+        if scroll_adjustment != 0 and pos == was_pos:
+            new_scroll = max(0, min(self.scroll_pos + scroll_adjustment,
+                                    self.max_scroll_pos))
+            if new_scroll != self.scroll_pos:
+                self.free_scroll = True
+            self.scroll_pos = new_scroll
+        elif pos != was_pos:
+            # A genuine pick move re-synchronises the view with the pick.
+            self.free_scroll = False
+
+    def _apply_prompt_move(self, pos: int, was_pos: int, scroll_adjustment: int) -> None:
+        if not self.pick_mode:
+            self.scroll_pos = pos
+            self.pick_pos = pos
+        else:
+            self.pick_pos = pos
+            self._apply_pick_scroll(pos, was_pos, scroll_adjustment)
+        self.fix_positions()
+
+    def _finish_prompt_move(self, key: int, pos: int, was_pos: int,
+                            scroll_adjustment: int) -> tuple[bool, int | None]:
+        # Render if position changed OR if we adjusted scroll to reveal DECOR.
+        if pos != was_pos or scroll_adjustment != 0:
+            if self.opts.return_if_pos_change:
+                # Don't render with stale content; return immediately to allow full redraw
+                return True, None
+            self.render()
+            return False, None
+        # The key was not a navigation key: in relax mode the app gets it.
+        if self.relax_handled_keys:
+            self._record_demo_key(key)
+            return True, key
+        return False, None
+
+    def _handle_prompt_navigation(self, key: int) -> tuple[bool, int | None]:
+        was_pos = self.pick_pos if self.pick_mode else self.scroll_pos
+        target = self._navigation_target(key)
+        if target is None:
+            target = was_pos
+        pos, scroll_adjustment = self._resolve_prompt_move(target, was_pos)
+        self._apply_prompt_move(pos, was_pos, scroll_adjustment)
+        return self._finish_prompt_move(key, pos, was_pos, scroll_adjustment)
+
     def prompt(self, seconds: float = 1.0) -> int | None:
-        ctl_b, ctl_d, ctl_f, ctl_u = 2, 4, 6, 21
         begin_mono = time.monotonic()
         while True:
             if time.monotonic() - begin_mono >= seconds:
-                break
-            while self.pending_keys:
-                key = self.pending_keys.pop()
-                if key in self.handled_keys:
-                    return key
-
-            key = self.scr.getch()
-            if signals.ctrl_c_flag:
-                if key in self.handled_keys:
-                    self.pending_keys.add(key)
-                signals.ctrl_c_flag = False # Reset flag
-                if 0x3 in self.handled_keys:
-                    return 0x3 # Return the ETX key code
-                continue
-
-            if key == curses.ERR:
-                continue
-
-            if key in (curses.KEY_RESIZE, ) or self._backend.is_term_resized(self.rows, self.cols):
-                self._set_screen_dims()
-                if not self._check_min_size():
-                    # User pressed ESC to abort during size check
-                    if 27 in self.handled_keys:
-                        return 27
-                break
-
-            # App keys...
-            # In passthrough mode, return all keys to the application (printable, editing, and navigation)
-            # This allows InlineConfirmation and IncrementalSearchBar to decide which keys to handle
-            if self.passthrough_mode:
-                # Return all printable chars, editing keys, navigation keys, and handled_keys
-                # Let the application decide what to do with each key
-                editing_keys = {curses.KEY_BACKSPACE, 127, 8, 263,  # backspace variants
-                              curses.KEY_LEFT, curses.KEY_RIGHT,
-                              curses.KEY_HOME, curses.KEY_END,
-                              1, 5}  # Ctrl-A, Ctrl-E
-                if (32 <= key <= 126 or key in editing_keys or key in NAVIGATION_KEYS or key in self.handled_keys):
-                    # Update demo mode tracking for non-navigation keys
-                    if self.opts.demo_mode and key not in NAVIGATION_KEYS:
-                        self.last_demo_key = self._format_key_for_demo(key)
-                    return key
-
-            # If relax_handled_keys is False, only pass keys explicitly in handled_keys
-            # (Navigation keys will still be handled below)
-            if not self.relax_handled_keys and key in self.handled_keys:
-                # Update demo mode tracking for non-navigation keys
-                if self.opts.demo_mode and key not in NAVIGATION_KEYS:
-                    self.last_demo_key = self._format_key_for_demo(key)
-                return key # return for handling
-
-            # Navigation Keys...
-            # Clear demo mode indicator when any navigation key is pressed
-            if self.opts.demo_mode and key in NAVIGATION_KEYS:
-                self.last_demo_key = ''
-
-            pos = self.pick_pos if self.pick_mode else self.scroll_pos
-            delta = self.pick_size if self.pick_mode else 1
-            was_pos = pos
-            if key in (ord('k'), curses.KEY_UP):
-                pos -= delta
-            elif key in (ord('j'), curses.KEY_DOWN):
-                pos += delta
-            elif key in (ctl_b, curses.KEY_PPAGE):
-                pos -= self.scroll_view_size
-            elif key in (ctl_u, ):
-                pos -= self.scroll_view_size//2
-            elif key in (ctl_f, curses.KEY_NPAGE):
-                pos += self.scroll_view_size
-            elif key in (ctl_d, ):
-                pos += self.scroll_view_size//2
-            elif key in (ord('0'), curses.KEY_HOME):
-                pos = 0
-            elif key in (ord('$'), curses.KEY_END):
-                pos = self.body.row_cnt - 1
-            elif key in (ord('H'), ):
-                pos = self.scroll_pos
-            elif key in (ord('M'), ):
-                pos = self.scroll_pos + self.scroll_view_size//2
-            elif key in (ord('L'), ):
-                pos = self.scroll_pos + self.scroll_view_size-1
-
-            # Skip non-pickable lines in pick mode.  `target`/`requested` are the
-            # raw move the key asked for (before DECOR-skipping): when no
-            # pickable row lies in that direction we scroll by that same amount,
-            # so j/k, the page keys and HOME/END still reach trailing/leading
-            # DECOR instead of stalling on the last pickable row.
-            target = pos
-            requested = target - was_pos
-            scroll_adjustment = 0  # Track if we should adjust scroll even when pick doesn't move
-            if self.pick_mode and target != was_pos:
-                # Determine direction of movement
-                direction = 1 if target > was_pos else -1
-
-                # Find next pickable line in the direction of movement
-                attempts = 0
-                max_attempts = self.body.row_cnt + 1  # Prevent infinite loop
-
-                while 0 <= pos < self.body.row_cnt and not self._is_pickable(pos) and attempts < max_attempts:
-                    pos += direction
-                    attempts += 1
-
-                # If we went out of bounds or found no pickable line, stay at
-                # current position BUT still allow scrolling to reveal DECOR
-                # lines the key asked to cross (not just the adjacent row, so a
-                # page/HOME/END move over a DECOR block works too).
-                if pos < 0 or pos >= self.body.row_cnt or attempts >= max_attempts:
-                    limit = min(max(target, 0), self.body.row_cnt - 1)
-                    probe = was_pos + direction
-                    while 0 <= probe < self.body.row_cnt:
-                        if not self._is_pickable(probe):
-                            # There's a DECOR/TRANSIENT line in that direction -
-                            # allow scroll adjustment.
-                            scroll_adjustment = requested
-                            break
-                        if probe == limit:
-                            break
-                        probe += direction
-                    pos = was_pos
-
-            if self.pick_mode:
-                self.pick_pos = pos
-                # If pick_pos didn't move but there are DECOR lines to reveal,
-                # scroll instead; latch free-scroll only when the view actually
-                # moves so a blocked move at the very top/bottom is a no-op.
-                if scroll_adjustment != 0 and pos == was_pos:
-                    new_scroll = max(0, min(self.scroll_pos + scroll_adjustment,
-                                            self.max_scroll_pos))
-                    if new_scroll != self.scroll_pos:
-                        self.free_scroll = True
-                    self.scroll_pos = new_scroll
-                elif pos != was_pos:
-                    # A genuine pick move re-synchronises the view with the pick.
-                    self.free_scroll = False
-            else:
-                self.scroll_pos = pos
-                self.pick_pos = pos
-
-            self.fix_positions()
-
-            # Render if position changed OR if we adjusted scroll to reveal DECOR lines
-            if pos != was_pos or scroll_adjustment != 0:
-                if self.opts.return_if_pos_change:
-                    # Don't render with stale content; return immediately to allow full redraw
-                    return None
-                else:
-                    # Only render here if we're not going to redraw immediately
-                    self.render()
-            else:
-                # Navigation key didn't match - if relax_handled_keys is True, pass key to app
-                if self.relax_handled_keys:
-                    # Update demo mode tracking for non-navigation keys
-                    if self.opts.demo_mode and key not in NAVIGATION_KEYS:
-                        self.last_demo_key = self._format_key_for_demo(key)
-                    return key
-        return None
+                return None
+            key = self._pop_pending_key()
+            if key is not None:
+                return key
+            done, result = self._handle_prompt_key(self.scr.getch())
+            if done:
+                return result

@@ -192,7 +192,7 @@ def test_prompt_genre_accepts_new_value():
 
 
 def test_prompt_genre_abort_keeps_previous_value():
-    # ESC/abort surfaces as answer() -> None and must mean "no change" (audit §3.7).
+    # ESC/abort surfaces as answer() -> None and must mean "no change".
     spin = OptionSpinner()
     spin.add_key('name', 'n - name', genre='prompt', prompt='name?', keys=[ord('n')])
     obj = spin.default_obj

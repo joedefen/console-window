@@ -21,7 +21,7 @@ def colour_recorder(monkeypatch):
     return inited
 
 
-# --- the shared pair list (AUDIT.md §3.9) -----------------------------------
+# --- the shared pair list ---------------------------------------------------
 
 def test_semantic_pairs_is_one_shared_list_including_old_success():
     # Theme.set() and _init_screen() must reinitialise exactly this set; startup
@@ -41,13 +41,26 @@ def test_default_bg_pair_keeps_its_historic_id():
 
 # --- the two initialisation paths agree -------------------------------------
 
-def test_startup_initialises_every_semantic_pair(colour_recorder, monkeypatch):
+def test_startup_initialises_every_semantic_pair(monkeypatch):
+    # Startup must not touch curses directly: a backend that reports colours
+    # owns colour initialisation, so make any direct call a hard failure.
+    def off_limits(*args, **kwargs):
+        raise AssertionError('startup called curses instead of the backend')
+
+    for name in ('start_color', 'use_default_colors', 'color_pair', 'init_pair'):
+        monkeypatch.setattr(curses, name, off_limits)
     monkeypatch.setattr(Theme, '_current', 'dark-mono')
+
+    backend = HeadlessBackend(colors=True)
     win = ConsoleWindow(opts=ConsoleWindowOpts(body_rows=10, head_rows=3),
-                        backend=HeadlessBackend(colors=True))
+                        backend=backend)
     try:
-        assert set(Theme.SEMANTIC_PAIRS) <= set(colour_recorder)
-        assert Theme.DEFAULT_BG in colour_recorder
+        assert backend.start_color_calls == 1
+        assert backend.use_default_colors_calls == 1
+        initialised = {pair for pair, _fg, _bg in backend.init_pair_calls}
+        assert set(Theme.SEMANTIC_PAIRS) <= initialised
+        assert Theme.DEFAULT_BG in initialised
+        assert Theme.DEFAULT_BG in backend.color_pair_calls
     finally:
         win.stop_curses()
 

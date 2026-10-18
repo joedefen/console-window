@@ -149,6 +149,19 @@ For anything beyond a single list, subclass `Screen` and drive it with
 `ScreenStack` — that is what the sample app does, and it is the paradigm the
 library is designed around.
 
+## Versioning and Deprecation
+
+`console-window` follows semantic versioning: patch releases fix behaviour
+without changing the public API, minor releases add functionality, and major
+releases may make incompatible changes.
+
+Deprecated APIs remain supported **indefinitely**. A deprecation is a request to
+migrate, not a scheduled removal: deprecated functions and parameters keep
+working, and one is removed only when there is significant value in doing so
+(for example, the API is actively harmful or blocks a necessary redesign).
+Deprecated paths emit a `DeprecationWarning` where practical, and every removal
+is recorded in [`CHANGELOG.md`](CHANGELOG.md:1).
+
 ## License
 MIT
 

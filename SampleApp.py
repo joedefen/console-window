@@ -331,7 +331,7 @@ class MainScreen(DemoScreen):
     def _draw_header(self):
         app = self.app
         # Build the header explicitly from HeaderLine tokens: intent is declared,
-        # so nothing here can be misread as markup (AUDIT.md §4.14).
+        # so nothing here can be misread as markup.
         line = HeaderLine()
         line.text('  ')
         bar_line = app.filter_bar.as_header_line(prefix='/')

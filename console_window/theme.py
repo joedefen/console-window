@@ -25,8 +25,8 @@ class Theme:
 
     # The semantic roles, in initialisation order.  Both startup
     # (ConsoleWindow._init_screen) and Theme.set() reinitialise exactly this set,
-    # so the two paths cannot drift apart (AUDIT.md §3.9): startup used to omit
-    # OLD_SUCCESS, leaving it on an uninitialised pair until a theme change.
+    # so the two paths cannot drift apart: startup used to omit OLD_SUCCESS,
+    # leaving it on an uninitialised pair until a theme change.
     SEMANTIC_PAIRS: ClassVar[tuple[int, ...]] = (
         DANGER, SUCCESS, OLD_SUCCESS, WARNING, INFO, EMPHASIS, ERROR, PROGRESS, HOTSWAP,
     )

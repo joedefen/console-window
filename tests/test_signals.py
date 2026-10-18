@@ -54,7 +54,7 @@ def test_terminating_window_latches_and_replaces_handler(recorded):
     assert signals._ctrl_c_terminates_locked is True
 
     # A later non-terminating window cannot take Ctrl-C back, and stopping it
-    # cannot uninstall the terminating policy (the AUDIT.md §3.6 interleaving).
+    # cannot uninstall the terminating policy (the AUDIT.md §3.1 interleaving).
     signals.set_ctrl_c_policy(False)
     signals.setup_ctrl_c()
     signals.teardown_ctrl_c()

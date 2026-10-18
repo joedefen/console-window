@@ -12,7 +12,7 @@ _ctrl_c_terminates: bool = True
 # Once any window has asked for terminating Ctrl-C, that policy is latched for
 # the rest of the process: SIGINT never goes back to being an application key.
 # SIGINT is process-global, so a non-terminating window must not be able to
-# swallow Ctrl-C after a terminating one exists (AUDIT.md §3.6).
+# swallow Ctrl-C after a terminating one exists (AUDIT.md §3.1).
 _ctrl_c_terminates_locked: bool = False
 
 

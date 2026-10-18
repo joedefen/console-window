@@ -14,8 +14,8 @@ class ConsoleWindowOpts:
 
     # Explicit attribute types: assignments below come from **kwargs, so without
     # these every option would be typed as ``object`` and every read would need a
-    # cast (AUDIT.md §3.4).  ``Any`` for kwargs keeps the dynamic API while the
-    # stored attributes are checked.
+    # cast.  ``Any`` for kwargs keeps the dynamic API while the stored attributes
+    # are checked.
     answer_show_redraws: bool
     body_cols: int
     body_rows: int

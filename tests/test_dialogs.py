@@ -59,7 +59,7 @@ def make_window(scr, rows=None, cols=None, **opts_kwargs):
     win = object.__new__(ConsoleWindow)
     win.scr = scr
     # alert()/answer() draw through the backend seam now; give the bare instance
-    # a headless one so no curses.newpad()/newwin() is required (AUDIT.md §3.3).
+    # a headless one so no curses.newpad()/newwin() is required.
     win._backend = HeadlessBackend(scr._rows, scr._cols)
     win.opts = ConsoleWindowOpts(**opts_kwargs)
     win.rows = scr._rows if rows is None else rows

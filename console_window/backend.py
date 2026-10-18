@@ -88,6 +88,18 @@ class RenderBackend(Protocol):
     def has_colors(self) -> bool:
         ...
 
+    def start_color(self) -> None:
+        ...
+
+    def use_default_colors(self) -> None:
+        ...
+
+    def init_pair(self, pair: int, fg: int, bg: int) -> None:
+        ...
+
+    def color_pair(self, pair: int) -> int:
+        ...
+
     def stop(self, scr: Surface | None) -> None:
         ...
 
@@ -125,6 +137,18 @@ class CursesBackend:
         except curses.error:  # curses not initialised yet
             return False
 
+    def start_color(self) -> None:
+        curses.start_color()
+
+    def use_default_colors(self) -> None:
+        curses.use_default_colors()
+
+    def init_pair(self, pair: int, fg: int, bg: int) -> None:
+        curses.init_pair(pair, fg, bg)
+
+    def color_pair(self, pair: int) -> int:
+        return int(curses.color_pair(pair))
+
     def stop(self, scr: Surface | None) -> None:
         if scr is None:
             return
@@ -151,7 +175,7 @@ class _NoopSurface:
         # Ordered queue of key codes returned by getch().  It is empty by
         # default, so getch() reports "no key" (curses.ERR, -1) exactly as
         # before; tests push keys here to drive the interactive loops
-        # (prompt/answer/navigation) without a TTY (AUDIT.md §3.2).
+        # (prompt/answer/navigation) without a TTY.
         self.keys: list[int] = []
 
     def __getattr__(self, name: str) -> Callable[..., object]:
@@ -198,10 +222,14 @@ class HeadlessBackend:
         self._colors = colors
         # Process-global curses calls the window used to make directly are
         # recorded here instead, so the dialog/render paths are backend-driven
-        # and observable headlessly (AUDIT.md §3.3).
+        # and observable headlessly.
         self.doupdates = 0
         self.curs_set_calls: list[int] = []
         self.update_lines_cols_calls = 0
+        self.start_color_calls = 0
+        self.use_default_colors_calls = 0
+        self.init_pair_calls: list[tuple[int, int, int]] = []
+        self.color_pair_calls: list[int] = []
 
     def start(self, timeout_ms: int) -> Surface:
         self.screen.timeout(timeout_ms)
@@ -227,11 +255,25 @@ class HeadlessBackend:
     def queue_keys(self, *keys: int) -> None:
         # Queue curses key codes for the next getch() calls.  This is the seam
         # that lets the interactive core (prompt/answer/navigation) be exercised
-        # headlessly (AUDIT.md §3.2).
+        # headlessly.
         self.screen.queue_keys(*keys)
 
     def has_colors(self) -> bool:
         return self._colors
+
+    def start_color(self) -> None:
+        self.start_color_calls += 1
+
+    def use_default_colors(self) -> None:
+        self.use_default_colors_calls += 1
+
+    def init_pair(self, pair: int, fg: int, bg: int) -> None:
+        self.init_pair_calls.append((pair, fg, bg))
+
+    def color_pair(self, pair: int) -> int:
+        self.color_pair_calls.append(pair)
+        # Same encoding as curses: the pair id in the attribute's high bits.
+        return pair << 8
 
     def stop(self, scr: Surface | None) -> None:
         self.stopped = True

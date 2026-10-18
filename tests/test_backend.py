@@ -1,3 +1,7 @@
+import warnings
+
+import pytest
+
 import console_window.backend as backend_mod
 import console_window.window as window_mod
 from console_window.backend import CursesBackend, HeadlessBackend
@@ -14,7 +18,8 @@ def _make(backend=None):
 def test_headless_backend_exposes_protocol_surface():
     backend = HeadlessBackend()
     for meth in ('start', 'newpad', 'doupdate', 'curs_set', 'update_lines_cols',
-                 'is_term_resized', 'stop'):
+                 'is_term_resized', 'start_color', 'use_default_colors',
+                 'init_pair', 'color_pair', 'stop'):
         assert callable(getattr(backend, meth))
 
 
@@ -28,6 +33,19 @@ def test_headless_backend_records_process_global_calls():
     assert backend.curs_set_calls == [0]
     assert backend.update_lines_cols_calls == 1
     assert backend.is_term_resized(24, 80) is False
+
+
+def test_headless_backend_records_colour_calls():
+    backend = HeadlessBackend(colors=True)
+    backend.start_color()
+    backend.use_default_colors()
+    backend.init_pair(3, 1, -1)
+    assert backend.start_color_calls == 1
+    assert backend.use_default_colors_calls == 1
+    assert backend.init_pair_calls == [(3, 1, -1)]
+    # Mirrors curses: the pair id lives in the attribute's high bits.
+    assert backend.color_pair(3) == 3 << 8
+    assert backend.color_pair_calls == [3]
 
 
 def test_curses_backend_stop_restores_cursor(monkeypatch):
@@ -64,12 +82,92 @@ def test_curses_backend_delegates_process_global_calls(monkeypatch):
     assert calls == ['doupdate', ('curs_set', 0), 'update_lines_cols']
 
 
+class _FakeCursesScreen:
+    def __init__(self):
+        self.calls = []
+
+    def keypad(self, flag):
+        self.calls.append(('keypad', flag))
+
+    def timeout(self, ms):
+        self.calls.append(('timeout', ms))
+
+    def clear(self):
+        self.calls.append(('clear',))
+
+
+class _FakeCursesModule:
+    """Only the API surface guaranteed by the Python 3.10 floor.
+
+    ``CursesBackend.start()`` must stay inside this set: an unguarded call to
+    something newer raises ``AttributeError`` here, which fails the floor test
+    instead of breaking users on 3.10.
+    """
+
+    def __init__(self):
+        self.calls = []
+        self.scr = _FakeCursesScreen()
+
+    def initscr(self):
+        self.calls.append(('initscr',))
+        return self.scr
+
+    def set_escdelay(self, ms):
+        self.calls.append(('set_escdelay', ms))
+
+    def noecho(self):
+        self.calls.append(('noecho',))
+
+    def cbreak(self):
+        self.calls.append(('cbreak',))
+
+    def curs_set(self, visibility):
+        self.calls.append(('curs_set', visibility))
+
+
+def test_curses_backend_start_uses_only_the_python_310_curses_api(monkeypatch):
+    # Pin the `requires-python = ">=3.10"` floor.  The fake module
+    # deliberately exposes nothing beyond that floor, so a new unguarded
+    # curses call is caught here rather than on an old interpreter.
+    fake = _FakeCursesModule()
+    monkeypatch.setattr(backend_mod, 'curses', fake)
+
+    scr = CursesBackend().start(timeout_ms=250)
+
+    assert scr is fake.scr
+    assert fake.calls == [('initscr',), ('set_escdelay', 25), ('noecho',),
+                          ('cbreak',), ('curs_set', 0)]
+    assert fake.scr.calls == [('keypad', True), ('timeout', 250), ('clear',)]
+
+
 def test_noop_surface_history_is_bounded():
     from console_window.backend import _NoopSurface
     surf = _NoopSurface()
     for _ in range(_NoopSurface.MAX_CALLS + 50):
         surf.clear()
     assert len(surf.calls) == _NoopSurface.MAX_CALLS
+
+
+def test_deprecated_constructor_kwargs_warn():
+    backend = HeadlessBackend()
+    with pytest.warns(DeprecationWarning, match='opts='):
+        win = ConsoleWindow(body_rows=10, backend=backend)
+    try:
+        assert win.opts.body_rows == 10
+    finally:
+        win.stop_curses()
+
+
+def test_opts_constructor_does_not_warn():
+    backend = HeadlessBackend()
+    with warnings.catch_warnings():
+        warnings.simplefilter('error', DeprecationWarning)
+        win = ConsoleWindow(opts=ConsoleWindowOpts(body_rows=10, head_rows=3),
+                            backend=backend)
+    try:
+        assert win.opts.body_rows == 10
+    finally:
+        win.stop_curses()
 
 
 def test_window_can_be_constructed_headless():
@@ -149,7 +247,7 @@ def test_theme_broadcast_reaches_all_windows():
 
 
 def test_no_process_wide_screen_singletons():
-    # Regression guard for §4.5: the class-level singletons must be gone.
+    # Regression guard: the class-level singletons must be gone.
     assert not hasattr(ConsoleWindow, 'static_scr')
     assert not hasattr(ConsoleWindow, 'static_win')
 
