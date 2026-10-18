@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Protocol
 
 from .spinner import OptionSpinner
@@ -71,7 +72,6 @@ class Screen:
 class ScreenStack:
     def __init__(self, win: ConsoleWindow, spins_obj: object, screens: tuple,
                  screen_objects: dict[int, Screen] | None = None) -> None:
-        from types import SimpleNamespace
         self.win = win
         self.obj = spins_obj
         self.screens = screens
@@ -79,7 +79,6 @@ class ScreenStack:
         self.screen_objects: dict[int, Screen] = screen_objects or {}
         self.stack: list[SimpleNamespace] = []
         self.curr: SimpleNamespace | None = None
-        self._SimpleNamespace = SimpleNamespace
         # Push home screen (HOME_ST=0) as the initial screen
         self.push(HOME_ST, 0)
 
@@ -127,7 +126,7 @@ class ScreenStack:
             self.curr.scroll_pos = self.win.scroll_pos
             self.curr.prev_pos = prev_pos
             self.stack.append(self.curr)
-        self.curr = self._SimpleNamespace(num=screen,
+        self.curr = SimpleNamespace(num=screen,
                   name=self.screens[screen], pick_pos=-1,
                                 scroll_pos=-1, prev_pos=-1)
         self.win.pick_pos = self.win.scroll_pos = 0

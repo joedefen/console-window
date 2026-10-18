@@ -119,8 +119,6 @@ def wrap_position(text: str, index: int, width: int) -> tuple[int, int]:
 
 
 def index_at_cell(text: str, ranges: list[tuple[int, int]], line_no: int,
-
-
                   cell: int) -> int | None:
     if line_no < 0 or line_no >= len(ranges):
         return None

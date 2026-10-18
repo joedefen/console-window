@@ -249,9 +249,8 @@ class OptionSpinner:
     def show_help_nav_keys(win: ConsoleWindow) -> None:
         # Late import to avoid a circular import at module load time.
         from .window import ConsoleWindow
-        for line in ConsoleWindow.get_nav_keys_blurb().splitlines():
-            if line:
-                win.add_header(line)
+        for line in ConsoleWindow.get_nav_key_lines():
+            win.add_header(line)
 
     def show_help_body(self, win: ConsoleWindow, screen_filter: int | list | set | None = None) -> None:
         win.add_body('Type keys to alter choice:', curses.A_UNDERLINE)

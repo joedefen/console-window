@@ -1,4 +1,5 @@
 import curses
+import logging
 
 import pytest
 
@@ -342,7 +343,7 @@ def test_render_retries_transient_curses_errors(monkeypatch, make):
     assert calls['n'] == 2
 
 
-def test_render_gives_up_after_the_retry_budget(monkeypatch, capsys, make):
+def test_render_gives_up_after_the_retry_budget(monkeypatch, caplog, make):
     win, backend = make()
     monkeypatch.setattr(ConsoleWindow, 'render_retry_seconds', 0.01)
     monkeypatch.setattr(window_mod.time, 'sleep', lambda s: None)
@@ -351,10 +352,12 @@ def test_render_gives_up_after_the_retry_budget(monkeypatch, capsys, make):
         raise window_mod.curses.error('persistent')
 
     monkeypatch.setattr(win, 'render_once', boom)
-    with pytest.raises(window_mod.curses.error):
-        win.render()
+    with caplog.at_level(logging.ERROR, logger='console_window.window'):
+        with pytest.raises(window_mod.curses.error):
+            win.render()
     assert backend.stopped is True
-    assert 'curses err' in capsys.readouterr().out
+    assert 'curses error while rendering' in caplog.text
+    assert 'pick_mode=False' in caplog.text
 
 
 # --- draw(): the direct row writer ------------------------------------------

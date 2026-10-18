@@ -30,6 +30,24 @@ def test_headless_backend_records_process_global_calls():
     assert backend.is_term_resized(24, 80) is False
 
 
+def test_curses_backend_stop_restores_cursor(monkeypatch):
+    calls = []
+    monkeypatch.setattr(backend_mod.curses, 'nocbreak',
+                        lambda: calls.append('nocbreak'))
+    monkeypatch.setattr(backend_mod.curses, 'echo', lambda: calls.append('echo'))
+    monkeypatch.setattr(backend_mod.curses, 'curs_set',
+                        lambda v: calls.append(('curs_set', v)))
+    monkeypatch.setattr(backend_mod.curses, 'endwin', lambda: calls.append('endwin'))
+
+    class Scr:
+        def keypad(self, flag):
+            calls.append(('keypad', flag))
+
+    CursesBackend().stop(Scr())
+    assert calls == ['nocbreak', 'echo', ('keypad', False),
+                     ('curs_set', 1), 'endwin']
+
+
 def test_curses_backend_delegates_process_global_calls(monkeypatch):
     calls = []
     monkeypatch.setattr(backend_mod.curses, 'doupdate', lambda: calls.append('doupdate'))
@@ -44,6 +62,14 @@ def test_curses_backend_delegates_process_global_calls(monkeypatch):
     be.update_lines_cols()
     assert be.is_term_resized(24, 80) is True
     assert calls == ['doupdate', ('curs_set', 0), 'update_lines_cols']
+
+
+def test_noop_surface_history_is_bounded():
+    from console_window.backend import _NoopSurface
+    surf = _NoopSurface()
+    for _ in range(_NoopSurface.MAX_CALLS + 50):
+        surf.clear()
+    assert len(surf.calls) == _NoopSurface.MAX_CALLS
 
 
 def test_window_can_be_constructed_headless():

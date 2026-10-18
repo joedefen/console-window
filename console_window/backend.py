@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import curses
+from collections import deque
 from typing import Callable, Protocol
 
 
@@ -130,14 +131,23 @@ class CursesBackend:
         curses.nocbreak()
         curses.echo()
         scr.keypad(False)
+        try:
+            curses.curs_set(1)  # start() hid it; restore the hardware cursor
+        except curses.error:  # some terminals cannot show the cursor
+            pass
         curses.endwin()
 
 
 class _NoopSurface:
+    # Bound the call history: headless runs can draw for hours, and every call
+    # would otherwise be retained forever just for test assertions.
+    MAX_CALLS = 1000
+
     def __init__(self, rows: int = 24, cols: int = 80) -> None:
         self._rows = rows
         self._cols = cols
-        self.calls: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
+        self.calls: deque[tuple[str, tuple[object, ...], dict[str, object]]] = deque(
+            maxlen=self.MAX_CALLS)
         # Ordered queue of key codes returned by getch().  It is empty by
         # default, so getch() reports "no key" (curses.ERR, -1) exactly as
         # before; tests push keys here to drive the interactive loops

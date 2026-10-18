@@ -5,6 +5,10 @@ from typing import Callable, ClassVar
 
 from .header import HeaderLine
 
+# Keys treated as backspace (all terminal variants).  Shared by both widgets so
+# the list cannot drift between them.
+_BACKSPACE_KEYS = (127, 8, curses.KEY_BACKSPACE, 263)
+
 
 class InlineConfirmation:
     MODES = 'Y y YES yes identity choices text'.split()
@@ -122,9 +126,6 @@ class InlineConfirmation:
         ss_ci_matches = [c for c in choices if c.lower().startswith(buf_l)]
         return ss_ci_matches[0] if len(ss_ci_matches) == 1 else None
 
-    #: Keys treated as backspace (all terminal variants).
-    _BACKSPACE_KEYS = (127, 8, curses.KEY_BACKSPACE, 263)
-
     def handle_key(self, key: int) -> str:
         if key == 27:
             return 'cancelled'
@@ -136,7 +137,7 @@ class InlineConfirmation:
         # Handle buffered input
         if 32 <= key <= 126:
             self.input_buffer += chr(key)
-        elif key in self._BACKSPACE_KEYS:  # Backspace (all variants)
+        elif key in _BACKSPACE_KEYS:  # Backspace (all variants)
             self.input_buffer = self.input_buffer[:-1]
         elif key in (10, 13):  # Enter
             return self._handle_enter()
@@ -226,7 +227,7 @@ class IncrementalSearchBar:
             curses.KEY_HOME: self._cursor_home, 1: self._cursor_home,
             curses.KEY_END: self._cursor_end, 5: self._cursor_end,
         }
-        for code in self._BACKSPACE_KEYS:
+        for code in _BACKSPACE_KEYS:
             self._key_actions[code] = self._backspace
 
     def start(self, initial_text: str = '') -> None:
@@ -234,9 +235,6 @@ class IncrementalSearchBar:
         self._text = initial_text
         self._start_text = initial_text
         self._cursor_pos = len(initial_text)
-
-    #: Keys treated as backspace (all terminal variants).
-    _BACKSPACE_KEYS = (127, 8, curses.KEY_BACKSPACE, 263)
 
     def handle_key(self, key: int) -> bool:
         if not self._active:

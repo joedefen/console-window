@@ -31,6 +31,10 @@ This project follows [Semantic Versioning](https://semver.org/).
   smoke-tested in CI (AUDIT.md §3.2).
 
 ### Changed
+- The package version now has a single source of truth: `pyproject.toml`
+  declares `dynamic = ["version"]` and flit reads `__version__` from
+  `console_window/__init__.py` (AUDIT.md §3.14). The stale manual-build recipe
+  at the top of `pyproject.toml` is gone.
 - `OptionSpinner.get_value()` is now a pure read: its `coerce` parameter is
   gone and initialisation moved to the explicit `OptionSpinner.normalize(attr)`,
   which `_register()` calls. Apps that read option values through
@@ -50,6 +54,14 @@ This project follows [Semantic Versioning](https://semver.org/).
   `DemoApp`/`DemoScreen`.
 
 ### Fixed
+- Hygiene debt from AUDIT.md §3.14: removed blank lines inside the
+  `index_at_cell()`/`answer()` signatures and the commented-out assignment in
+  `fix_positions()`; replaced `render()`'s `print()`/`except Exception` failure
+  path with `logging` and `curses.error`; made `_BACKSPACE_KEYS` a single
+  module constant; moved `ScreenStack`'s `SimpleNamespace` import to module
+  level; stored navigation help as `NAV_KEY_LINES` so indentation cannot alter
+  it; bounded `_NoopSurface.calls` to `MAX_CALLS`; and restored the hardware
+  cursor in `CursesBackend.stop()`.
 - The window no longer uses identity or sentinel tricks to decide what it is
   drawing. `_add()` takes an explicit `is_body` keyword from
   `add_header()`/`add_body()` instead of comparing `id(ns)` with `id(self.body)`,

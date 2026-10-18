@@ -9,7 +9,7 @@ from __future__ import annotations
 import atexit
 import curses
 import itertools
-import textwrap
+import logging
 import time
 import warnings
 import weakref
@@ -27,6 +27,20 @@ from .theme import Theme
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .context import Context
+
+logger = logging.getLogger(__name__)
+
+# Navigation help is stored as complete lines, not a dedented triple-quoted
+# string: editing the indentation can no longer change what the help screen
+# renders.  ``ConsoleWindow.nav_keys`` remains the joined string for callers
+# that want the whole blurb at once.
+NAV_KEY_LINES: tuple[str, ...] = (
+    'Navigation:      H/M/L:      top/middle/end-of-page',
+    '  k, UP:  up one row             0, HOME:  first row',
+    'j, DOWN:  down one row           $, END:  last row',
+    '  Ctrl-u:  half-page up     Ctrl-b, PPAGE:  page up',
+    '  Ctrl-d:  half-page down     Ctrl-f, NPAGE:  page down',
+)
 
 # Live ConsoleWindow instances, held by weak reference and keyed by creation
 # order.  This replaces the old process-wide ``ConsoleWindow.static_scr`` /
@@ -101,13 +115,7 @@ class ConsoleWindow:
     # NOTE: these used to be ``static_scr``/``static_win`` process-wide class
     # attributes.  Live instances are now tracked in the module ``_WINDOWS``
     # registry (see start_curses/stop_curses/active_windows) — no singleton.
-    nav_keys: str = """
-        Navigation:      H/M/L:      top/middle/end-of-page
-          k, UP:  up one row             0, HOME:  first row
-        j, DOWN:  down one row           $, END:  last row
-          Ctrl-u:  half-page up     Ctrl-b, PPAGE:  page up
-          Ctrl-d:  half-page down     Ctrl-f, NPAGE:  page down
-    """
+    nav_keys: str = '\n'.join(NAV_KEY_LINES)
     def __init__(self, opts: ConsoleWindowOpts | None = None, head_line: bool | None = None,
                  head_rows: int | None = None, body_rows: int | None = None,
                  body_cols: int | None = None, keys: set | list | None = None,
@@ -323,7 +331,11 @@ class ConsoleWindow:
 
     @staticmethod
     def get_nav_keys_blurb() -> str:
-        return textwrap.dedent(ConsoleWindow.nav_keys)
+        return ConsoleWindow.nav_keys
+
+    @staticmethod
+    def get_nav_key_lines() -> tuple[str, ...]:
+        return NAV_KEY_LINES
 
     def _set_screen_dims(self) -> bool:
         rows, cols = self.scr.getmaxyx()
@@ -821,23 +833,17 @@ class ConsoleWindow:
                 continue
         try:
             self.render_once(redraw)
-        except Exception:
+        except curses.error:
             self.stop_curses()
-            print(f"""curses err:
-    head.row_cnt={self.head.row_cnt}
-    head.view_cnt={self.head.view_cnt}
-    hor_line_cnt={self.hor_line_cnt}
-    body.row_cnt={self.body.row_cnt}
-    scroll_pos={self.scroll_pos}
-    max_scroll_pos={self.max_scroll_pos}
-    pick_pos={self.pick_pos}
-    last_pick_pos={self.last_pick_pos}
-    pick_clear_pending={self._pick_clear_pending}
-    pick_mode={self.pick_mode}
-    pick_size={self.pick_size}
-    rows={self.rows}
-    cols={self.cols}
-""")
+            logger.exception(
+                'curses error while rendering: head.row_cnt=%s head.view_cnt=%s '
+                'hor_line_cnt=%s body.row_cnt=%s scroll_pos=%s max_scroll_pos=%s '
+                'pick_pos=%s last_pick_pos=%s pick_clear_pending=%s pick_mode=%s '
+                'pick_size=%s rows=%s cols=%s',
+                self.head.row_cnt, self.head.view_cnt, self.hor_line_cnt,
+                self.body.row_cnt, self.scroll_pos, self.max_scroll_pos,
+                self.pick_pos, self.last_pick_pos, self._pick_clear_pending,
+                self.pick_mode, self.pick_size, self.rows, self.cols)
             raise
 
 
@@ -874,7 +880,6 @@ class ConsoleWindow:
                 self.scroll_pos = max(self.scroll_pos, 0)
                 self.scroll_pos = min(self.scroll_pos, self.max_scroll_pos)
                 self.pick_pos = self.scroll_pos + ind_pos - self.body_base
-                # indent = 1 if self.body.row_cnt > self.scroll_view_size else 0
         return indent
 
     def _abut_range_at(self, pos: int) -> tuple[int, int] | None:
@@ -1032,8 +1037,6 @@ class ConsoleWindow:
 
 
     def answer(self, prompt: str = 'Type string [then Enter]', seed: str = '', width: int = 80,
-
-
                height: int = 5, esc_abort: bool | None = None, prompt_attr: int | None = None) -> str | None:
         # Handle deprecated esc_abort parameter for backward compatibility
         dialog_abort = self._resolve_abort_mode(esc_abort)

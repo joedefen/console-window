@@ -112,6 +112,13 @@ def test_opts_rejects_every_unknown_key():
     assert "'head_row'" in message
 
 
+def test_nav_help_lines_are_stored_without_dedent_magic():
+    from console_window.window import NAV_KEY_LINES, ConsoleWindow
+    assert NAV_KEY_LINES
+    assert ConsoleWindow.get_nav_key_lines() is NAV_KEY_LINES
+    assert ConsoleWindow.get_nav_keys_blurb() == '\n'.join(NAV_KEY_LINES)
+
+
 def test_opts_defaults():
     from console_window import ConsoleWindowOpts
     opts = ConsoleWindowOpts()
