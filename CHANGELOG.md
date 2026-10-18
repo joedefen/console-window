@@ -6,6 +6,12 @@ This project follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- `mypy` type checking for the library: `[tool.mypy]` in `pyproject.toml`
+  checks `console_window` (`files`, `ignore_missing_imports`,
+  `warn_unused_ignores`, `disallow_untyped_defs = false`) and a new `types` job
+  in CI runs it on every push/PR. Ruff's `ANN` rules were already enforcing
+  annotation *presence*; this enforces that the annotations are true
+  (AUDIT.md §3.4).
 - `[project.urls]` in `pyproject.toml` (Homepage / Repository / Issues /
   Changelog) so published package metadata carries project links.
 - `ConsoleWindow.rows_dropped`, counting the rows `add_body()`/`add_header()`
@@ -25,6 +31,12 @@ This project follows [Semantic Versioning](https://semver.org/).
   smoke-tested in CI (AUDIT.md §3.2).
 
 ### Changed
+- `OptionSpinner.get_value()` is now a pure read: its `coerce` parameter is
+  gone and initialisation moved to the explicit `OptionSpinner.normalize(attr)`,
+  which `_register()` calls. Apps that read option values through
+  `get_value()` are unaffected because `add_key()` already normalizes the value
+  during registration; code that passed `coerce=True` directly should call
+  `normalize()` instead (AUDIT.md §3.12).
 - Raised the minimum supported Python to **3.10** (was 3.8): `requires-python =
   ">=3.10"`, the Ruff `target-version` is now `py310`, and the CI matrix drops
   the 3.8/3.9 legs. The 3.8 floor was never real — [`backend.py`](console_window/backend.py:35)
@@ -38,6 +50,53 @@ This project follows [Semantic Versioning](https://semver.org/).
   `DemoApp`/`DemoScreen`.
 
 ### Fixed
+- The window no longer uses identity or sentinel tricks to decide what it is
+  drawing. `_add()` takes an explicit `is_body` keyword from
+  `add_header()`/`add_body()` instead of comparing `id(ns)` with `id(self.body)`,
+  and `_warn_rows_dropped()` receives the pad name. The undocumented
+  `last_pick_pos == -2` "clear every row" sentinel is replaced by the one-shot
+  `_pick_clear_pending` flag, which `set_pick_mode()`/`set_pick_range()` set and
+  `highlight_picked()` consumes; `last_pick_pos` is now only a row index or `-1`.
+  A range change still repaints the picked row when its position is unchanged
+  (AUDIT.md §3.13).
+- The help screen no longer relies on `assert` to guard option rendering.
+  `OptionSpinner._write_option_body()` now renders a dim `<unset: 'attr'>`
+  placeholder when an application has deleted or cleared a registered option,
+  so the row shows the same thing under `python -O` instead of falling through
+  to `None` (AUDIT.md §3.12).
+- `ConsoleWindowOpts` now rejects unknown option names with a `TypeError`
+  instead of silently ignoring them. A typo such as
+  `ConsoleWindowOpts(body_row=5000)` used to leave `body_rows` at its default
+  and surface only later as discarded pad rows; construction now fails, and a
+  `difflib` suggestion points at the intended name (`body_rows`). Multiple
+  unknown keys are all reported (AUDIT.md §3.11).
+- `answer()` no longer loops forever on `curses.error`, and it no longer uses
+  `None` for both "user aborted" and "terminal too small". The recovery loop is
+  bounded by `render_retry_seconds` and then re-raises; both too-small paths
+  raise `TerminalTooSmallError` (ESC on the mid-dialog too-small notice still
+  returns `None`, since that is a real abort). The dialog timeout is now
+  restored in a `finally`, so it is also restored when `answer()` raises.
+- Annotations that `mypy` exposed: `fix_positions()` is declared `-> int`
+  (it returns `indent` and the caller uses it), `_draw_line_with_attrs()` and
+  `_draw_plain_line()` accept `attrs: list | None`, `pick_range` is typed as
+  `list[int] | tuple[int, int] | None`, and `draw()` accepts `str | bytes` to
+  match its decode path. `ConsoleWindowOpts` attributes now have explicit types
+  instead of being `object` values from `**kwargs`, and the full screen/pad API
+  is described by the new `CursesSurface` protocol rather than `object`.
+- Ctrl-C termination is now a process-lifetime latch. The first `ConsoleWindow`
+  created with `ctrl_c_terminates=True` sets SIGINT to the default handler and
+  no later window can install the key-delivery handler, even after that window
+  stops. Previously `teardown_ctrl_c()` decided from whichever policy happened to
+  be current, so window A (`False`, handler installed) → window B (`True`) →
+  stop A left A's handler installed and Ctrl-C could no longer terminate. The
+  latch is deliberately one-way: `ctrl_c_terminates=False` applies only while no
+  terminating window has existed in the process (AUDIT.md §3.6).
+- Aborting a `prompt`-genre spinner option (ESC in the `answer()` dialog) no
+  longer wipes the stored value. `OptionSpinner.do_key()` wrote whatever
+  `answer()` returned straight onto the attribute, and an aborted dialog returns
+  `None`, so cancelling blanked the setting and the next read coerced it back to
+  `''`. The prompt branch now treats `None` as "no change" and returns without
+  touching the attribute (AUDIT.md §3.7).
 - `ConsoleWindow.alert()` now actually scrolls. It used to build a pad sized to
   the whole message but always refresh it at offset 0, so content taller than the
   box was silently unreachable despite the "scrollable if needed" comment. The

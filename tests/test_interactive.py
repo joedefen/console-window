@@ -7,7 +7,7 @@ import console_window.window as window_mod
 from console_window.backend import HeadlessBackend
 from console_window.context import Context
 from console_window.opts import ConsoleWindowOpts
-from console_window.window import ConsoleWindow
+from console_window.window import ConsoleWindow, TerminalTooSmallError
 
 # ``curses.ACS_*`` are only bound once curses has been initialised (i.e. after
 # initscr()).  Stand-ins let the drawing helpers run against HeadlessBackend.
@@ -299,7 +299,7 @@ def test_render_draws_gutter_separator_and_indicator(make):
         win.add_body(f'body {i}')
     win.pick_mode = True
     win.pick_pos = 2
-    win.last_pick_pos = -2  # force the "clear every row" path
+    win._pick_clear_pending = True  # force the "clear every row" path
 
     win.render(redraw=True)
 
@@ -403,10 +403,36 @@ def test_highlight_picked_clears_and_repaints_with_pick_size(make):
     win.pick_mode = True
     win.pick_size = 2
     win.pick_pos = 2
-    win.last_pick_pos = -2
+    win._pick_clear_pending = True
     win.highlight_picked()
     assert win.body.pad.calls_named('addstr')
     assert win.last_pick_pos == 2
+    assert win._pick_clear_pending is False
+
+
+def test_pick_range_repaints_when_position_is_unchanged(make):
+    # set_pick_range() must repaint the picked row even when it did not move:
+    # the full clear removes the old highlight, so treating "same position" as
+    # "nothing to do" would leave the row unhighlighted.
+    win, _backend = make(pick_mode=True, pick_size=1, body_rows=10)
+    win.add_body('row 0')
+    win.add_body('row 1')
+    win.pick_pos = 1
+    win.last_pick_pos = 1
+    win.set_pick_range(0, 2)
+    assert win._pick_clear_pending is True
+    win.highlight_picked()
+    assert win._pick_clear_pending is False
+    picked = [args for _name, args, _kw in win.body.pad.calls_named('addstr')
+              if args[0] == 1]
+    assert picked
+    assert any(args[3] & curses.A_REVERSE for args in picked)
+
+
+def test_set_pick_mode_requests_a_full_clear(make):
+    win, _backend = make()
+    win.set_pick_mode(True, 2)
+    assert win._pick_clear_pending is True
 
 
 def test_draw_picked_rows_plain_line_with_range(make):
@@ -509,9 +535,12 @@ def test_answer_handles_resize_then_submits(make):
     assert win.answer(seed='hi') == 'hi'
 
 
-def test_answer_returns_none_when_terminal_too_small(make):
+def test_answer_raises_when_terminal_too_small(make):
     win, _backend = make(HeadlessBackend(rows=5, cols=10))
-    assert win.answer() is None
+    with pytest.raises(TerminalTooSmallError) as excinfo:
+        win.answer()
+    assert (excinfo.value.required_cols, excinfo.value.required_rows) == (70, 20)
+    assert (excinfo.value.actual_cols, excinfo.value.actual_rows) == (10, 5)
 
 
 # --- alert(): the scrollable message box ------------------------------------
@@ -621,11 +650,10 @@ def test_recover_from_resize_drains_pending_keys(make):
 def test_show_too_small_dialog_returns_true_on_esc(make):
     win, backend = make()
     backend.queue_keys(27)
-    assert win._show_too_small_dialog(5, 1234) is True
-    assert win._scr_timeout_ms == 1234
+    assert win._show_too_small_dialog(5) is True
 
 
 def test_show_too_small_dialog_keeps_waiting_on_resize(make):
     win, backend = make()
     backend.queue_keys(curses.KEY_RESIZE)
-    assert win._show_too_small_dialog(5, 42) is False
+    assert win._show_too_small_dialog(5) is False

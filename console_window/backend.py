@@ -11,7 +11,57 @@ class Surface(Protocol):
     def timeout(self, ms: int) -> None:
         ...
 
-    def keypad(self, flag: int) -> None:
+    def keypad(self, flag: bool) -> None:
+        ...
+
+
+class CursesSurface(Surface, Protocol):
+    # Full curses surface used by ConsoleWindow's drawing code.  It exists so
+    # those calls can be type-checked without pretending the small Surface
+    # protocol (the backend seam) covers addstr/border/insstr/...
+    def getyx(self) -> tuple[int, int]:
+        ...
+
+    def clear(self) -> None:
+        ...
+
+    def addstr(self, *args: object) -> None:
+        ...
+
+    def addch(self, *args: object) -> None:
+        ...
+
+    def insstr(self, *args: object) -> None:
+        ...
+
+    def vline(self, *args: object) -> None:
+        ...
+
+    def hline(self, *args: object) -> None:
+        ...
+
+    def border(self, *args: object) -> None:
+        ...
+
+    def move(self, y: int, x: int) -> None:
+        ...
+
+    def bkgd(self, *args: object) -> None:
+        ...
+
+    def noutrefresh(self, *args: object) -> None:
+        ...
+
+    def refresh(self, *args: object) -> None:
+        ...
+
+    def redrawwin(self) -> None:
+        ...
+
+    def getch(self) -> int:
+        ...
+
+    def nodelay(self, flag: bool) -> None:
         ...
 
 
@@ -48,7 +98,7 @@ class CursesBackend:
         curses.noecho()
         curses.cbreak()
         curses.curs_set(0)
-        scr.keypad(1)
+        scr.keypad(True)
         scr.timeout(timeout_ms)
         scr.clear()
         return scr
@@ -79,7 +129,7 @@ class CursesBackend:
             return
         curses.nocbreak()
         curses.echo()
-        scr.keypad(0)
+        scr.keypad(False)
         curses.endwin()
 
 
@@ -121,7 +171,7 @@ class _NoopSurface:
     def timeout(self, ms: int) -> None:
         self.calls.append(('timeout', (ms,), {}))
 
-    def keypad(self, flag: int) -> None:
+    def keypad(self, flag: bool) -> None:
         self.calls.append(('keypad', (flag,), {}))
 
     def calls_named(self, name: str) -> list[tuple[str, tuple[object, ...], dict[str, object]]]:

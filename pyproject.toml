@@ -76,3 +76,16 @@ ignore = ["E501", "E701", "E731"]
 # annotation rules do not apply there.
 "tests/**" = ["ANN"]
 "SampleApp.py" = ["ANN"]
+
+# ----------------------------------------------------------------------
+# MYPY TYPE CHECKING
+[tool.mypy]
+python_version = "3.10"
+# Check the library, not the tests/example: those are unannotated by design
+# (see the ruff per-file-ignores above).
+files = ["console_window"]
+ignore_missing_imports = true
+warn_unused_ignores = true
+# Modest on purpose: ruff already requires annotations, but requiring a fully
+# typed body in every function would flag the curses/dynamic-object edges first.
+disallow_untyped_defs = false

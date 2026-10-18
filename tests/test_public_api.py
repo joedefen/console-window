@@ -17,6 +17,7 @@ PUBLIC_NAMES = [
     'Span',
     'HOME_ST',
     'NAVIGATION_KEYS',
+    'TerminalTooSmallError',
 ]
 
 
@@ -88,6 +89,27 @@ def test_opts_validates_dialog_return():
     from console_window import ConsoleWindowOpts
     with pytest.raises(ValueError):
         ConsoleWindowOpts(dialog_return='SPACE')
+
+
+def test_opts_rejects_unknown_key():
+    from console_window import ConsoleWindowOpts
+    with pytest.raises(TypeError, match=r"unknown option\(s\): 'body_row'"):
+        ConsoleWindowOpts(body_row=5000)
+
+
+def test_opts_unknown_key_suggests_the_closest_name():
+    from console_window import ConsoleWindowOpts
+    with pytest.raises(TypeError, match="did you mean 'body_rows'"):
+        ConsoleWindowOpts(body_row=5000)
+
+
+def test_opts_rejects_every_unknown_key():
+    from console_window import ConsoleWindowOpts
+    with pytest.raises(TypeError) as excinfo:
+        ConsoleWindowOpts(body_row=5000, head_row=8)
+    message = str(excinfo.value)
+    assert "'body_row'" in message
+    assert "'head_row'" in message
 
 
 def test_opts_defaults():

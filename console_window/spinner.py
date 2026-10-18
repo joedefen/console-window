@@ -13,15 +13,16 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 class OptionSpinner:
     def __init__(self, stack: ScreenStack | None = None) -> None:
-        self.options, self.keys = [], []
+        self.options: list[SimpleNamespace] = []
+        self.keys: set[int] = set()
         self.margin = 4 # + actual width (1st column right pos)
         self.align = self.margin # + actual width (1st column right pos)
-        self._default_obj = SimpleNamespace() # if not given one (private)
-        self.attr_to_option = {} # given an attribute, find its option ns
-        self.key_to_option = {} # given key, options namespace
-        self.keys = set()
+        self._default_obj: object = SimpleNamespace() # if not given one (private)
+        self.attr_to_option: dict[str, SimpleNamespace] = {} # attr -> option ns
+        self.key_to_option: dict[int, SimpleNamespace] = {} # key -> option ns
         self.stack = stack  # Optional ScreenStack for scope-aware bindings
-        self.key_scopes = {}  # Maps (key, screen) -> option_ns for scope tracking
+        # Maps (key, screen) -> option_ns for scope tracking
+        self.key_scopes: dict[tuple[int, int], SimpleNamespace] = {}
 
         # Sync with stack.obj: use stack's obj if available, otherwise provide ours
         if self.stack:
@@ -56,19 +57,28 @@ class OptionSpinner:
             scope=None,  # None = all screens, or set of screen numbers
         )
 
-    def get_value(self, attr: str, coerce: bool = False) -> object:
+    def get_value(self, attr: str) -> object:
+        """Return the current value without mutating the application object."""
         ns = self.attr_to_option.get(attr, None)
-        obj = ns.obj if ns else None
-        value = getattr(obj, attr, None) if obj else None
-        if value is None and obj and coerce:
-            if ns.vals:
-                if value not in ns.vals:
-                    value = ns.vals[0]
-                    setattr(obj, attr, value)
-            else:
-                if value is None:
-                    value = ''
-                    setattr(ns.obj, ns.attr, '')
+        if ns is None or ns.obj is None:
+            return None
+        return getattr(ns.obj, ns.attr, None)
+
+    def normalize(self, attr: str) -> object:
+        """Initialise a missing option to its first value (or '' for a prompt).
+
+        This is the only path that writes while an option is being registered;
+        ordinary reads (help rendering, key handling) use get_value() and stay
+        side-effect free.  An existing non-None value is left alone.
+        """
+        value = self.get_value(attr)
+        if value is not None:
+            return value
+        ns = self.attr_to_option.get(attr, None)
+        if ns is None or ns.obj is None:
+            return None
+        value = ns.vals[0] if ns.vals else ''
+        setattr(ns.obj, ns.attr, value)
         return value
 
     def _register(self, ns: SimpleNamespace) -> None:
@@ -93,7 +103,7 @@ class OptionSpinner:
 
         self.options.append(ns)
         self.align = max(self.align, self.margin+len(ns.descr))
-        self.get_value(ns.attr, coerce=True)
+        self.normalize(ns.attr)
 
     def _resolve_scope(self, ns: SimpleNamespace, all_screens: set) -> set:
         if ns.scope is not None:
@@ -269,12 +279,16 @@ class OptionSpinner:
         return not (ns.effective_scope & filter_screens)
 
     def _write_option_body(self, win: ConsoleWindow, ns: SimpleNamespace) -> None:
-        # get / coerce the current value
+        # Registration normalizes every option, so a missing value here means
+        # the application deleted or cleared the attribute afterwards.  Render
+        # an explicit placeholder instead of relying on an assert (which would
+        # vanish under ``python -O`` and print "None" as the current value).
         value = self.get_value(ns.attr)
-        assert value is not None, f'cannot get value of {ns.attr!r}'
-
         dot = ' ' if ns.genre == 'action' else '·'
         win.add_body(f'{ns.descr:{dot}<{self.align}} ')
+        if value is None:
+            win.add_body(f'<unset: {ns.attr!r}>', resume=True, attr=curses.A_DIM)
+            return
 
         if ns.genre in ('cycle', 'prompt'):
             choices = ns.vals if ns.vals else [value]
@@ -311,6 +325,8 @@ class OptionSpinner:
             value = ns.vals[(idx+1) % len(ns.vals)] # choose next
         elif ns.genre == 'prompt':
             value = win.answer(prompt=ns.prompt, seed=str(value))
+            if value is None:
+                return None  # aborted dialog: leave the previous value untouched
         elif ns.genre == 'action':
             value = True
 

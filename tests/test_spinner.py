@@ -93,7 +93,7 @@ def test_cycle_value_rotates():
     spin = OptionSpinner()
     spin.add_key('mode', 'v - view mode', vals=['compact', 'full'], keys=[ord('v')])
     obj = spin.default_obj
-    assert obj.mode == 'compact'  # coerced to first value
+    assert obj.mode == 'compact'  # normalized to the first value at registration
     spin.do_key(ord('v'), win=None)
     assert obj.mode == 'full'
     spin.do_key(ord('v'), win=None)
@@ -168,6 +168,40 @@ def test_genre_cycle_without_vals_raises():
         spin.add_key('bad', 'a - bad', genre='cycle', keys=[ord('a')])
 
 
+class FakeAnswerWindow:
+    """Minimal stand-in for ConsoleWindow.answer()."""
+
+    def __init__(self, reply):
+        self.reply = reply
+        self.calls = []
+
+    def answer(self, prompt=None, seed=''):
+        self.calls.append((prompt, seed))
+        return self.reply
+
+
+def test_prompt_genre_accepts_new_value():
+    spin = OptionSpinner()
+    spin.add_key('name', 'n - name', genre='prompt', prompt='name?', keys=[ord('n')])
+    obj = spin.default_obj
+    obj.name = 'old'
+    win = FakeAnswerWindow('new')
+    assert spin.do_key(ord('n'), win=win) == 'new'
+    assert obj.name == 'new'
+    assert win.calls == [('name?', 'old')]  # current value seeds the dialog
+
+
+def test_prompt_genre_abort_keeps_previous_value():
+    # ESC/abort surfaces as answer() -> None and must mean "no change" (audit §3.7).
+    spin = OptionSpinner()
+    spin.add_key('name', 'n - name', genre='prompt', prompt='name?', keys=[ord('n')])
+    obj = spin.default_obj
+    obj.name = 'kept'
+    win = FakeAnswerWindow(None)
+    assert spin.do_key(ord('n'), win=win) is None
+    assert obj.name == 'kept'
+
+
 def test_genre_prompt_without_prompt_raises():
     spin = OptionSpinner()
     with pytest.raises(ValueError):
@@ -178,3 +212,57 @@ def test_genre_invalid_value_raises():
     spin = OptionSpinner()
     with pytest.raises(ValueError):
         spin.add_key('bad', 'a - bad', genre='spinner', keys=[ord('a')])
+
+
+class FakeBodyWindow:
+    """Records add_body() calls made by the help renderer."""
+
+    def __init__(self):
+        self.calls = []
+
+    def add_body(self, text, attr=None, resume=False):
+        self.calls.append((text, attr, resume))
+
+
+def test_get_value_is_a_pure_read():
+    spin = OptionSpinner()
+    spin.add_key('mode', 'm - mode', vals=['a', 'b'], keys=[ord('m')])
+    obj = spin.default_obj
+    obj.mode = None
+    assert spin.get_value('mode') is None
+    assert obj.mode is None  # not re-initialized behind the caller's back
+
+
+def test_normalize_initialises_a_missing_option():
+    spin = OptionSpinner()
+    spin.add_key('mode', 'm - mode', vals=['a', 'b'], keys=[ord('m')])
+    obj = spin.default_obj
+    del obj.mode
+    assert spin.normalize('mode') == 'a'
+    assert obj.mode == 'a'
+
+
+def test_normalize_prompt_uses_empty_string():
+    spin = OptionSpinner()
+    spin.add_key('name', 'n - name', genre='prompt', prompt='name?', keys=[ord('n')])
+    obj = spin.default_obj
+    obj.name = None
+    assert spin.normalize('name') == ''
+    assert obj.name == ''
+
+
+def test_normalize_unknown_attr_returns_none():
+    spin = OptionSpinner()
+    assert spin.normalize('missing') is None
+
+
+def test_help_body_renders_placeholder_for_unset_option():
+    spin = OptionSpinner()
+    spin.add_key('mode', 'm - mode', vals=['a', 'b'], keys=[ord('m')])
+    ns = spin.attr_to_option['mode']
+    del spin.default_obj.mode
+    win = FakeBodyWindow()
+    spin._write_option_body(win, ns)
+    texts = [text for text, _attr, _resume in win.calls]
+    assert any('unset' in text for text in texts)
+    assert not any('None' in text for text in texts)

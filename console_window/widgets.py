@@ -10,14 +10,14 @@ class InlineConfirmation:
     MODES = 'Y y YES yes identity choices text'.split()
 
     def __init__(self, min_abbrev_chars: int | None = None) -> None:
-        self.active = False
-        self.action_type = None  # e.g., 'wipe' or 'verify'
-        self.identity = None     # e.g., 'sda1'
-        self.choices = None
-        self.input_buffer = ''
-        self.mode = None
-        self.min_abbrev_chars = min_abbrev_chars
-        self._calculated_min_abbrev = None  # Cached calculated value
+        self.active: bool = False
+        self.action_type: str | None = None  # e.g., 'wipe' or 'verify'
+        self.identity: str | None = None     # e.g., 'sda1'
+        self.choices: list[str] | None = None
+        self.input_buffer: str = ''
+        self.mode: str | None = None
+        self.min_abbrev_chars: int | None = min_abbrev_chars
+        self._calculated_min_abbrev: int | None = None  # Cached calculated value
 
     def start(self, action_type: str | None = None, identity: str | None = None,
               choices: str | list[str] | tuple[str, ...] | None = None,
@@ -25,7 +25,7 @@ class InlineConfirmation:
         self.active = True
         self.action_type = action_type
         self.identity = identity
-        self.choices = (choices if isinstance(choices, (list, tuple))
+        self.choices = (list(choices) if isinstance(choices, (list, tuple))
                     else [choices] if isinstance(choices, str) else None)
         self.input_buffer = ''
 
@@ -51,15 +51,16 @@ class InlineConfirmation:
         self.input_buffer = ''
 
     def _calculate_min_abbrev_chars(self) -> int:
-        if not self.choices or len(self.choices) <= 1:
+        choices = self.choices
+        if not choices or len(choices) <= 1:
             return 1
 
         # Find minimum prefix length to distinguish all choices (case-insensitive)
-        max_len = max(len(c) for c in self.choices)
+        max_len = max(len(c) for c in choices)
 
         for prefix_len in range(1, max_len + 1):
             prefixes = {}
-            for choice in self.choices:
+            for choice in choices:
                 prefix = choice[:prefix_len].lower()
                 if prefix in prefixes:
                     # Collision found
@@ -78,11 +79,13 @@ class InlineConfirmation:
         if self.min_abbrev_chars is not None:
             return self.min_abbrev_chars
 
-        # Calculate if not cached
-        if self._calculated_min_abbrev is None:
-            self._calculated_min_abbrev = self._calculate_min_abbrev_chars()
-
-        return self._calculated_min_abbrev
+        # Calculate if not cached (local keeps the narrowed type; mypy does not
+        # narrow instance attributes across methods).
+        calc = self._calculated_min_abbrev
+        if calc is None:
+            calc = self._calculate_min_abbrev_chars()
+            self._calculated_min_abbrev = calc
+        return calc
 
     def _resolve_choice(self) -> str | None:
         buf = self.input_buffer
@@ -98,22 +101,25 @@ class InlineConfirmation:
         return None
 
     def _match_exact(self, buf: str) -> str | None:
-        return buf if buf in self.choices else None
+        choices = self.choices or []
+        return buf if buf in choices else None
 
     def _match_case_insensitive(self, buf: str) -> str | None:
-        ci_matches = [c for c in self.choices if c.lower() == buf.lower()]
+        choices = self.choices or []
+        ci_matches = [c for c in choices if c.lower() == buf.lower()]
         return ci_matches[0] if len(ci_matches) == 1 else None
 
     def _match_prefix(self, buf: str) -> str | None:
         if len(buf) < self._get_effective_min_abbrev_chars():
             return None
 
-        ss_matches = [c for c in self.choices if c.startswith(buf)]
+        choices = self.choices or []
+        ss_matches = [c for c in choices if c.startswith(buf)]
         if len(ss_matches) == 1:
             return ss_matches[0]
 
         buf_l = buf.lower()
-        ss_ci_matches = [c for c in self.choices if c.lower().startswith(buf_l)]
+        ss_ci_matches = [c for c in choices if c.lower().startswith(buf_l)]
         return ss_ci_matches[0] if len(ss_ci_matches) == 1 else None
 
     #: Keys treated as backspace (all terminal variants).
@@ -140,8 +146,9 @@ class InlineConfirmation:
     def _handle_single_key_mode(self, key: int) -> str:
         # Only 'Y'/'y' reach here, so the trigger key is always the mode's
         # first character (the old `self.mode == 'identity'` test was dead).
-        if key == ord(self.mode[0]):
-            self.input_buffer = self.mode
+        mode = self.mode or ''
+        if mode and key == ord(mode[0]):
+            self.input_buffer = mode
             return 'confirmed'
         return 'continue'
 
@@ -185,11 +192,12 @@ class InlineConfirmation:
             return f'Type {self.identity} + ENTER or ESC'
         if self.mode == 'choices':
             return self._choices_hint()
-        return self._STATIC_HINTS.get(self.mode, '')
+        return self._STATIC_HINTS.get(self.mode or '', '')
 
     def _choices_hint(self) -> str:
-        if len(self.choices) == 1:
-            return f'Type {self.choices[0]} + ENTER or ESC'
+        choices = self.choices or []
+        if len(choices) == 1:
+            return f'Type {choices[0]} + ENTER or ESC'
         min_chars = self._get_effective_min_abbrev_chars()
         return f'{min_chars}+ chars + ENTER or ESC'
 

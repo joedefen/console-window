@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import curses
+import difflib
+from typing import Any, Callable
 
 
 class ConsoleWindowOpts:
@@ -10,7 +12,42 @@ class ConsoleWindowOpts:
                  'pick_size', 'relax_handled_keys', 'return_if_pos_change',
                  'single_cell_scroll_indicator', 'strip_attrs_in_pick_mode']
 
-    def __init__(self, **kwargs: object) -> None:
+    # Explicit attribute types: assignments below come from **kwargs, so without
+    # these every option would be typed as ``object`` and every read would need a
+    # cast (AUDIT.md §3.4).  ``Any`` for kwargs keeps the dynamic API while the
+    # stored attributes are checked.
+    answer_show_redraws: bool
+    body_cols: int
+    body_rows: int
+    ctrl_c_terminates: bool
+    demo_mode: bool
+    dialog_abort: str | None
+    dialog_return: str
+    head_line: bool
+    head_rows: int
+    keys: set | list | None
+    min_cols_rows: tuple[int, int]
+    mod_pick: Callable[[str], str] | None
+    pick_attr: int
+    pick_mode: bool
+    pick_range: list[int] | None
+    pick_size: int
+    relax_handled_keys: bool
+    return_if_pos_change: bool
+    single_cell_scroll_indicator: bool
+    strip_attrs_in_pick_mode: bool
+
+    def __init__(self, **kwargs: Any) -> None:  # noqa: ANN401 - dynamic options bag
+        unknown = set(kwargs) - set(self.__slots__)
+        if unknown:
+            details = []
+            for name in sorted(unknown):
+                match = difflib.get_close_matches(name, self.__slots__, n=1)
+                hint = f' (did you mean {match[0]!r}?)' if match else ''
+                details.append(f'{name!r}{hint}')
+            raise TypeError(
+                f'ConsoleWindowOpts() got unknown option(s): {", ".join(details)}.')
+
         self.head_line = kwargs.get('head_line', True)
         self.head_rows = kwargs.get('head_rows', 50)
         self.body_rows = kwargs.get('body_rows', 200)

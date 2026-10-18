@@ -90,11 +90,17 @@ demonstrates:
   `Theme.list_all()` / `get_current()` / `set()`.
 * **Dialogs** — `a` calls `answer()` for text input, `l` calls `alert()`, and `n`
   drives `answer()` from an `OptionSpinner` option (`add_key(..., prompt=...)`).
+  `answer()` returns `None` only when the user aborts; if the terminal cannot
+  fit the dialog it raises `TerminalTooSmallError` with the required and actual
+  sizes.
 * **`flash()`** — transient, non-destructive status messages.
 * **Token-based headers** — `HeaderLine` (`text`, `bracket_key`, `key`, `extend`)
   rendered with `add_header_line()`, rather than string markup.
 * **`Ctrl-C` as an application key** — `ctrl_c_terminates=False` and
-  `keys={0x3, ord('q')}` on the quit action.
+  `keys={0x3, ord('q')}` on the quit action. This works only while no window in
+  the process has requested terminating Ctrl-C: once any window uses the default
+  (`ctrl_c_terminates=True`), terminating Ctrl-C is latched for the process
+  lifetime and cannot be undone.
 * **Full-repaint recovery** — `r` toggles `render(redraw=True)`, the path that
   repaints after terminal corruption.
 * **Multi-row picking** — `p` sets `pick_size` (1–3) via

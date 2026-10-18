@@ -1,11 +1,17 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from .spinner import OptionSpinner
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .window import ConsoleWindow
+
+
+class _AppLike(Protocol):
+    # The only part of the host application a Screen touches at construction.
+    win: ConsoleWindow
+
 
 # Default home screen constant (applications should define their own)
 HOME_ST = 0
@@ -17,10 +23,10 @@ class Screen:
     is_terminal = False         # True = cannot be pushed onto stack
     cannot_stack_me = False     # True = cannot have other screens pushed on top
 
-    def __init__(self, app: object) -> None:
+    def __init__(self, app: _AppLike) -> None:
         self.app = app  # Reference to main application instance
         self.win = app.win
-        self._cached_spinner = None  # Lazy-loaded spinner reference
+        self._cached_spinner: OptionSpinner | None = None  # Lazy-loaded spinner reference
 
     def draw_screen(self) -> None:
         pass
@@ -64,14 +70,15 @@ class Screen:
 
 class ScreenStack:
     def __init__(self, win: ConsoleWindow, spins_obj: object, screens: tuple,
-                 screen_objects: dict | None = None) -> None:
+                 screen_objects: dict[int, Screen] | None = None) -> None:
         from types import SimpleNamespace
         self.win = win
         self.obj = spins_obj
         self.screens = screens
-        self.screen_objects = screen_objects or {}  # Dict of screen_num -> Screen instance
-        self.stack = []
-        self.curr = None
+        # Dict of screen_num -> Screen instance
+        self.screen_objects: dict[int, Screen] = screen_objects or {}
+        self.stack: list[SimpleNamespace] = []
+        self.curr: SimpleNamespace | None = None
         self._SimpleNamespace = SimpleNamespace
         # Push home screen (HOME_ST=0) as the initial screen
         self.push(HOME_ST, 0)
@@ -138,11 +145,10 @@ class ScreenStack:
             return None
 
         to_screen_num = self.stack[-1].num
-        from_screen_num = self.curr.num if self.curr else None
 
         # Call on_pop() on current screen (it's being removed - always succeeds)
         if not force and self.curr and self.screen_objects:
-            current_screen_obj = self.screen_objects.get(from_screen_num)
+            current_screen_obj = self.screen_objects.get(self.curr.num)
             if current_screen_obj:
                 current_screen_obj.on_pop()  # Always called, cannot reject
 
@@ -161,11 +167,15 @@ class ScreenStack:
         return self.curr.prev_pos
 
     def is_curr(self, screens: int | str | list | tuple | set) -> bool:
+        curr = self.curr
+        if curr is None:
+            return False
+
         def test_one(screen: int | str) -> bool:
             if isinstance(screen, int):
-                return screen == self.curr.num
-            return str(screen) == self.curr.name
-        if isinstance(screens, (tuple, list)):
+                return screen == curr.num
+            return str(screen) == curr.name
+        if isinstance(screens, (tuple, list, set)):
             return any(test_one(screen) for screen in screens)
         return test_one(screen=screens)
 
@@ -175,6 +185,8 @@ class ScreenStack:
         return val and (screens is None or self.is_curr(screens))
 
     def perform_actions(self, spinner: OptionSpinner) -> int:
+        if self.curr is None:
+            return 0
         current_screen = self.screen_objects.get(self.curr.num)
         if not current_screen:
             return 0  # No screen object to handle actions

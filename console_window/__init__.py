@@ -8,7 +8,7 @@ from .screens import HOME_ST, BasicHelpScreen, Screen, ScreenStack
 from .spinner import OptionSpinner
 from .theme import Theme
 from .widgets import IncrementalSearchBar, InlineConfirmation
-from .window import ConsoleWindow
+from .window import ConsoleWindow, TerminalTooSmallError
 
 __all__ = [
     'HOME_ST',
@@ -24,5 +24,6 @@ __all__ = [
     'Screen',
     'ScreenStack',
     'Span',
+    'TerminalTooSmallError',
     'Theme',
 ]
