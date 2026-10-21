@@ -10,6 +10,7 @@ import atexit
 import curses
 import itertools
 import logging
+import sys
 import time
 import warnings
 import weakref
@@ -73,6 +74,11 @@ _SINGLETON_MODE: bool | None = None
 # ``atexit`` teardown is registered once for the whole process, not once per
 # window, so creating multiple windows does not stack up duplicate handlers.
 _ATEXIT_REGISTERED = False
+
+# Sentinel for "no content-row ceiling" (opts.max_rows is None).  It only has to
+# be larger than any row index a process could allocate; it is never passed to
+# curses, because the pads themselves are viewport-sized.
+_NO_ROW_LIMIT = sys.maxsize
 
 
 def _register_window(win: ConsoleWindow) -> None:
@@ -205,8 +211,8 @@ class ConsoleWindow:
             )
             self.opts = ConsoleWindowOpts(
                 head_line=head_line if head_line is not None else True,
-                head_rows=head_rows if head_rows is not None else 50,
-                body_rows=body_rows if body_rows is not None else 200,
+                head_rows=head_rows,
+                body_rows=body_rows,
                 body_cols=body_cols if body_cols is not None else 200,
                 keys=keys,
                 pick_mode=pick_mode if pick_mode is not None else False,
@@ -244,37 +250,45 @@ class ConsoleWindow:
         # they ran, instead of assuming the class default.
         self._scr_timeout_ms = ConsoleWindow.timeout_ms
 
+        # Scheme B: the pads are viewport-sized blit buffers, not content
+        # stores.  `rows` below is the enforced content ceiling (opts.max_rows,
+        # or _NO_ROW_LIMIT when that option is None) and `hint_rows` is the
+        # advisory opts.head_rows/opts.body_rows value, kept for compatibility
+        # and introspection.  pad_rows/pad_cols track the actual allocation.
+        # _sync_pad_geometry() creates/sizes the pads once the terminal
+        # dimensions are known (calc() runs at the end of __init__), so no
+        # oversized placeholder is ever allocated.
+        row_limit = (self.opts.max_rows if self.opts.max_rows is not None
+                     else _NO_ROW_LIMIT)
         self.head = SimpleNamespace(
-            pad=self._backend.newpad(self.opts.head_rows, self.opts.body_cols),
-            rows=self.opts.head_rows,
+            pad=None,
+            rows=row_limit,  # enforced ceiling (NOT the pad height)
+            hint_rows=self.opts.head_rows,
             cols=self.opts.body_cols,
+            pad_rows=0,
+            pad_cols=0,
             row_cnt=0,  # no. head rows added
             texts = [],
             text_attrs = [],  # run-length encoded: [(attr, count), ...] per line
             contexts = [],  # Context object per line (or None)
+            drawn = {},  # row -> [(x, text, attr), ...] written by draw()
             view_cnt=0,  # no. head rows viewable (NOT in body)
-            rows_dropped=0,  # rows discarded because the pad was full (see _add)
+            rows_dropped=0,  # rows discarded because the content cap was reached
         )
         self.body = SimpleNamespace(
-            pad = self._backend.newpad(self.opts.body_rows, self.opts.body_cols),
-            rows= self.opts.body_rows,
+            pad = None,
+            rows= row_limit,  # enforced ceiling (NOT the pad height)
+            hint_rows= self.opts.body_rows,
             cols= self.opts.body_cols,
+            pad_rows=0,
+            pad_cols=0,
             row_cnt = 0,
             texts = [],
             text_attrs = [],  # run-length encoded: [(attr, count), ...] per line
             contexts = [],  # Context object per line (or None)
-            rows_dropped = 0,  # rows discarded because the pad was full (see _add)
+            drawn = {},  # row -> [(x, text, attr), ...] written by draw()
+            rows_dropped = 0,  # rows discarded because the content cap was reached
         )
-
-        # Apply theme background to pads
-        if self._backend.has_colors():
-            theme = Theme.THEMES.get(Theme.get_current(), Theme.THEMES['default'])
-            if 'default_fg' in theme and 'default_bg' in theme:
-                default_fg = theme['default_fg']
-                default_bg = theme['default_bg']
-                if default_fg != -1 or default_bg != -1:
-                    self.head.pad.bkgd(' ', self._backend.color_pair(Theme.DEFAULT_BG))
-                    self.body.pad.bkgd(' ', self._backend.color_pair(Theme.DEFAULT_BG))
 
         # Register this instance so theme broadcasts and process teardown reach
         # it.  Singleton mode also republishes the old ``static_win`` pointer.
@@ -311,7 +325,7 @@ class ConsoleWindow:
         self.passthrough_mode = False  # When True, all printable keys pass through
         self.relax_handled_keys = self.opts.relax_handled_keys  # When True, pass non-nav keys without checking handled_keys
         self._set_screen_dims()
-        self.calc()
+        self.calc()  # also creates the viewport-sized pads
 
     def set_handled_keys(self, keys: object) -> None:
         if hasattr(keys, 'keys'):
@@ -356,11 +370,43 @@ class ConsoleWindow:
         return min(self.cols-1, self.body_cols)
 
     @property
+    def max_rows(self) -> int | None:
+        """The enforced per-namespace content ceiling (None = unlimited)."""
+        return self.opts.max_rows
+
+    def _apply_pad_theme(self, pad: CursesSurface) -> None:
+        # A freshly created pad has no background, so re-apply the theme colour
+        # after every reallocation; otherwise a resize leaves the new pad on the
+        # terminal default instead of the configured background.
+        if not self._backend.has_colors():
+            return
+        theme = Theme.THEMES.get(Theme.get_current(), Theme.THEMES['default'])
+        default_fg = theme.get('default_fg', -1)
+        default_bg = theme.get('default_bg', -1)
+        if default_fg != -1 or default_bg != -1:
+            pad.bkgd(' ', self._backend.color_pair(Theme.DEFAULT_BG))
+
+    def _sync_pad_geometry(self) -> None:
+        # Viewport-sized pads: height is the terminal height and width is the
+        # blittable width (cols-1 with the last column reserved), so neither
+        # content length nor opts.body_rows has any effect on pad memory or on
+        # pad clear()/erase() cost.  Called from calc(), i.e. once per frame,
+        # but it only allocates when the terminal dimensions actually changed.
+        height = max(1, self.rows)
+        width = max(1, self.cols - 1)
+        for ns in (self.head, self.body):
+            if ns.pad_rows == height and ns.pad_cols == width:
+                continue
+            ns.pad = self._backend.newpad(height, width)
+            ns.pad_rows, ns.pad_cols = height, width
+            self._apply_pad_theme(cast(CursesSurface, ns.pad))
+
+    @property
     def rows_dropped(self) -> int:
-        # Rows handed to add_body()/add_header() after that pad had filled up.
-        # The pads are fixed-size (opts.body_rows/head_rows), so a caller that
-        # adds more rows than that used to lose the excess in silence; this
-        # counter, plus the one-shot warning in _add(), is how that is now
+        # Rows handed to add_body()/add_header() after that namespace reached
+        # opts.max_rows (the only ceiling; None disables it).  body_rows and
+        # head_rows are advisory hints and never drop anything.  This counter,
+        # plus the one-shot warning in _add(), keeps a runaway append loop
         # observable without the library deciding to abort the app.
         return self.head.rows_dropped + self.body.rows_dropped
 
@@ -612,6 +658,7 @@ class ConsoleWindow:
 
     def calc(self) -> bool:
         same = self._set_screen_dims()
+        self._sync_pad_geometry()
         self.head.view_cnt = min(self.rows - self.hor_line_cnt, self.head.row_cnt)
         self.scroll_view_size = self.rows - self.head.view_cnt - self.hor_line_cnt
         self.max_scroll_pos = max(self.body.row_cnt - self.scroll_view_size, 0)
@@ -621,41 +668,47 @@ class ConsoleWindow:
     def _add(self, ns: SimpleNamespace, text: str, attr: int | None = None,
              resume: bool = False, context: Context | None = None,
              *, is_body: bool = False) -> None:
-        if ns.row_cnt < ns.rows:
-            row = max(ns.row_cnt - (1 if resume else 0), 0)
-            if attr is None:
-                attr = curses.A_NORMAL
-            # Apply stripping logic if needed
-            if is_body and self.pick_mode and self.opts.strip_attrs_in_pick_mode:
-                attr = curses.A_NORMAL
-
-            if resume:
-                _, x = ns.pad.getyx()
-                cols = self.get_pad_width() - x
-                if cols > 0:
-                    actual_text = textwidth.truncate(text, cols)
-                    ns.pad.addstr(actual_text, attr)
-                    ns.texts[row] += actual_text
-                    # Append to existing attrs list (counts are code points)
-                    if row < len(ns.text_attrs):
-                        ns.text_attrs[row].append((attr, len(actual_text)))
-                    # Note: context not updated on resume
-            else:
-                # Truncate to the single "usable width" (get_pad_width), matching
-                # the resume branch, draw() and highlight_picked() — not the raw
-                # terminal width, which is one column wider and uncapped by the pad.
-                actual_text = textwidth.truncate(text, self.get_pad_width())
-                ns.pad.addstr(row, 0, actual_text, attr)
-                ns.texts.append(actual_text)  # text only history
-                ns.text_attrs.append([(attr, len(actual_text))])  # run-length encoded
-                ns.contexts.append(context)  # Context metadata (or None)
-                ns.row_cnt += 1
-        else:
+        # Model-only: the row is stored here and painted by _paint_body()/
+        # _paint_head() on the frames where it is actually visible.  `ns.rows`
+        # is ops.max_rows (or the no-limit sentinel), not the pad height and not
+        # the advisory hint, so nothing is dropped unless a ceiling was set.
+        if ns.row_cnt >= ns.rows:
             self._warn_rows_dropped(ns, 'body' if is_body else 'head')
+            return
+
+        if attr is None:
+            attr = curses.A_NORMAL
+        # Apply stripping logic if needed
+        if is_body and self.pick_mode and self.opts.strip_attrs_in_pick_mode:
+            attr = curses.A_NORMAL
+
+        if resume and ns.row_cnt > 0 and ns.texts:
+            row = min(ns.row_cnt - 1, len(ns.texts) - 1)
+            # The old code read the pad cursor with getyx(); the model already
+            # records the row's text, so its display width is the resume column.
+            x = textwidth.string_width(ns.texts[row])
+            cols = self.get_pad_width() - x
+            if cols > 0:
+                actual_text = textwidth.truncate(text, cols)
+                ns.texts[row] += actual_text
+                # Append to existing attrs list (counts are code points)
+                if row < len(ns.text_attrs):
+                    ns.text_attrs[row].append((attr, len(actual_text)))
+                # Note: context not updated on resume
+        else:
+            # Truncate to the single "usable width" (get_pad_width), matching
+            # the resume branch, draw() and highlight_picked() — not the raw
+            # terminal width, which is one column wider and uncapped by the pad.
+            actual_text = textwidth.truncate(text, self.get_pad_width())
+            ns.texts.append(actual_text)  # text only history
+            ns.text_attrs.append([(attr, len(actual_text))])  # run-length encoded
+            ns.contexts.append(context)  # Context metadata (or None)
+            ns.row_cnt += 1
 
     def _warn_rows_dropped(self, ns: SimpleNamespace, which: str) -> None:
-        # The pad is full, so this row is discarded (as it always was).  Counted
-        # always, warned about once per fill episode -- clear() resets both, so
+        # The content cap is reached, so this row is discarded (as it always
+        # was when the pad was the storage).  Counted always, warned about once
+        # per fill episode -- clear() resets both, so
         # a bulk overflow produces exactly one message instead of one per row --
         # and never fatal: the app keeps running and can inspect
         # ConsoleWindow.rows_dropped.  A caller that would rather treat this as
@@ -665,10 +718,10 @@ class ConsoleWindow:
         if ns.rows_dropped != 1:
             return
         warnings.warn(
-            f'console-window: the {which} pad is full ({ns.rows} rows), so '
-            f'further {which} rows are being discarded.  Raise the '
-            f'{which}_rows option (ConsoleWindowOpts({which}_rows=...)) or add '
-            f'fewer rows per frame.',
+            f'console-window: the {which} content limit is full ({ns.rows} '
+            f'rows), so further {which} rows are being discarded.  Raise '
+            f'ConsoleWindowOpts(max_rows=...) or pass max_rows=None to remove '
+            f'the ceiling entirely.',
             # warn() <- _warn_rows_dropped() <- _add() <- add_body()/add_header()
             # <- caller, so 4 is the application's own line.
             stacklevel=4,
@@ -748,6 +801,10 @@ class ConsoleWindow:
 
     def draw(self, y: int, x: int, text: str | bytes, text_attr: int | None = None,
              width: int | None = None, leftpad: bool = False, header: bool = False) -> None:
+        # Scheme B keeps y a *content* row, exactly as before; the row is
+        # painted at y - scroll_pos by _paint_body() on the frames where it is
+        # visible.  The attribute has no home in texts[], so the span is also
+        # recorded in ns.drawn and replayed over the row's normal attribute runs.
         ns = self.head if header else self.body
         text_attr = text_attr if text_attr else curses.A_NORMAL
         if y < 0 or y >= ns.rows or x < 0 or x >= ns.cols:
@@ -762,21 +819,16 @@ class ConsoleWindow:
                 return
             # Pad/truncate to exactly `width` display cells (wide-char safe).
             uni = textwidth.rjust(uni, width) if leftpad else textwidth.ljust(uni, width)
-            text = uni.encode('utf-8')
-        else:
-            text = uni.encode('utf-8')
 
-        try:
-            while y >= len(ns.texts):
-                ns.texts.append('')
-            existing = ns.texts[y]
-            left = textwidth.ljust(textwidth.truncate(existing, x), x)
-            right_start = textwidth.cell_to_index(existing, x + textwidth.string_width(uni))
-            ns.texts[y] = left + uni + existing[right_start:]
-            ns.pad.addstr(y, x, text, text_attr)
-        except curses.error:
-            # curses errors on drawing the last character on the screen; ignore
-            pass
+        while y >= len(ns.texts):
+            ns.texts.append('')
+            ns.text_attrs.append([])
+            ns.contexts.append(None)
+        existing = ns.texts[y]
+        left = textwidth.ljust(textwidth.truncate(existing, x), x)
+        right_start = textwidth.cell_to_index(existing, x + textwidth.string_width(uni))
+        ns.texts[y] = left + uni + existing[right_start:]
+        ns.drawn.setdefault(y, []).append((x, uni, text_attr))
 
 
     def highlight_picked(self) -> None:
@@ -805,24 +857,65 @@ class ConsoleWindow:
     def _body_attrs(self, pos: int) -> list | None:
         return self.body.text_attrs[pos] if pos < len(self.body.text_attrs) else None
 
+    def _pad_row(self, pos: int, header: bool = False) -> int | None:
+        # Map a content row to the pad row that currently holds it.  Returns
+        # None when the row is outside the viewport, which is the common case
+        # for a long body: only the visible page lives in the pad.
+        row = pos if header else pos - self.scroll_pos
+        ns = self.head if header else self.body
+        if row < 0 or row >= ns.pad_rows:
+            return None
+        return row
+
+    def _overlay_spans(self, pad: CursesSurface, pad_row: int, ns: SimpleNamespace,
+                       pos: int) -> None:
+        # Replay the draw() spans for one content row on top of its normal
+        # attribute runs.  Off-screen rows keep their spans in ns.drawn and are
+        # painted when they scroll into view.
+        spans = ns.drawn.get(pos)
+        if not spans:
+            return
+        width = self.get_pad_width()
+        for x, text, attr in spans:
+            if x >= width:
+                continue
+            pad.addstr(pad_row, x, textwidth.truncate(text, width - x), attr)
+
+    def _paint_row(self, pad: CursesSurface, pad_row: int, pos: int, *,
+                   picked: bool) -> None:
+        # One content row -> one pad row, with the pick styling applied here
+        # rather than incrementally: a scrolled viewport moves rows on screen
+        # without changing pick_pos, so highlight state must follow the paint,
+        # not the last pick position.
+        text = self._body_text(pos)
+        if picked and self.mod_pick:
+            text = self.mod_pick(text)
+        text = textwidth.ljust(text, self.get_pad_width())
+        if picked:
+            self._draw_line_with_attrs(pad, pad_row, 0, text,
+                                       self._body_attrs(pos),
+                                       extra_attr=self.opts.pick_attr,
+                                       extra_attr_range=self.opts.pick_range)
+        else:
+            self._draw_line_with_attrs(pad, pad_row, 0, text,
+                                       self._body_attrs(pos), extra_attr=None)
+            self._overlay_spans(pad, pad_row, self.body, pos)
+
     def _redraw_rows(self, rows: Iterable[int]) -> None:
         for row_idx in rows:
-            if row_idx < len(self.body.texts):
-                text = textwidth.ljust(self._body_text(row_idx), self.get_pad_width())
-                self._draw_line_with_attrs(self.body.pad, row_idx, 0, text,
-                                           self._body_attrs(row_idx), extra_attr=None)
+            pad_row = self._pad_row(row_idx)
+            if pad_row is None or row_idx >= len(self.body.texts):
+                continue
+            self._paint_row(cast(CursesSurface, self.body.pad), pad_row,
+                            row_idx, picked=False)
 
     def _draw_picked_rows(self, rows: Iterable[int]) -> None:
         for row_idx in rows:
-            if row_idx < len(self.body.texts):
-                text = self._body_text(row_idx)
-                if self.mod_pick:
-                    text = self.mod_pick(text)
-                text = textwidth.ljust(text, self.get_pad_width())
-                self._draw_line_with_attrs(self.body.pad, row_idx, 0, text,
-                                           self._body_attrs(row_idx),
-                                           extra_attr=self.opts.pick_attr,
-                                           extra_attr_range=self.opts.pick_range)
+            pad_row = self._pad_row(row_idx)
+            if pad_row is None or row_idx >= len(self.body.texts):
+                continue
+            self._paint_row(cast(CursesSurface, self.body.pad), pad_row,
+                            row_idx, picked=True)
 
     def _draw_line_with_attrs(self, pad: CursesSurface, row: int, col_offset: int,
                               text: str, attrs: list | None,
@@ -845,6 +938,13 @@ class ConsoleWindow:
             col = self._draw_attr_run(pad, row, col, text, attr, pos, count,
                                       range_start, range_end, extra_attr)
             pos += count
+        if pos < len(text):
+            # draw() can replace part of a row without rewriting text_attrs[],
+            # so the run list may not cover the whole string.  Paint the tail in
+            # the normal attribute rather than leaving a hole in the row.
+            tail = textwidth.truncate(text[pos:], self.get_pad_width() - col)
+            if tail:
+                pad.addstr(row, col, tail, curses.A_NORMAL)
 
     def _draw_plain_line(self, pad: CursesSurface, row: int, col_offset: int, text: str,
                          extra_attr: int | None,
@@ -1145,23 +1245,59 @@ class ConsoleWindow:
         top = min(round(ind_pos+width/2), self.cols-1)
         return bot, max(top - bot, 1)
 
-    def _refresh_pads(self, indent: int) -> None:
-        if self.body_base < self.rows:
-            if self.pick_mode:
-                self.highlight_picked()
+    def _paint_body(self) -> int:
+        # Paint the visible page into the viewport-sized body pad.  Unlike the
+        # old pad-as-storage model, every frame redraws at most one screenful,
+        # so cost tracks the terminal, not the document.
+        view = min(self.scroll_view_size, self.rows - self.body_base)
+        if view <= 0:
+            return 0
+        pad = cast(CursesSurface, self.body.pad)
+        pad.erase()
+        for row in range(view):
+            pos = self.scroll_pos + row
+            if pos < 0 or pos >= self.body.row_cnt or pos >= len(self.body.texts):
+                continue
+            picked = (self.pick_mode
+                      and self.pick_pos <= pos < self.pick_pos + self.pick_size)
+            self._paint_row(pad, row, pos, picked=picked)
+        if self.pick_mode:
+            # Bookkeeping only: the paint above is stateless, but the
+            # incremental API (and the debug log) still reports the pick that
+            # was last shown and considers any pending full repaint done.
+            self.last_pick_pos = self.pick_pos
+            self._pick_clear_pending = False
+        return view
 
+    def _paint_head(self) -> int:
+        last_row = min(self.head.view_cnt, self.rows) - 1
+        if last_row < 0:
+            return -1
+        pad = cast(CursesSurface, self.head.pad)
+        pad.erase()
+        width = self.get_pad_width()
+        for row in range(last_row + 1):
+            if row >= len(self.head.texts):
+                continue
+            text = textwidth.ljust(self.head.texts[row], width)
+            attrs = self.head.text_attrs[row] if row < len(self.head.text_attrs) else None
+            self._draw_line_with_attrs(pad, row, 0, text, attrs, extra_attr=None)
+            self._overlay_spans(pad, row, self.head, row)
+        return last_row
+
+    def _refresh_pads(self, indent: int) -> None:
+        if self._paint_body() > 0:
             self.body.pad.noutrefresh(
-                self.scroll_pos, 0,
+                0, 0,
                 self.body_base, indent, self.rows-1, self.cols-1
             )
 
-        if self.rows > 0:
-            last_row = min(self.head.view_cnt, self.rows)-1
-            if last_row >= 0:
-                self.head.pad.noutrefresh(
-                    0, 0,
-                    0, indent, last_row, self.cols-1
-                )
+        last_row = self._paint_head()
+        if last_row >= 0:
+            self.head.pad.noutrefresh(
+                0, 0,
+                0, indent, last_row, self.cols-1
+            )
 
 
     def answer(self, prompt: str = 'Type string [then Enter]', seed: str = '', width: int = 80,
@@ -1758,12 +1894,15 @@ class ConsoleWindow:
 
     def clear(self) -> None:
         self.scr.clear()
+        # Viewport-sized pads: clearing costs one screenful, not one high-water
+        # mark, and no shrink/grow decision is needed at a frame boundary.
         self.head.pad.clear()
         self.body.pad.clear()
         self.head.texts, self.body.texts, self.last_pick_pos = [], [], -1
         self._pick_clear_pending = False
         self.head.text_attrs, self.body.text_attrs = [], []
         self.head.contexts, self.body.contexts = [], []
+        self.head.drawn, self.body.drawn = {}, {}
         self.head.row_cnt = self.body.row_cnt = 0
         self.head.rows_dropped = self.body.rows_dropped = 0
 

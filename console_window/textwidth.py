@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import unicodedata
 from functools import lru_cache
 
@@ -19,6 +20,11 @@ __all__ = [
 # Categories that occupy no display cell: non-spacing/ enclosing marks, format
 # characters (ZWJ, variation selectors, BOM, …) and control characters.
 _ZERO_WIDTH_CATEGORIES = frozenset({'Mn', 'Me', 'Cf', 'Cc'})
+
+# Any character that is not printable ASCII needs per-character measurement.
+# Everything else is exactly one cell wide, so measurement can skip whole
+# ASCII runs in C and only visit the glyphs that actually differ.
+_SPECIAL_CHAR = re.compile(r'[^\x20-\x7e]')
 
 
 def _is_plain_ascii(text: str) -> bool:
@@ -56,28 +62,44 @@ def char_width(ch: str) -> int:
     return _non_ascii_char_width(ch)
 
 
-# A TUI redraws the same body rows on every keypress, so these pure functions
-# otherwise repeat the same unicode scan for every navigation key.  Bounded
-# caches turn that into a dict hit while keeping memory predictable.
-@lru_cache(maxsize=4096)
 def string_width(text: str) -> int:
     if _is_plain_ascii(text):
         return len(text)
-    return sum(char_width(ch) for ch in text)
+    # Count printable ASCII as one cell, then adjust only the glyphs that
+    # differ (wide, combining, ZWJ, control).  This keeps mixed rows cheap
+    # without needing a whole-string cache large enough for every body row.
+    width = len(text)
+    for match in _SPECIAL_CHAR.finditer(text):
+        width += char_width(match.group()) - 1
+    return width
 
 
-@lru_cache(maxsize=4096)
+# A redraw usually re-measures the same rows.  The cache must hold a whole
+# frame, not just a terminal's worth: large package/app lists routinely exceed
+# a few thousand rows, and a too-small cache evicts every entry before the next
+# frame and then pays both the scan and the eviction cost.  The ASCII-run scan
+# below still handles lists larger than this cap efficiently.
+@lru_cache(maxsize=32768)
 def truncate(text: str, max_width: int) -> str:
     if max_width <= 0:
         return ''
     if _is_plain_ascii(text):
         return text if len(text) <= max_width else text[:max_width]
     total = 0
-    for i, ch in enumerate(text):
-        w = char_width(ch)
+    ascii_start = 0
+    for match in _SPECIAL_CHAR.finditer(text):
+        run = match.start() - ascii_start
+        if total + run > max_width:
+            return text[:ascii_start + max_width - total]
+        total += run
+        w = char_width(match.group())
         if total + w > max_width:
-            return text[:i]
+            return text[:match.start()]
         total += w
+        ascii_start = match.end()
+    run = len(text) - ascii_start
+    if total + run > max_width:
+        return text[:ascii_start + max_width - total]
     return text
 
 
@@ -97,11 +119,20 @@ def cell_to_index(text: str, col: int) -> int:
     if _is_plain_ascii(text):
         return min(col, len(text))
     total = 0
-    for i, ch in enumerate(text):
-        w = char_width(ch)
+    ascii_start = 0
+    for match in _SPECIAL_CHAR.finditer(text):
+        run = match.start() - ascii_start
+        if total + run > col:
+            return ascii_start + col - total
+        total += run
+        w = char_width(match.group())
         if total + w > col:
-            return i
+            return match.start()
         total += w
+        ascii_start = match.end()
+    run = len(text) - ascii_start
+    if total + run > col:
+        return ascii_start + col - total
     return len(text)
 
 

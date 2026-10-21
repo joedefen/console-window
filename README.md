@@ -49,8 +49,8 @@ up immediately. The equivalent one-off is `python3 SampleApp.py`.)
 
 The wrapper handles several advanced terminal interaction patterns automatically:
 
-  * **Padded Content Management:** Uses separate `head` and `body` pads, allowing for a static header area while the main content area can be scrolled independently.
-  * **Loud Pad Limits:** The pads are fixed-size (`opts.head_rows` / `opts.body_rows`). Rows added past capacity are still discarded, but no longer quietly: the first discarded row of each fill episode emits a `UserWarning` naming the pad and the option to raise, and every discarded row is counted in `ConsoleWindow.rows_dropped`. It stays non-fatal — run `python -W error::UserWarning` if you would rather it killed the app.
+  * **Viewport-Sized Pads:** Separate `head` and `body` pads give the static header band and the independently scrolling body, but the pads are blit buffers sized to the terminal rather than content stores. `add_body()`/`add_header()`/`draw()` write the model, and `render()` paints the visible page into pad row 0, so pad memory and per-frame `clear()` cost stay constant no matter how many rows an app adds. Row counts need no configuration at all: `opts.body_rows` / `opts.head_rows` are advisory hints only, and `opts.max_rows` (default `32767`, `None` for unlimited) is the single content ceiling.
+  * **Loud Content Limits:** A row added past `opts.max_rows` is discarded, but no longer quietly: the first discarded row of each fill episode emits a `UserWarning` naming the namespace and the option to change, and every discarded row is counted in `ConsoleWindow.rows_dropped`. It stays non-fatal — run `python -W error::UserWarning` if you would rather it killed the app.
   * **Seamless Resizing:** Automatically detects terminal size changes (`KEY_RESIZE`) and recalculates layout dimensions, with robust error handling to prevent common `curses.error` crashes during resizing.
   * **Scroll & Pick Synchronization:** The `Window` class manages **scroll position** and a separate **pick position** (highlighted row) simultaneously.
     * When using pick mode, scrolling automatically tracks the highlighted element to keep it visible in `.pick_pos`.
@@ -106,9 +106,9 @@ demonstrates:
 * **Multi-row picking** — `p` sets `pick_size` (1–3) via
   `set_pick_mode(True, size)`.
 * **Large-body stress** — `z` appends 2000 non-pickable filler rows to exercise
-  big pads and the scroll indicator. The sample raises `body_rows` to 4000 so
-  that nothing is discarded: `row_cnt` is capped at the pad size and any excess
-  is counted in `ConsoleWindow.rows_dropped`.
+  long bodies and the scroll indicator. No option is needed for them: the pads
+  stay viewport-sized, memory and `clear()` cost do not grow with the row count,
+  and the default `max_rows` ceiling is far above 2000.
 
 ### Running it
 
@@ -126,7 +126,8 @@ from console_window import ConsoleWindow, ConsoleWindowOpts
 
 def main() -> None:
     # ConsoleWindow.__init__ performs the curses setup (no curses.wrapper needed).
-    win = ConsoleWindow(opts=ConsoleWindowOpts(head_line=True, body_rows=200))
+    # No row sizing is required; max_rows is only a safety ceiling.
+    win = ConsoleWindow(opts=ConsoleWindowOpts(head_line=True))
     try:
         while True:
             win.clear()

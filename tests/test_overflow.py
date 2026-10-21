@@ -5,9 +5,11 @@ from console_window.opts import ConsoleWindowOpts
 from console_window.window import ConsoleWindow
 
 
-def _make(head_rows=3, body_rows=5):
+def _make(max_rows=5):
+    # max_rows is the only enforced ceiling; body_rows/head_rows are hints and
+    # deliberately absent here so these tests pin the enforcement path.
     return ConsoleWindow(
-        opts=ConsoleWindowOpts(head_rows=head_rows, body_rows=body_rows),
+        opts=ConsoleWindowOpts(max_rows=max_rows),
         backend=HeadlessBackend(rows=24, cols=80),
         singleton=False,
     )
@@ -24,7 +26,7 @@ def _record(fn):
 
 
 def test_add_body_within_capacity_is_silent():
-    win = _make(body_rows=5)
+    win = _make(max_rows=5)
     try:
         caught = _record(lambda: [win.add_body(f'row {i}') for i in range(5)])
         assert [str(w.message) for w in caught] == []
@@ -34,13 +36,41 @@ def test_add_body_within_capacity_is_silent():
         win.stop_curses()
 
 
+def test_body_rows_is_a_hint_not_a_limit():
+    # The whole point of the viewport-sized pads: an app no longer has to
+    # pre-size storage, so a small (or absent) body_rows never discards rows.
+    win = ConsoleWindow(
+        opts=ConsoleWindowOpts(body_rows=5, head_rows=2, max_rows=None),
+        backend=HeadlessBackend(rows=24, cols=80),
+        singleton=False,
+    )
+    try:
+        caught = _record(lambda: [win.add_body(f'row {i}') for i in range(12)])
+        assert [str(w.message) for w in caught] == []
+        assert win.rows_dropped == 0
+        assert win.body.row_cnt == 12
+        assert win.body.texts == [f'row {i}' for i in range(12)]
+        assert win.max_rows is None
+    finally:
+        win.stop_curses()
+
+
+def test_max_rows_is_the_only_ceiling_and_can_be_removed():
+    assert ConsoleWindowOpts().max_rows == 32767
+    assert ConsoleWindowOpts(max_rows=None).max_rows is None
+    # The old row options survive as hints; they no longer control the ceiling.
+    opts = ConsoleWindowOpts(body_rows=5, head_rows=2)
+    assert (opts.body_rows, opts.head_rows) == (5, 2)
+    assert opts.max_rows == 32767
+
+
 def test_overflowing_the_body_pad_counts_rows_and_warns_once():
-    win = _make(body_rows=5)
+    win = _make(max_rows=5)
     try:
         caught = _record(lambda: [win.add_body(f'row {i}') for i in range(12)])
         assert len(caught) == 1
         assert caught[0].category is UserWarning
-        assert 'body pad is full' in str(caught[0].message)
+        assert 'body content limit is full' in str(caught[0].message)
         # The excess is still discarded -- 7 of the 12 rows -- but no longer in
         # silence.
         assert win.rows_dropped == 7
@@ -53,7 +83,7 @@ def test_overflowing_the_body_pad_counts_rows_and_warns_once():
 
 
 def test_overflow_is_not_fatal_and_clear_rearms_the_warning():
-    win = _make(body_rows=2)
+    win = _make(max_rows=2)
     try:
         caught = _record(lambda: [win.add_body(f'a{i}') for i in range(9)])
         # No exception: the app limped along, exactly as it did before.
@@ -72,7 +102,7 @@ def test_overflow_is_not_fatal_and_clear_rearms_the_warning():
 
 
 def test_head_pad_overflow_is_counted_and_summed():
-    win = _make(head_rows=2, body_rows=2)
+    win = _make(max_rows=2)
     try:
         def draw():
             for i in range(4):
@@ -83,8 +113,8 @@ def test_head_pad_overflow_is_counted_and_summed():
         caught = _record(draw)
         messages = [str(w.message) for w in caught]
         assert len(messages) == 2
-        assert any('head pad is full' in m for m in messages)
-        assert any('body pad is full' in m for m in messages)
+        assert any('head content limit is full' in m for m in messages)
+        assert any('body content limit is full' in m for m in messages)
         assert win.head.rows_dropped == 2
         assert win.body.rows_dropped == 1
         assert win.rows_dropped == 3
@@ -93,12 +123,12 @@ def test_head_pad_overflow_is_counted_and_summed():
 
 
 def test_resume_on_a_full_pad_is_counted_too():
-    win = _make(body_rows=1)
+    win = _make(max_rows=1)
     try:
         win.add_body('only')
         caught = _record(lambda: win.add_body('more', resume=True))
         assert len(caught) == 1
-        assert 'body pad is full' in str(caught[0].message)
+        assert 'body content limit is full' in str(caught[0].message)
         assert win.body.row_cnt == 1
         assert win.rows_dropped == 1
     finally:
@@ -106,7 +136,7 @@ def test_resume_on_a_full_pad_is_counted_too():
 
 
 def test_the_warning_blames_the_callers_line_not_the_library():
-    win = _make(body_rows=1)
+    win = _make(max_rows=1)
     try:
         caught = _record(lambda: [win.add_body('first'), win.add_body('second')])
         assert caught[0].filename.endswith('test_overflow.py')

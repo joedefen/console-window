@@ -38,6 +38,19 @@ This project follows [Semantic Versioning](https://semver.org/).
   smoke-tested in CI (AUDIT.md §3.2).
 
 ### Changed
+- Body and header pads are now viewport-sized blit buffers rather than content
+  stores. `add_body()`, `add_header()` and `draw()` write the model only, and
+  `render()` paints the visible page into pad row 0, so pad memory and the
+  per-frame `clear()` cost track the terminal instead of the highest row count
+  an app ever reached. `opts.body_rows`/`opts.head_rows` are retained for
+  compatibility but are now **advisory hints only**: no row is discarded for
+  exceeding them. The single ceiling is the new `opts.max_rows` (default
+  `32767`, `None` for unlimited), which is what `rows_dropped` and its warning
+  report. Apps no longer have to pre-size storage for the largest list they
+  might show. `draw()` keeps its content-row coordinates (a row written
+  off-screen appears when scrolled to) and records its span so the attribute it
+  was given survives the deferred paint. Pick highlighting is applied while
+  painting, so it follows the viewport when scrolling without moving the pick.
 - The package version now has a single source of truth: `pyproject.toml`
   declares `dynamic = ["version"]` and flit reads `__version__` from
   `console_window/__init__.py` (AUDIT.md §3.14). The stale manual-build recipe
@@ -61,13 +74,16 @@ This project follows [Semantic Versioning](https://semver.org/).
   `DemoApp`/`DemoScreen`.
 
 ### Fixed
-- Navigation keys are responsive again. 2.0.0 made every body row pass through
-  wide-character-aware `textwidth.truncate()`, which ran three `unicodedata`
-  lookups per character on every full redraw; a 2,000-row screen spent ~39 ms
-  of a ~41 ms frame there. Printable ASCII now takes a direct one-cell path,
-  repeated `string_width()`/`truncate()` calls are memoised (a TUI redraws the
-  same rows on each keypress), and non-ASCII glyph widths are cached. The same
-  headless redraw is now ~4 ms, including mixed `✔`/`─`/`◆` rows.
+- Navigation keys are responsive again. Two 2.0.0 hot paths made a full
+  redraw of a large list far slower than 1.4.3. `textwidth.truncate()` ran
+  three `unicodedata` lookups per character on every row, and
+  `Context.__init__()` ran `difflib.get_close_matches()` for every custom
+  keyword on every row (a 9,000-row screen constructs 9,000 Contexts per
+  frame). Printable ASCII now takes a direct one-cell path, mixed text skips
+  whole ASCII runs and visits only the glyphs that differ, `truncate()` uses a
+  frame-sized cache, non-ASCII glyph widths are cached, and the Context typo
+  suggestion is cached per attribute name. On vappman's 9,035-row screen,
+  `draw_screen()` fell from ~225 ms to ~74 ms (1.4.3 measured ~58 ms).
 - Hygiene debt from AUDIT.md §3.14: removed blank lines inside the
   `index_at_cell()`/`answer()` signatures and the commented-out assignment in
   `fix_positions()`; replaced `render()`'s `print()`/`except Exception` failure

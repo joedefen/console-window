@@ -79,8 +79,10 @@ def make_window(cols=10, body_cols=10):
     win.cols = cols
     win.body_cols = body_cols
     for name in ('head', 'body'):
+        pad = FakePad()
         setattr(win, name, SimpleNamespace(
-            pad=FakePad(), rows=50, cols=body_cols, row_cnt=0,
+            pad=pad, rows=50, cols=body_cols, row_cnt=0,
+            pad_rows=50, pad_cols=body_cols, drawn={},
             texts=[], text_attrs=[], contexts=[]))
     return win
 
@@ -126,9 +128,10 @@ def test_draw_pads_to_cells():
     win = make_window(cols=8, body_cols=8)
     win.draw(0, 0, CJK, width=6)
 
-    y, x, data, _attr = win.body.pad.calls[-1]
-    text = data.decode('utf-8')
-    assert (y, x) == (0, 0)
+    # draw() now records the span; the viewport painter replays it (with the
+    # same display-cell padding) on the frame where row 0 is visible.
+    x, text, _attr = win.body.drawn[0][-1]
+    assert x == 0
     assert tw.string_width(text) == 6
 
 
@@ -136,7 +139,7 @@ def test_draw_leftpad_pads_on_the_left():
     win = make_window(cols=8, body_cols=8)
     win.draw(0, 0, CJK, width=4, leftpad=True)
 
-    text = win.body.pad.calls[-1][2].decode('utf-8')
+    text = win.body.drawn[0][-1][1]
     assert text == '  ' + CJK
 
 # --- pick-range highlighting ------------------------------------------------

@@ -56,7 +56,6 @@ def test_ascii_fast_path_skips_unicodedata(monkeypatch):
     monkeypatch.setattr(tw.unicodedata, 'combining', unexpected)
     monkeypatch.setattr(tw.unicodedata, 'category', unexpected)
     monkeypatch.setattr(tw.unicodedata, 'east_asian_width', unexpected)
-    tw.string_width.cache_clear()
     tw.truncate.cache_clear()
     assert tw.string_width('plain ascii') == 11
     assert tw.truncate('plain ascii', 5) == 'plain'

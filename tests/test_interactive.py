@@ -368,11 +368,15 @@ def test_draw_writes_a_row_and_tracks_row_cnt(make):
     win.draw(2, 1, 'hello')
     assert win.body.row_cnt == 3
     assert win.body.texts[2] == ' hello'
+    # Deferred painting: the span is recorded now and replayed by render().
+    assert win.body.drawn[2] == [(1, 'hello', curses.A_NORMAL)]
+    win.render()
     assert win.body.pad.calls_named('addstr')
 
 
 def test_draw_out_of_bounds_is_a_no_op(make):
-    win, _backend = make(body_rows=10, body_cols=40)
+    # max_rows, not body_rows, is what bounds draw(): body_rows is only a hint.
+    win, _backend = make(max_rows=10, body_cols=40)
     for y, x in ((-1, 0), (0, -1), (999, 0), (0, 999)):
         win.draw(y, x, 'x')
     assert win.body.row_cnt == 0
@@ -383,6 +387,7 @@ def test_draw_header_flag_targets_the_head_pad(make):
     win, _backend = make(head_rows=5)
     win.draw(0, 0, 'HDR', header=True)
     assert win.head.row_cnt == 1
+    win.render()
     assert win.head.pad.calls_named('addstr')
 
 

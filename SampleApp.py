@@ -63,12 +63,9 @@ class DemoApp:
         # Configure console window
         win_opts = ConsoleWindowOpts(
             head_line=True,
-            # Pad capacity: add_body()/add_header() discard rows past this (they
-            # are counted in ConsoleWindow.rows_dropped, and the first one of each
-            # fill is warned about), so each pad must be big enough for what the
-            # screens actually draw.
-            body_rows=4000,  # the 'z' stress mode appends 2000 filler rows
-            head_rows=8,  # the help screen's nav-key block is 5 header rows
+            # No row sizing needed: the pads are viewport-sized and rows live in
+            # the model, so the 'z' stress mode's 2000 filler rows need no
+            # option.  max_rows is only a safety ceiling (32767 by default).
             min_cols_rows=(60,10),
             pick_attr=cs.A_REVERSE,
             # Ctrl-C arrives as an ordinary key code (bound to 'quit' below)

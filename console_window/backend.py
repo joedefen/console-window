@@ -26,6 +26,9 @@ class CursesSurface(Surface, Protocol):
     def clear(self) -> None:
         ...
 
+    def erase(self) -> None:
+        ...
+
     def addstr(self, *args: object) -> None:
         ...
 

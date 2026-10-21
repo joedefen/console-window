@@ -113,11 +113,8 @@ def test_stress_mode_pads_the_body_within_pad_capacity():
         app.opts.stress = True
         app.screens[sample.MAIN_ST].draw_screen()
         assert app.win.body.row_cnt > normal
-        # add_body() drops rows past the pad capacity, so it must not exceed it...
-        assert app.win.body.row_cnt <= app.win.body.rows
-        # ...and must not hit it either: the demo's 'z' filler only stays whole
-        # because body_rows was raised for it.  Any drop is counted (and warned
-        # about) rather than passing unnoticed.
+        # Nothing is dropped: the pads are viewport-sized, the 2000 filler rows
+        # live in the model, and the default max_rows ceiling is far above them.
         assert app.win.rows_dropped == 0
     finally:
         app.win.stop_curses()

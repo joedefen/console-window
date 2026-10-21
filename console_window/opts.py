@@ -8,8 +8,8 @@ from typing import Any, Callable
 class ConsoleWindowOpts:
     __slots__ = ['answer_show_redraws', 'body_cols', 'body_rows', 'ctrl_c_terminates',
                  'demo_mode', 'dialog_abort', 'dialog_return', 'head_line', 'head_rows',
-                 'keys', 'min_cols_rows', 'mod_pick', 'pick_attr', 'pick_mode', 'pick_range',
-                 'pick_size', 'relax_handled_keys', 'return_if_pos_change',
+                 'keys', 'max_rows', 'min_cols_rows', 'mod_pick', 'pick_attr', 'pick_mode',
+                 'pick_range', 'pick_size', 'relax_handled_keys', 'return_if_pos_change',
                  'single_cell_scroll_indicator', 'strip_attrs_in_pick_mode']
 
     # Explicit attribute types: assignments below come from **kwargs, so without
@@ -18,13 +18,14 @@ class ConsoleWindowOpts:
     # are checked.
     answer_show_redraws: bool
     body_cols: int
-    body_rows: int
+    body_rows: int | None  # advisory hint only; see max_rows
     ctrl_c_terminates: bool
     demo_mode: bool
     dialog_abort: str | None
     dialog_return: str
     head_line: bool
-    head_rows: int
+    head_rows: int | None  # advisory hint only; see max_rows
+    max_rows: int | None
     keys: set | list | None
     min_cols_rows: tuple[int, int]
     mod_pick: Callable[[str], str] | None
@@ -49,8 +50,12 @@ class ConsoleWindowOpts:
                 f'ConsoleWindowOpts() got unknown option(s): {", ".join(details)}.')
 
         self.head_line = kwargs.get('head_line', True)
-        self.head_rows = kwargs.get('head_rows', 50)
-        self.body_rows = kwargs.get('body_rows', 200)
+        # Row counts are hints, not limits: the pads are viewport-sized, so an
+        # app never has to pre-size storage.  max_rows is the only ceiling and
+        # applies to both namespaces; pass None to disable it entirely.
+        self.head_rows = kwargs.get('head_rows')
+        self.body_rows = kwargs.get('body_rows')
+        self.max_rows = kwargs.get('max_rows', 32767)
         self.body_cols = kwargs.get('body_cols', 200)
         self.keys = kwargs.get('keys')
         self.pick_mode = kwargs.get('pick_mode', False)
