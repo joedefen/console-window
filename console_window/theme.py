@@ -197,8 +197,12 @@ class Theme:
         # Set the screen/pad background too, even when it is (-1, -1) — i.e.
         # "back to the terminal default" — and broadcast it to *every* live
         # window; there is no longer a single process-wide "static" window.
+        # Theme.set() is the process-wide entry point, so it owns this internal
+        # step; exposing a public hook would only invite apps to bypass the
+        # pair-table installation above.
         if 'default_fg' in theme and 'default_bg' in theme:
-            ConsoleWindow._apply_default_colors(curses.color_pair(cls.DEFAULT_BG))
+            ConsoleWindow._apply_default_colors(  # pylint: disable=protected-access
+                curses.color_pair(cls.DEFAULT_BG))
 
         # A process-wide switch leaves every window reporting the same theme,
         # so per-window state cannot contradict the pair table just installed.

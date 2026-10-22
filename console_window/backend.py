@@ -252,7 +252,9 @@ class HeadlessBackend:
     def update_lines_cols(self) -> None:
         self.update_lines_cols_calls += 1
 
-    def is_term_resized(self, rows: int, cols: int) -> bool:
+    def is_term_resized(self, rows: int, cols: int) -> bool:  # pylint: disable=unused-argument
+        # Headless screens have fixed geometry, so the size arguments exist only
+        # to satisfy the RenderBackend protocol and are deliberately ignored.
         return False
 
     def queue_keys(self, *keys: int) -> None:
@@ -278,5 +280,6 @@ class HeadlessBackend:
         # Same encoding as curses: the pair id in the attribute's high bits.
         return pair << 8
 
-    def stop(self, scr: Surface | None) -> None:
+    def stop(self, scr: Surface | None) -> None:  # pylint: disable=unused-argument
+        # Nothing to tear down; the argument mirrors the CursesBackend signature.
         self.stopped = True

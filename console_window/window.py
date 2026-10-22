@@ -90,8 +90,11 @@ _NO_ROW_LIMIT = sys.maxsize
 
 
 def _register_window(win: ConsoleWindow) -> None:
+    # The module-level registry owns the private back-pointer: only this module
+    # allocates and clears the handle, and keeping it private keeps it out of
+    # ConsoleWindow's public surface.
     key = next(_WINDOW_IDS)
-    win._registry_key = key
+    win._registry_key = key  # pylint: disable=protected-access
     _WINDOWS[key] = win
 
 
@@ -99,7 +102,7 @@ def _unregister_window(win: ConsoleWindow) -> None:
     key = getattr(win, '_registry_key', None)
     if key is not None:
         _WINDOWS.pop(key, None)
-        win._registry_key = None
+        win._registry_key = None  # pylint: disable=protected-access
 
 
 def _register_atexit() -> None:
@@ -138,10 +141,12 @@ class _StopCurses:
     def __get__(self, obj: ConsoleWindow | None,
                 objtype: type[ConsoleWindow]) -> Callable[[], None]:
         def stop() -> None:
+            # The descriptor lives in the class body, so it deliberately reaches
+            # the implementation methods that must stay off the public surface.
             if obj is None:
-                objtype._stop_legacy()
+                objtype._stop_legacy()  # pylint: disable=protected-access
             else:
-                obj._stop_instance()
+                obj._stop_instance()  # pylint: disable=protected-access
         return stop
 
 
@@ -150,11 +155,16 @@ class ConsoleWindow:
     timeout_ms: int = 2000
     # Set by _register_window(); None once stop_curses() unregisters the window.
     _registry_key: int | None = None
-    # render() retries transient curses errors within this wall-clock budget
-    # (seconds) instead of a fixed iteration count, so a persistent error aborts
-    # quickly rather than freezing the UI for ~20 s.
+    # Wall-clock budget (seconds) for retrying transient curses errors, instead
+    # of a fixed iteration count, so a persistent error aborts quickly rather
+    # than freezing the UI for ~20 s.  It is deliberately a class-level knob and
+    # is read as ``ConsoleWindow.render_retry_seconds``; render() and answer()
+    # share it (AUDIT.md §3.2).  Tune it on the class before starting a window:
+    # assigning it on one instance has no effect because the lookup bypasses the
+    # instance, and there is no dialog-specific budget by design.
     render_retry_seconds: float = 2.0
-    render_retry_interval: float = 0.16  # seconds to wait between retries
+    # Seconds to wait between retries; class-level for the same reason.
+    render_retry_interval: float = 0.16
     # flash() repaints the underlying screen from the pads when it finishes, so
     # callers no longer have to re-render afterwards. Set False to make flash()
     # purely additive (e.g. when the caller is about to redraw anyway).
@@ -1373,6 +1383,17 @@ class ConsoleWindow:
 
     def answer(self, prompt: str = 'Type string [then Enter]', seed: str = '', width: int = 80,
                height: int = 5, esc_abort: bool | None = None, prompt_attr: int | None = None) -> str | None:
+        """Blocking single-line text dialog.
+
+        Returns the submitted string, or ``None`` when the user aborts.  Raises
+        ``TerminalTooSmallError`` when no dialog of the requested size can be
+        shown; that is an environment failure, never a user cancel.
+
+        Transient ``curses.error`` and too-small redraws retry within the shared
+        class-level ``render_retry_seconds`` budget (see the attribute comment);
+        a persistent failure re-raises.  Recovery drains the input queue, so
+        keys typed while the screen is recovering are discarded (AUDIT.md §3.2).
+        """
         # Handle deprecated esc_abort parameter for backward compatibility
         dialog_abort = self._resolve_abort_mode(esc_abort)
 
@@ -1727,10 +1748,20 @@ class ConsoleWindow:
         return self.opts.dialog_return == 'ENTER' and key in (10, 13)
 
     def _recover_from_resize(self) -> None:
+        """Discard queued input and adopt the new screen geometry.
+
+        Draining is intentional and covers *all* queued key codes, not just
+        ``KEY_RESIZE``: curses has no push-back API, so preserving them would
+        mean replaying raw codes read after a failed redraw, where duplicates
+        and partial escape sequences are indistinguishable from real input.
+        The loss is limited to the retry window bounded by
+        ``render_retry_seconds``; keys typed after recovery are read normally.
+        """
         self.scr.clear()
         self._backend.update_lines_cols()
         self.rows, self.cols = self.scr.getmaxyx()
-        # Drain any pending resize events to prevent infinite loop
+        # Drain any pending events to prevent an infinite resize loop.  Keys
+        # typed during this window are dropped by design (see the docstring).
         self.scr.nodelay(True)  # Make getch() non-blocking
         while True:
             if self.scr.getch() == -1:  # No more keys in queue
@@ -1836,7 +1867,7 @@ class ConsoleWindow:
                                        content_width)
                 scroll_top = 0
                 self._paint_alert(pad, scroll_top, visible_rows, len(lines),
-                                  row0, row9, col0, col9)
+                                  row0, col0, col9)
 
                 # Inner key loop: scroll until the user acknowledges the alert.
                 while True:
@@ -1855,7 +1886,7 @@ class ConsoleWindow:
                     if new_top != scroll_top:
                         scroll_top = new_top
                         self._paint_alert(pad, scroll_top, visible_rows, len(lines),
-                                          row0, row9, col0, col9)
+                                          row0, col0, col9)
         finally:
             self._set_scr_timeout(prev_timeout_ms)
 
@@ -1947,8 +1978,7 @@ class ConsoleWindow:
         scr.addstr(row9, footer_pos, textwidth.truncate(footer_text, content_width))
 
     def _paint_alert(self, pad: CursesSurface, scroll_top: int, visible_rows: int,
-                     content_height: int, row0: int, row9: int,
-                     col0: int, col9: int) -> None:
+                     content_height: int, row0: int, col0: int, col9: int) -> None:
         scr = self.scr
         # Scroll affordances on the box's left border.  Both cells are always
         # repainted (marker or plain border) so a marker does not linger once

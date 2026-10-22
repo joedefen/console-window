@@ -26,8 +26,8 @@ def _app(rows=40, cols=120):
 
     # The suite runs several app instances; keep the process in per-instance
     # window mode (the first construction latches it).
-    return sample, sample.DemoApp(backend=HeadlessBackend(rows=rows, cols=cols),
-                                  singleton=False)
+    return sample, sample.SampleApp(backend=HeadlessBackend(rows=rows, cols=cols),
+                                    singleton=False)
 
 
 def test_sample_app_builds_headless_and_draws_every_screen():

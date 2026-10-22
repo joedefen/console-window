@@ -19,9 +19,9 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install test dependencies
-        run: python -m pip install --upgrade pip pytest
-      - name: Run tests (TTY-free)
-        run: python -m pytest -q
+        run: python -m pip install pytest==9.1.1 pytest-cov==7.1.0
+      - name: Run tests (TTY-free) with coverage floor
+        run: python -m pytest -q --cov=console_window --cov-fail-under=80
 
   lint:
     name: ruff
@@ -31,9 +31,9 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
+          python-version: "3.13"
       - name: Install ruff
-        run: python -m pip install ruff
+        run: python -m pip install ruff==0.17.0
       - name: Lint
         run: ruff check .
 
@@ -45,8 +45,22 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
+          python-version: "3.13"
       - name: Install mypy
-        run: python -m pip install mypy
+        run: python -m pip install mypy==2.4.0
       - name: Type check
         run: python -m mypy
+
+  pylint:
+    name: pylint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install pylint
+        run: python -m pip install pylint==3.3.4
+      - name: Lint
+        run: python -m pylint console_window SampleApp.py runner --disable=C,R

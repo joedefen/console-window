@@ -29,7 +29,7 @@ THEME_ST = 3
 SCREEN_NAMES = ('MAIN', 'HELP', 'HISTORY', 'THEMES')
 
 
-class DemoApp:
+class SampleApp:
     def __init__(self, backend=None, singleton=True):
         self.win = None
         self.spin = None
@@ -146,8 +146,10 @@ class DemoApp:
                                 'home': home,
                                 'line': line.strip()
                             })
-        except Exception:
-            # Fallback sample data
+        except Exception:  # pylint: disable=broad-exception-caught
+            # The example must run on any host: a malformed/absent passwd file
+            # is not an error worth aborting the demo for, so fall back to the
+            # fixed sample rows below.
             self.items = [
                 {'username': 'demo1', 'uid': '1001', 'home': '/home/demo1',
                  'line': 'demo1:x:1001:1001::/home/demo1:/bin/bash'},
@@ -215,13 +217,6 @@ class DemoApp:
                 if self.filter_text in item['username'].lower() or
                    self.filter_text in item['home'].lower()]
 
-    def do_key(self, key):
-        if not key:
-            return
-        # handle Inline confirmation / filter
-        if key in self.spin.keys:
-            self.spin.do_key(key, self.win)
-
     def main_loop(self):
         while True:
             current_screen = self.screens[self.stack.curr.num]
@@ -237,9 +232,11 @@ class DemoApp:
 
 
 class DemoScreen(Screen):
-    app: DemoApp
+    app: SampleApp
 
-    def __init__(self, name, app):
+    def __init__(self, name, app):  # pylint: disable=unused-argument
+        # ``name`` is part of the screen protocol (ThemeScreen passes 'THEMES'),
+        # but Screen identifies a screen by its stack number, not a label.
         super().__init__(app)
         self.app = app
 
@@ -392,7 +389,10 @@ class MainScreen(DemoScreen):
 
     def clear_filter_ACTION(self):
         app = self.app
-        app.filter_bar._text = ''
+        # IncrementalSearchBar exposes only a read-only ``text`` property, so
+        # the example resets the buffer directly rather than growing the widget
+        # API for a single demo action.
+        app.filter_bar._text = ''  # pylint: disable=protected-access
         app.filter_text = ''
         app.win.pick_pos = 0
 
@@ -506,10 +506,11 @@ class ThemeScreen(Theme.create_picker_screen(DemoScreen)):
 
 def main(backend=None, singleton=True):
     try:
-        app = DemoApp(backend=backend, singleton=singleton)
+        app = SampleApp(backend=backend, singleton=singleton)
         app.main_loop()
-    except Exception as bummer:
-        # Leave the terminal usable no matter how we failed.
+    except Exception as bummer:  # pylint: disable=broad-exception-caught
+        # Top-level demo guard: no matter how the app failed, leave the terminal
+        # usable and show the error instead of dying with a broken screen.
         win = ConsoleWindow.primary_window()
         if win:
             win.stop_curses()

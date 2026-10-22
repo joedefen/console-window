@@ -64,7 +64,8 @@ class Screen:
         method_name = f'{action_name}_ACTION'
         method = getattr(self, method_name, None)
         if method and callable(method):
-            method()
+            # pylint: disable-next=not-callable
+            method()  # getattr + callable() proof is opaque to pylint's inference
             return True
         return False
 

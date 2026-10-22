@@ -50,6 +50,23 @@ This project follows [Semantic Versioning](https://semver.org/).
   smoke-tested in CI (AUDIT.md §3.2).
 
 ### Changed
+- Every `pylint` warning now states why it is deliberate (AUDIT.md §3.3), taking
+  `pylint --disable=C,R` from 9.94/10 to **10.00/10**. Protected-access and
+  protocol-signature findings carry scoped disables with an adjacent reason,
+  `_paint_alert()`'s genuinely unused `row9` parameter was removed, and the
+  `getattr` + `callable()` call site uses `disable-next`. No runtime behaviour
+  changed.
+- The example's application class is now `SampleApp` (was `DemoApp`), matching
+  the module filename and the package name. The screen base class keeps its
+  `DemoScreen` name; only the app class and its construction site changed.
+- `answer()`'s recovery policy is now documented rather than implicit
+  (AUDIT.md §3.2): the retry loop deliberately shares the class-level
+  `render_retry_seconds`/`render_retry_interval` budget with `render()`, and
+  `_recover_from_resize()` deliberately discards every queued key. The budget
+  is read on the class, so tuning it on one instance has no effect, and keys
+  typed during the bounded recovery window are lost because curses offers no
+  push-back API. Both points are stated on the attributes, on `answer()` and on
+  the recovery method; no behaviour changed.
 - The SIGINT policy captures the handler that was installed before the library
   first took the signal over instead of assuming `signal.default_int_handler`,
   and restores it when the last live window stops rather than on the first
