@@ -256,6 +256,14 @@ def test_normalize_unknown_attr_returns_none():
     assert spin.normalize('missing') is None
 
 
+def test_legacy_add_is_retired_and_points_at_add_key():
+    spin = OptionSpinner()
+    with pytest.raises(NotImplementedError, match=r'add_key\('):
+        spin.add(spin.default_obj, [('m - mode', 'mode', 'a', 'b')])
+    assert spin.options == []
+    assert spin.attr_to_option == {}
+
+
 def test_help_body_renders_placeholder_for_unset_option():
     spin = OptionSpinner()
     spin.add_key('mode', 'm - mode', vals=['a', 'b'], keys=[ord('m')])

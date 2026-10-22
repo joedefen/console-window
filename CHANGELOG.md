@@ -73,7 +73,25 @@ This project follows [Semantic Versioning](https://semver.org/).
   (`tests/test_sample_app.py`) to match. The classes inside are still named
   `DemoApp`/`DemoScreen`.
 
+- `OptionSpinner.add()` is now a retired tombstone. Its comment handling sliced
+  the truncated value list with the pre-truncation index, so `comments` was
+  always empty; rather than register a half-configured option it raises
+  `NotImplementedError` naming `add_key()` and showing the replacement call.
+  No in-repo code used it.
+
 ### Fixed
+- `BasicHelpScreen.draw_screen()` resolves the window from `self.app.win` at
+  draw time instead of using the `app.win` value cached by `Screen.__init__`.
+  Applications that build their `Screen` objects before their `ConsoleWindow`
+  (including `SampleApp`) then get a working help screen instead of
+  `AttributeError: 'NoneType' object has no attribute 'set_pick_mode'` when
+  mixing `BasicHelpScreen` into an existing screen class.
+- `add_fancy_header()` now treats `HeaderLine.bracket_key()` delimiters as
+  markup in every mode except `'Off'`: the brackets are removed and the
+  enclosed span keeps its `KEY` styling. Previously a `HeaderLine` was emitted
+  verbatim, so it rendered identically to `add_header_line()`. The explicit
+  path still shows literal brackets, and declared span roles are preserved
+  rather than re-parsed from the rendered text.
 - Navigation keys are responsive again. Two 2.0.0 hot paths made a full
   redraw of a large list far slower than 1.4.3. `textwidth.truncate()` ran
   three `unicodedata` lookups per character on every row, and

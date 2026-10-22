@@ -165,6 +165,48 @@ def test_add_fancy_header_off_adds_raw_line():
         win.stop_curses()
 
 
+def test_add_fancy_header_headerline_strips_bracket_delimiters():
+    win = _make_window()
+    try:
+        win.add_fancy_header(
+            HeaderLine().text(' ').bracket_key('v').text('iew=compact'),
+            mode='Underline',
+        )
+        assert win.head.texts[0] == ' view=compact'
+        attrs = [attr for attr, _count in win.head.text_attrs[0]]
+        assert KEY_ATTR in attrs
+    finally:
+        win.stop_curses()
+
+
+def test_add_fancy_header_headerline_off_keeps_bracket_delimiters():
+    win = _make_window()
+    try:
+        win.add_fancy_header(
+            HeaderLine().text(' ').bracket_key('v').text('iew=compact'),
+            mode='Off',
+        )
+        assert win.head.texts[0] == ' [v]iew=compact'
+    finally:
+        win.stop_curses()
+
+
+def test_add_fancy_header_headerline_preserves_explicit_roles():
+    # The fancy path only elides bracket delimiters around KEY spans; it does
+    # not re-guess roles from the rendered text (lowercase '?:' stays a key).
+    win = _make_window()
+    try:
+        win.add_fancy_header(
+            HeaderLine().text(' ').key('?').text(':help'),
+            mode='Underline',
+        )
+        assert win.head.texts[0] == ' ?:help'
+        attrs = [attr for attr, _count in win.head.text_attrs[0]]
+        assert KEY_ATTR in attrs
+    finally:
+        win.stop_curses()
+
+
 @pytest.mark.parametrize('role', [KEY, LABEL, SEARCH, PLAIN])
 
 

@@ -161,18 +161,24 @@ class OptionSpinner:
         self.keys.add(key)
 
     def add(self, obj: object, specs: list) -> None:
-        for spec in specs:
-            ns = self._make_option_ns()
-            ns.descr = spec[0]
-            ns.obj = obj
-            ns.attr = spec[1]
-            ns.vals=spec[2:]
-            if None in ns.vals:
-                idx = ns.vals.index(None)
-                ns.vals = ns.vals[:idx]
-                ns.comments = ns.vals[idx+1:]
-            ns.keys = [ord(ns.descr[0])]
-            self._register(ns)
+        """Retired pre-2.0 registration shim: use add_key() instead.
+
+        The old call shape was ``spin.add(obj, [(descr, attr, *vals)])`` with an
+        optional ``None`` separating values from comments.  Its comment handling
+        sliced the already-truncated value list with the pre-truncation index,
+        so ``comments`` was always empty.  Rather than silently registering a
+        half-configured option, this method now fails loudly for callers still
+        on the old API.
+        """
+        del obj, specs  # signature kept only so old call sites fail loudly
+        raise NotImplementedError(
+            'OptionSpinner.add() was retired in 2.0 and no longer registers '
+            'options; upgrade to OptionSpinner.add_key(attr, descr, obj=..., '
+            'vals=..., prompt=..., keys=..., comments=...). For example, '
+            "replace spin.add(obj, [('n - name', 'name', 'Ada', 'Grace')]) "
+            "with spin.add_key('name', 'n - name', obj=obj, "
+            "vals=['Ada', 'Grace'])."
+        )
 
     def add_key(self, attr: str, descr: str, obj: object | None = None,
                 vals: list | None = None, prompt: str | None = None,

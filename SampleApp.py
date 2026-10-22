@@ -18,6 +18,7 @@ from console_window import (
     Screen,
     ScreenStack,
     Theme,
+    BasicHelpScreen,
 )
 
 # Screen IDs
@@ -108,6 +109,7 @@ class DemoApp:
                      genre='action', scope={MAIN_ST})
         spin.add_key('alert_demo', 'l - alert demo',
                      genre='action', scope={MAIN_ST})
+        spin.add_key('show_keys', 'K - show keys (demo mode)', genre='action')
 
         # Folded in from the retired dev self-test.
         # Scoped to MAIN and HELP, like view_mode/sort_by, so the keys keep
@@ -343,14 +345,15 @@ class MainScreen(DemoScreen):
         line.text(' ').bracket_key('a').text('nsDemo')
         line.text(' ').key('l').text(':alrtDemo')
         line.text(' ').key('SPC').text(':process')
-        line.text(' ').bracket_key('p').text(f'ick={app.opts.pick_size}')
+        # line.text(' ').bracket_key('p').text(f'ick={app.opts.pick_size}')
         line.text(' ').bracket_key('n').text(f'ame={app.opts.name or "-"}')
-        line.text(' ').key('r').text('edraw')
-        line.text(' ').key('z').text(':stress')
-        line.text(' ').bracket_key('t').text('hemes')
-        line.text(' ').bracket_key('h').text('ist')
+        # line.text(' ').key('r').text('edraw')
+        # line.text(' ').key('z').text(':stress')
+        # line.text(' ').bracket_key('t').text('hemes')
+        # line.text(' ').bracket_key('h').text('ist')
         line.text(' ').key('?').text(':help')
         app.win.add_header_line(line, mode='Underline')
+        app.win.add_fancy_header(line, mode='Underline')
 
         # Column headers
         view_mode = app.opts.view_mode
@@ -425,20 +428,24 @@ class MainScreen(DemoScreen):
         win = app.win
         app.stack.push(THEME_ST, win.pick_pos)
 
+    def show_keys_ACTION(self):
+        """ Show last key for demo"""
+        self.app.win.set_demo_mode(enabled=None) # toggle it
 
-class HelpScreen(DemoScreen):
+
+class HelpScreen(DemoScreen, BasicHelpScreen):
     def __init__(self, app):
         super().__init__('HELP', app)
 
-    def draw_screen(self):
-        app = self.app
-        app.win.set_pick_mode(False)
+#   def draw_screen(self):
+#       app = self.app
+#       app.win.set_pick_mode(False)
 
-        spinner = self.get_spinner()
-        if spinner:
-            # Use built-in help display
-            spinner.show_help_nav_keys(app.win)
-            spinner.show_help_body(app.win)
+#       spinner = self.get_spinner()
+#       if spinner:
+#           # Use built-in help display
+#           spinner.show_help_nav_keys(app.win)
+#           spinner.show_help_body(app.win)
 
 
 class HistoryScreen(DemoScreen):

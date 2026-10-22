@@ -21,7 +21,15 @@ from typing import TYPE_CHECKING, Callable, ClassVar, cast
 
 from . import geometry, signals, textwidth
 from .backend import CursesBackend, CursesSurface, RenderBackend
-from .header import LABEL, PLAIN, SEARCH, HeaderLine, Span, parse_fancy_header
+from .header import (
+    LABEL,
+    PLAIN,
+    SEARCH,
+    HeaderLine,
+    Span,
+    parse_fancy_header,
+    strip_key_brackets,
+)
 from .keys import NAVIGATION_KEYS
 from .opts import ConsoleWindowOpts
 from .theme import Theme
@@ -737,6 +745,14 @@ class ConsoleWindow:
 
     def add_fancy_header(self, line: str | HeaderLine, mode: str = 'Underline',
                          search_pattern_attr: int | None = None) -> None:
+        """Add a header line with legacy ``[x]``/``KEY:``/``/pattern`` markup.
+
+        String input is parsed unless ``mode='Off'``.  A :class:`HeaderLine`
+        keeps its declared span roles, but its ``bracket_key()`` delimiters are
+        treated as markup too: in every mode except ``'Off'`` they are removed,
+        while the enclosed key keeps its ``KEY`` styling.  Use
+        :meth:`add_header_line` when literal brackets are wanted.
+        """
         if isinstance(line, str):
             if mode == 'Off':
                 # Legacy: no markup processing, add the raw line unchanged.
@@ -745,6 +761,8 @@ class ConsoleWindow:
             spans = parse_fancy_header(line)
         else:
             spans = list(line)
+            if mode != 'Off':
+                spans = strip_key_brackets(spans)
         self._emit_header_spans(spans, mode, search_pattern_attr)
 
     def add_header_line(self, header_line: HeaderLine | Iterable[Span],

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from typing import Iterator, NamedTuple
 
 # Span roles.  The renderer (:meth:`ConsoleWindow._resolve_header_attr`) maps a
@@ -58,6 +59,41 @@ class HeaderLine:
 
     def __str__(self) -> str:
         return ''.join(span.text for span in self.spans)
+
+
+def strip_key_brackets(spans: Iterable[Span]) -> list[Span]:
+    """Remove literal ``[``/``]`` delimiters around explicit ``KEY`` spans.
+
+    :meth:`HeaderLine.bracket_key` emits ``'[', Span(key, KEY), ']'`` so that
+    the explicit-token API can show the brackets verbatim.  The fancy header
+    path treats those delimiters as markup instead, matching the legacy string
+    parser's ``[x]`` rule while preserving the caller's declared span roles.
+    """
+    pending = list(spans)
+    result: list[Span] = []
+    i = 0
+    while i < len(pending):
+        span = pending[i]
+        following = pending[i + 1] if i + 1 < len(pending) else None
+        if (span.role == KEY and result
+                and result[-1].role == PLAIN
+                and result[-1].text.endswith('[')
+                and following is not None
+                and following.role == PLAIN
+                and following.text.startswith(']')):
+            previous = result.pop()
+            prefix = previous.text[:-1]
+            if prefix:
+                result.append(Span(prefix, PLAIN))
+            result.append(span)
+            suffix = following.text[1:]
+            if suffix:
+                result.append(Span(suffix, PLAIN))
+            i += 2
+            continue
+        result.append(span)
+        i += 1
+    return result
 
 
 def _re_match_word(word: str) -> bool:

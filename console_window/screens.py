@@ -226,8 +226,11 @@ class ScreenStack:
 
 class BasicHelpScreen(Screen):
     def draw_screen(self) -> None:
-        win = self.win
-        self.win.set_pick_mode(False)
+        # Resolve the window at draw time: applications may construct their
+        # Screen objects before the ConsoleWindow exists (the sample app does),
+        # so the value captured by Screen.__init__ can still be None here.
+        win = self.app.win
+        win.set_pick_mode(False)
         spinner = self.get_spinner()
         if spinner:
             spinner.show_help_nav_keys(win)

@@ -22,7 +22,7 @@ The library is small, dependency-free, and unusually disciplined for a single-au
 The remaining risks are narrower than the ones in the original audit. There is no data-loss or security defect, and the interactive core is no longer an untested hole. What is left is one drawing path outside the overflow contract, a body of unreachable or dead-but-broken public surface, residual process-global state, and CI that cannot reproduce its own inputs. Highest-risk findings, in order:
 
 1. **[`draw()`](console_window/window.py:749) bypasses the pad-overflow policy.** It inflates `row_cnt` without a capacity check and never records row context or attributes, so phantom rows, silently pickable rows and attribute loss can follow (§3.2).
-2. **A meaningful amount of public API is unreachable and one piece is dead-but-broken.** `Theme.create_picker_screen()`, `ScreenStack.act_in()`, `ScreenStack.is_curr()`, `ConsoleWindow.set_pick_range()`, `BasicHelpScreen` and `OptionSpinner.add()` have no consumer outside the test suite; `add()` additionally discards the `comments` field it exists to populate (§3.3).
+2. **A meaningful amount of public API is unreachable.** `Theme.create_picker_screen()`, `ScreenStack.act_in()`, `ScreenStack.is_curr()`, `ConsoleWindow.set_pick_range()` and `BasicHelpScreen` have no consumer outside the test suite (§3.3).
 3. **Process-global state is still managed asymmetrically.** The active theme is a class global, and the Ctrl-C policy deliberately latches terminating Ctrl-C for the process lifetime without restoring a host application's prior SIGINT handler (§3.1).
 4. **CI is green but shallow.** Tool versions are unpinned, and there is no coverage or `pylint` gate, so the current 87% coverage and 9.92/10 score are not protected (§3.4).
 
@@ -86,16 +86,16 @@ No consumer outside the test suite for:
 | `ScreenStack.is_curr()` | [`screens.py:168`](console_window/screens.py:168) | Only reachable from `act_in()` |
 | `ConsoleWindow.set_pick_range()` | [`window.py:518`](console_window/window.py:518) | The `pick_range` feature's only public entry point; called only by [`tests/test_interactive.py`](tests/test_interactive.py:1) |
 | `BasicHelpScreen` | [`screens.py:227`](console_window/screens.py:227) | Exported in `__all__`, unused; the sample app writes its own help screen |
-| `OptionSpinner.add()` | [`spinner.py:163`](console_window/spinner.py:163) | Dead **and** broken (see below) |
+| `OptionSpinner.add()` | [`spinner.py:163`](console_window/spinner.py:163) | Retired shim; raises `NotImplementedError` pointing to `add_key()` (see below) |
 | `draw()` | [`window.py:749`](console_window/window.py:749) | Used only by [`tests/test_interactive.py`](tests/test_interactive.py:365) and [`tests/test_widechars.py`](tests/test_widechars.py:1) |
 | `add_fancy_header()` string path | [`window.py:685`](console_window/window.py:685) | The sample uses `add_header_line()`; only tests exercise the string path |
 | `demo_mode` / `set_demo_mode()` | [`window.py:325`](console_window/window.py:325) | Only tests toggle it; internal prompt/render code reads `opts.demo_mode` |
 
-`OptionSpinner.add()` truncates `ns.vals` and *then* slices it with the pre-truncation index ([`spinner.py:170`](console_window/spinner.py:170)), so `ns.comments` is always empty — the parameter it exists for is silently dropped. Dead code that cannot be right is worse than no code.
+`OptionSpinner.add()` was a pre-2.0 compatibility shim that truncated `ns.vals` and *then* sliced it with the pre-truncation index, so `ns.comments` was always empty — the parameter it existed for was silently dropped. Since no in-repo consumer uses it, it is kept only as a tombstone: the signature remains (so old callers fail at the call rather than at import) and it raises `NotImplementedError` naming `add_key()` and showing the replacement call.
 
 The same is true of two example methods: `DemoApp.do_key()` ([`SampleApp.py:219`](SampleApp.py:219)) is never called (`main_loop` calls [`handle_key()`](SampleApp.py:184), which calls `spin.do_key` directly), and `ThemeScreen.theme_screen()` ([`SampleApp.py:512`](SampleApp.py:512)) is never called and, unlike the live [`theme_screen_ACTION()`](SampleApp.py:426) path and `Theme.create_picker_screen`'s `spin_theme_ACTION`, does not update `app.opts.theme`.
 
-**Fix:** delete what no consumer needs (these are pre-2.0 leftovers), or promote it deliberately: give each survivor a test and a README mention, and fix `OptionSpinner.add()` if it is retained.
+**Fix:** delete what no consumer needs (these are pre-2.0 leftovers), or promote it deliberately: give each survivor a test and a README mention. `OptionSpinner.add()` is done: it now fails loudly instead of registering a broken option.
 
 ### 3.4 🟡 CI is green but shallow, and its inputs are unpinned
 
@@ -121,7 +121,7 @@ The same is true of two example methods: `DemoApp.do_key()` ([`SampleApp.py:219`
 **P1 — robustness and surface**
 
 1. Clamp `draw()` to the pad and route its overflow through the existing counter (§3.2).
-2. Delete or promote the unreachable API (§3.3), fix or remove `OptionSpinner.add()`, and delete `DemoApp.do_key()` and `ThemeScreen.theme_screen()`.
+2. Delete or promote the unreachable API (§3.3) and delete `DemoApp.do_key()` and `ThemeScreen.theme_screen()`.
 3. Pin CI tool versions and add a coverage floor (even a low one, e.g. `--cov-fail-under=80`) so the suite cannot silently shrink (§3.4).
 
 **P2 — honesty and hygiene**
