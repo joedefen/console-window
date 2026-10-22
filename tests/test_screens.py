@@ -5,6 +5,7 @@ from console_window import (
     ConsoleWindow,
     ConsoleWindowOpts,
     OptionSpinner,
+    ScreenStack,
 )
 from console_window.backend import HeadlessBackend
 
@@ -15,6 +16,32 @@ def _make_window():
         backend=HeadlessBackend(rows=24, cols=80),
         singleton=False,
     )
+
+
+def test_act_in_consumes_one_flag_and_tolerates_missing_flags():
+    win = _make_window()
+    try:
+        obj = SimpleNamespace(flag=True)
+        stack = ScreenStack(win, obj, ('MAIN', 'OTHER'))
+
+        # A missing flag is a no-op, not an AttributeError (and is not created).
+        assert stack.act_in('missing') is False
+        assert not hasattr(obj, 'missing')
+
+        # Set on the current screen: returns True exactly once.
+        assert stack.act_in('flag', 'MAIN') is True
+        assert obj.flag is False
+        assert stack.act_in('flag') is False
+
+        # A set flag is still consumed when the screen filter does not match.
+        obj.flag = True
+        assert stack.act_in('flag', 'OTHER') is False
+        assert obj.flag is False
+        assert stack.is_curr('MAIN') is True
+        assert stack.is_curr(('MAIN', 'OTHER')) is True
+        assert stack.is_curr('OTHER') is False
+    finally:
+        win.stop_curses()
 
 
 def test_basic_help_screen_resolves_window_created_after_construction():

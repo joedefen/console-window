@@ -142,3 +142,34 @@ def test_the_warning_blames_the_callers_line_not_the_library():
         assert caught[0].filename.endswith('test_overflow.py')
     finally:
         win.stop_curses()
+
+
+def test_draw_past_the_content_limit_uses_the_same_counter():
+    # draw() clamps at the row ceiling, but its discarded rows must be visible
+    # exactly like _add()'s: counted per row, warned once per fill episode.
+    win = _make(max_rows=3)
+    try:
+        caught = _record(lambda: [win.draw(3, 0, 'x') for _ in range(4)])
+        assert len(caught) == 1
+        assert 'body content limit is full' in str(caught[0].message)
+        assert caught[0].filename.endswith('test_overflow.py')
+        assert win.body.rows_dropped == 4
+        assert win.rows_dropped == 4
+        assert win.body.row_cnt == 0
+        assert win.body.drawn == {}
+    finally:
+        win.stop_curses()
+
+
+def test_draw_header_past_the_content_limit_counts_the_head():
+    win = _make(max_rows=2)
+    try:
+        caught = _record(lambda: win.draw(2, 0, 'HDR', header=True))
+        assert len(caught) == 1
+        assert 'head content limit is full' in str(caught[0].message)
+        assert win.head.rows_dropped == 1
+        assert win.body.rows_dropped == 0
+        assert win.rows_dropped == 1
+        assert win.head.row_cnt == 0
+    finally:
+        win.stop_curses()

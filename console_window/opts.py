@@ -10,7 +10,7 @@ class ConsoleWindowOpts:
                  'demo_mode', 'dialog_abort', 'dialog_return', 'head_line', 'head_rows',
                  'keys', 'max_rows', 'min_cols_rows', 'mod_pick', 'pick_attr', 'pick_mode',
                  'pick_range', 'pick_size', 'relax_handled_keys', 'return_if_pos_change',
-                 'single_cell_scroll_indicator', 'strip_attrs_in_pick_mode']
+                 'single_cell_scroll_indicator', 'strip_attrs_in_pick_mode', 'theme']
 
     # Explicit attribute types: assignments below come from **kwargs, so without
     # these every option would be typed as ``object`` and every read would need a
@@ -37,6 +37,7 @@ class ConsoleWindowOpts:
     return_if_pos_change: bool
     single_cell_scroll_indicator: bool
     strip_attrs_in_pick_mode: bool
+    theme: str | None  # initial per-window theme; None inherits the process default
 
     def __init__(self, **kwargs: Any) -> None:  # noqa: ANN401 - dynamic options bag
         unknown = set(kwargs) - set(self.__slots__)
@@ -73,6 +74,10 @@ class ConsoleWindowOpts:
         self.strip_attrs_in_pick_mode = kwargs.get('strip_attrs_in_pick_mode', False)
         self.demo_mode = kwargs.get('demo_mode', False)
         self.relax_handled_keys = kwargs.get('relax_handled_keys', True)
+        # Per-window theme (ConsoleWindow.theme).  None means "inherit whatever
+        # theme is current when this window starts", which is the pre-existing
+        # process-default behaviour.
+        self.theme = kwargs.get('theme')
 
         # Validate dialog_abort
         if self.dialog_abort not in [None, 'ESC', 'ESC-ESC']:

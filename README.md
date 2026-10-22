@@ -87,7 +87,11 @@ demonstrates:
 * **`InlineConfirmation`** — `SPACE` asks you to confirm with `y` before
   "processing" the picked row.
 * **Themes** — a `THEMES` screen of colour samples backed by
-  `Theme.list_all()` / `get_current()` / `set()`.
+  `Theme.list_all()` / `get_current()` / `set()`. The active theme is now
+  per-window state: `ConsoleWindowOpts(theme=...)` seeds `window.theme`,
+  `window.set_theme()` switches it (and re-initialises the terminal's colour
+  pairs, which curses keeps per terminal rather than per window), and
+  `Theme.set()` remains the process-wide switch.
 * **Dialogs** — `a` calls `answer()` for text input, `l` calls `alert()`, and `n`
   drives `answer()` from an `OptionSpinner` option (`add_key(..., prompt=...)`).
   `answer()` returns `None` only when the user aborts; if the terminal cannot
@@ -97,10 +101,13 @@ demonstrates:
 * **Token-based headers** — `HeaderLine` (`text`, `bracket_key`, `key`, `extend`)
   rendered with `add_header_line()`, rather than string markup.
 * **`Ctrl-C` as an application key** — `ctrl_c_terminates=False` and
-  `keys={0x3, ord('q')}` on the quit action. This works only while no window in
-  the process has requested terminating Ctrl-C: once any window uses the default
-  (`ctrl_c_terminates=True`), terminating Ctrl-C is latched for the process
-  lifetime and cannot be undone.
+  `keys={0x3, ord('q')}` on the quit action. This works only while no live
+  window in the process has requested terminating Ctrl-C: once any window uses
+  the default (`ctrl_c_terminates=True`), terminating Ctrl-C is latched for as
+  long as a window depends on it. The handler that was installed before the
+  first window is captured and restored when the last window stops, and
+  `reset_ctrl_c()` does the same deliberately for an embedding application that
+  manages SIGINT itself.
 * **Full-repaint recovery** — `r` toggles `render(redraw=True)`, the path that
   repaints after terminal corruption.
 * **Multi-row picking** — `p` sets `pick_size` (1–3) via
@@ -149,6 +156,14 @@ if __name__ == '__main__':
 For anything beyond a single list, subclass `Screen` and drive it with
 `ScreenStack` — that is what the sample app does, and it is the paradigm the
 library is designed around.
+
+`ScreenStack.perform_actions()` is the normal router: it walks the spinner
+options, honours their scopes, and calls the matching `<attr>_ACTION` method.
+For apps that dispatch an action themselves, `ScreenStack.act_in(action,
+screens=None)` is the low-level single-flag variant: it clears that flag from
+`stack.obj` and returns whether it was set and the current screen matched.
+`ScreenStack.is_curr()` answers the screen test on its own. A missing flag reads
+as `False`, so an options object need not pre-seed every action.
 
 ### Singleton vs. per-instance windows
 

@@ -232,6 +232,16 @@ class ConsoleWindow:
             # No parameters provided - use all defaults
             self.opts = ConsoleWindowOpts()
 
+        # Per-window theme (AUDIT.md §3.1).  opts.theme seeds it; otherwise the
+        # window inherits the process default, which is what existing apps saw
+        # before themes were per-window.  curses owns a single pair table per
+        # terminal, so *applying* a theme is still terminal-global; what is now
+        # per-window is the choice, its use at startup and when pads are
+        # reallocated, and the far more common case of several windows in one
+        # process that are not drawn at the same time.
+        self.theme = Theme.resolve(
+            getattr(self.opts, 'theme', None) or Theme.get_current())
+
         # Configure SIGINT policy (Ctrl-C terminates, or is delivered as key 0x3).
         signals.set_ctrl_c_policy(self.opts.ctrl_c_terminates)
         self.ctrl_c_terminates = self.opts.ctrl_c_terminates
@@ -244,7 +254,9 @@ class ConsoleWindow:
         if self.singleton and ConsoleWindow.static_scr is not None:
             # Singleton mode: every instance draws through the process screen
             # and the backend that owns it, even if a different backend was
-            # passed to this constructor.
+            # passed to this constructor.  The shared screen's palette was
+            # installed by the window that created it; a later window records
+            # its own theme but does not repaint the others (use set_theme()).
             self._backend = ConsoleWindow._static_backend or self._backend
             self.scr = ConsoleWindow.static_scr
         else:
@@ -382,13 +394,41 @@ class ConsoleWindow:
         """The enforced per-namespace content ceiling (None = unlimited)."""
         return self.opts.max_rows
 
+    def set_theme(self, theme_name: str) -> bool:
+        """Make *theme_name* this window's theme and install its colours.
+
+        Returns False for an unknown theme, or when the backend has no colour
+        support (the choice is still recorded, so a later colour-capable start
+        uses it).  Colour pairs are per-terminal, so installing a palette
+        necessarily also affects any other window drawing on the same screen —
+        that is a curses constraint, not a choice.  What is per-window is the
+        selection: it is used at startup, when pads are reallocated, and
+        reported by ``window.theme``.
+        """
+        if theme_name not in Theme.THEMES:
+            return False
+        self.theme = theme_name
+        # The choice is real even when nothing can be painted, and new windows
+        # inherit the most recently applied theme.
+        Theme.set_active(theme_name)
+        if not self._backend.has_colors():
+            return False
+        self.theme = self._install_theme(self._backend, self.scr, theme_name)
+        for ns in (self.head, self.body):
+            pad = getattr(ns, 'pad', None)
+            if pad is not None:
+                self._apply_pad_theme(cast(CursesSurface, pad))
+        Theme.set_active(self.theme)
+        return True
+
     def _apply_pad_theme(self, pad: CursesSurface) -> None:
         # A freshly created pad has no background, so re-apply the theme colour
         # after every reallocation; otherwise a resize leaves the new pad on the
-        # terminal default instead of the configured background.
+        # terminal default instead of the configured background.  The colour
+        # comes from *this window's* theme, not the process default.
         if not self._backend.has_colors():
             return
-        theme = Theme.THEMES.get(Theme.get_current(), Theme.THEMES['default'])
+        theme = Theme.THEMES[Theme.resolve(getattr(self, 'theme', None))]
         default_fg = theme.get('default_fg', -1)
         default_bg = theme.get('default_bg', -1)
         if default_fg != -1 or default_bg != -1:
@@ -505,7 +545,7 @@ class ConsoleWindow:
         return True
 
     def _start_curses(self) -> CursesSurface:
-        return self._init_screen(self._backend)
+        return self._init_screen(self._backend, self.theme)
 
     @classmethod
     def start_curses(cls, backend: RenderBackend | None = None) -> CursesSurface:
@@ -514,6 +554,7 @@ class ConsoleWindow:
         if _SINGLETON_MODE and cls.static_scr is not None:
             return cls.static_scr
         screen_backend = backend if backend is not None else CursesBackend()
+        # No window exists yet at this point, so the process default is used.
         scr = cls._init_screen(screen_backend)
         if _SINGLETON_MODE:
             cls.static_scr = scr
@@ -521,7 +562,26 @@ class ConsoleWindow:
         return scr
 
     @staticmethod
-    def _init_screen(backend: RenderBackend) -> CursesSurface:
+    def _install_theme(backend: RenderBackend, scr: CursesSurface,
+                       theme_name: str | None) -> str:
+        """Install *theme_name*'s colours into the terminal's pair table.
+
+        Colour pairs are per-terminal (one table, not one per window), so both
+        startup and ``set_theme()`` call this; the caller decides *whose*
+        theme wins.  Returns the resolved theme name.
+        """
+        name = Theme.resolve(theme_name or Theme.get_current())
+        theme = Theme.THEMES[name]
+        for pair_id, fg, bg in Theme.pair_specs(name):
+            backend.init_pair(pair_id, fg, bg)
+        # Can't change pair 0, so the screen background is set directly.
+        if theme.get('default_fg', -1) != -1 or theme.get('default_bg', -1) != -1:
+            scr.bkgd(' ', backend.color_pair(Theme.DEFAULT_BG))
+        return name
+
+    @staticmethod
+    def _init_screen(backend: RenderBackend,
+                     theme_name: str | None = None) -> CursesSurface:
         _register_atexit()
         signals.setup_ctrl_c()
         scr = cast(CursesSurface, backend.start(ConsoleWindow.timeout_ms))
@@ -531,34 +591,11 @@ class ConsoleWindow:
         if backend.has_colors():
             backend.start_color()
             backend.use_default_colors()  # Allow -1 for default terminal colors
-
-            # Select theme from the Theme registry (single source of truth) or
-            # fall back to the default.  No environment variable is involved:
-            # Theme.get_current() is the one place the active theme lives.
-            theme_name = Theme.get_current() or 'default'
-            if theme_name not in Theme.THEMES:
-                theme_name = 'default'
-            Theme.set_active(theme_name)
-            theme = Theme.THEMES[theme_name]
-
-            # Set terminal background and foreground from theme
-            if 'default_fg' in theme and 'default_bg' in theme:
-                default_fg = theme['default_fg']
-                default_bg = theme['default_bg']
-                # Initialize pair 0 equivalent for default colors
-                # Note: Can't change pair 0, so we set screen background directly
-                if default_fg != -1 or default_bg != -1:
-                    # Create a color pair for default colors and set screen background
-                    backend.init_pair(Theme.DEFAULT_BG, default_fg, default_bg)
-                    scr.bkgd(' ', backend.color_pair(Theme.DEFAULT_BG))
-
-            # Initialize semantic color pairs based on selected theme.  The set is
-            # the shared Theme.SEMANTIC_PAIRS, so startup and Theme.set() always
-            # agree (it used to omit OLD_SUCCESS here).
-            for color_id in Theme.SEMANTIC_PAIRS:
-                if color_id in theme:
-                    fg, bg = theme[color_id]
-                    backend.init_pair(color_id, fg, bg)
+            # The window's own theme (per-window since AUDIT.md §3.1) or the
+            # process default for a window that has not chosen one yet.
+            name = ConsoleWindow._install_theme(backend, scr, theme_name)
+            # New windows inherit the most recently applied theme.
+            Theme.set_active(name)
 
         return scr
 
@@ -621,9 +658,12 @@ class ConsoleWindow:
         try:
             backend.stop(scr)
         finally:
+            # One teardown per window, matching the per-window setup in
+            # _init_screen: the SIGINT handler is only restored once the last
+            # live window is gone (AUDIT.md §3.1).
             for win in windows:
                 _unregister_window(win)
-            signals.teardown_ctrl_c()
+                signals.teardown_ctrl_c()
 
     def __enter__(self) -> ConsoleWindow:
         return self
@@ -713,7 +753,8 @@ class ConsoleWindow:
             ns.contexts.append(context)  # Context metadata (or None)
             ns.row_cnt += 1
 
-    def _warn_rows_dropped(self, ns: SimpleNamespace, which: str) -> None:
+    def _warn_rows_dropped(self, ns: SimpleNamespace, which: str, *,
+                           stacklevel: int = 4) -> None:
         # The content cap is reached, so this row is discarded (as it always
         # was when the pad was the storage).  Counted always, warned about once
         # per fill episode -- clear() resets both, so
@@ -722,6 +763,10 @@ class ConsoleWindow:
         # ConsoleWindow.rows_dropped.  A caller that would rather treat this as
         # an error can use the usual warnings machinery
         # (python -W error::UserWarning, or pytest's filterwarnings ini setting).
+        #
+        # stacklevel is 4 for the _add() path:
+        # warn() <- _warn_rows_dropped() <- _add() <- add_body()/add_header()
+        # <- caller.  draw() is one frame shorter, so it passes 3.
         ns.rows_dropped += 1
         if ns.rows_dropped != 1:
             return
@@ -730,9 +775,7 @@ class ConsoleWindow:
             f'rows), so further {which} rows are being discarded.  Raise '
             f'ConsoleWindowOpts(max_rows=...) or pass max_rows=None to remove '
             f'the ceiling entirely.',
-            # warn() <- _warn_rows_dropped() <- _add() <- add_body()/add_header()
-            # <- caller, so 4 is the application's own line.
-            stacklevel=4,
+            stacklevel=stacklevel,
         )
 
     def add_header(self, text: str, attr: int | None = None, resume: bool = False,
@@ -825,8 +868,18 @@ class ConsoleWindow:
         # recorded in ns.drawn and replayed over the row's normal attribute runs.
         ns = self.head if header else self.body
         text_attr = text_attr if text_attr else curses.A_NORMAL
-        if y < 0 or y >= ns.rows or x < 0 or x >= ns.cols:
-            return # nada if out of bounds
+        if y < 0:
+            return # nothing above the first content row
+        if y >= ns.rows:
+            # The row coordinate is past the same content ceiling _add() enforces;
+            # discard it through the shared counter so draw() overflow is counted
+            # and warned about once per fill episode, just like add_body().
+            # draw() sits one frame below _add(), hence stacklevel=3.
+            self._warn_rows_dropped(
+                ns, 'head' if header else 'body', stacklevel=3)
+            return
+        if x < 0 or x >= ns.cols:
+            return # nothing to paint outside the pad width
         ns.row_cnt = max(ns.row_cnt, y+1)
 
         uni = text if isinstance(text, str) else text.decode('utf-8')

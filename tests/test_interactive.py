@@ -375,12 +375,15 @@ def test_draw_writes_a_row_and_tracks_row_cnt(make):
 
 
 def test_draw_out_of_bounds_is_a_no_op(make):
-    # max_rows, not body_rows, is what bounds draw(): body_rows is only a hint.
+    # Only the row ceiling (max_rows) is an overflow; negative rows and columns
+    # outside the pad are simply not painted.  _add() owns the overflow warning,
+    # and draw() routes past-the-ceiling rows through the same counter.
     win, _backend = make(max_rows=10, body_cols=40)
-    for y, x in ((-1, 0), (0, -1), (999, 0), (0, 999)):
+    for y, x in ((-1, 0), (0, -1), (0, 999)):
         win.draw(y, x, 'x')
     assert win.body.row_cnt == 0
     assert win.body.texts == []
+    assert win.rows_dropped == 0
 
 
 def test_draw_header_flag_targets_the_head_pad(make):

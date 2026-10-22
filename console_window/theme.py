@@ -31,8 +31,12 @@ class Theme:
         DANGER, SUCCESS, OLD_SUCCESS, WARNING, INFO, EMPHASIS, ERROR, PROGRESS, HOTSWAP,
     )
 
-    # Current theme name — single source of truth, written by Theme.set() and by
-    # Theme.set_active() (called from ConsoleWindow.start_curses()).
+    # Process default theme name.  It seeds a new window's own ``theme``
+    # (ConsoleWindow.theme) and receives the most recently applied theme, so
+    # windows created later inherit it.  The authoritative choice for a running
+    # window is that window's attribute: curses owns one pair table per terminal,
+    # so *applying* a theme is still terminal-global, but two windows no longer
+    # have to disagree about which theme they are on (AUDIT.md §3.1).
     _current: ClassVar[str | None] = None
 
     # Available themes
@@ -138,8 +142,35 @@ class Theme:
     }
 
     @classmethod
+    def resolve(cls, theme_name: str | None) -> str:
+        """Return *theme_name* if it names a theme, else ``'default'``."""
+        if theme_name and theme_name in cls.THEMES:
+            return theme_name
+        return 'default'
+
+    @classmethod
     def get_current(cls) -> str | None:
         return cls._current
+
+    @classmethod
+    def pair_specs(cls, theme_name: str | None) -> list[tuple[int, int, int]]:
+        """``(pair_id, fg, bg)`` for every pair *theme_name* defines.
+
+        ``DEFAULT_BG`` comes first (the screen and pad background), then the
+        semantic roles in ``SEMANTIC_PAIRS`` order.  Startup
+        (``ConsoleWindow._init_screen``), :meth:`set` and
+        ``ConsoleWindow.set_theme`` all install colours from this one list, so
+        the paths cannot drift apart.
+        """
+        theme = cls.THEMES[cls.resolve(theme_name)]
+        specs: list[tuple[int, int, int]] = []
+        if 'default_fg' in theme and 'default_bg' in theme:
+            specs.append((cls.DEFAULT_BG, theme['default_fg'], theme['default_bg']))
+        for color_id in cls.SEMANTIC_PAIRS:
+            if color_id in theme:
+                fg, bg = theme[color_id]
+                specs.append((color_id, fg, bg))
+        return specs
 
     @classmethod
     def list_all(cls) -> list[str]:
@@ -159,22 +190,20 @@ class Theme:
         # Late import to avoid a circular import at module load time.
         from .window import ConsoleWindow
 
-        # Set terminal background and foreground from theme
+        # Reinitialize every pair this theme defines (DEFAULT_BG first).
+        for pair_id, fg, bg in cls.pair_specs(theme_name):
+            curses.init_pair(pair_id, fg, bg)
+
+        # Set the screen/pad background too, even when it is (-1, -1) — i.e.
+        # "back to the terminal default" — and broadcast it to *every* live
+        # window; there is no longer a single process-wide "static" window.
         if 'default_fg' in theme and 'default_bg' in theme:
-            default_fg = theme['default_fg']
-            default_bg = theme['default_bg']
-            # Always update the default color pair and screen background
-            # (even when -1, -1 to reset to terminal defaults)
-            curses.init_pair(cls.DEFAULT_BG, default_fg, default_bg)
-            # Broadcast to *every* live window — there is no longer a single
-            # process-wide "static" window to update.
             ConsoleWindow._apply_default_colors(curses.color_pair(cls.DEFAULT_BG))
 
-        # Reinitialize color pairs with new theme
-        for color_id in cls.SEMANTIC_PAIRS:
-            if color_id in theme:
-                fg, bg = theme[color_id]
-                curses.init_pair(color_id, fg, bg)
+        # A process-wide switch leaves every window reporting the same theme,
+        # so per-window state cannot contradict the pair table just installed.
+        for win in ConsoleWindow.active_windows():
+            win.theme = theme_name
 
         return True
 
@@ -184,7 +213,38 @@ class Theme:
         return theme_name
 
     @classmethod
+    def theme_of(cls, win: object) -> str | None:
+        """Return the theme *win* is on (falling back to the process default).
+
+        Host objects that only expose the drawing methods the factory needs do
+        not have to carry a ``theme`` attribute.
+        """
+        return getattr(win, 'theme', cls.get_current())
+
+    @classmethod
+    def apply_to(cls, win: object, theme_name: str) -> bool:
+        """Apply *theme_name* to *win*, preferring its per-window API.
+
+        A host window without ``set_theme()`` still gets the historical
+        process-wide switch, so the factory works on minimal window stubs.
+        """
+        setter = getattr(win, 'set_theme', None)
+        if setter is not None:
+            return bool(setter(theme_name))
+        return cls.set(theme_name)
+
+    @classmethod
     def create_picker_screen(cls, base_class: type) -> type:
+        """Build a theme-picker screen class on top of *base_class*.
+
+        The generated screen renders the current theme, a set of labelled colour
+        swatches, and an action (``spin_theme_ACTION``) that cycles themes.  The
+        host application is expected to expose ``win``, and may expose
+        ``opts.theme``: when present, that option is treated as the selected
+        theme, so an ordinary cycle binding and the built-in action stay in sync.
+        The theme is applied to ``app.win`` itself (``ConsoleWindow.set_theme``),
+        so the window reports the theme it is actually drawing with.
+        """
         class ThemePickerScreen(base_class):
             def draw_screen(self) -> None:
                 app = self.app
@@ -192,8 +252,15 @@ class Theme:
 
                 win.set_pick_mode(False)
 
-                # Get current theme name (may be empty string for default)
-                current_theme = cls.get_current()
+                # Apply a theme selected through the host's option (for example
+                # an OptionSpinner cycle binding) before drawing the swatches.
+                opts = getattr(app, 'opts', None)
+                selected = getattr(opts, 'theme', None) if opts is not None else None
+                if selected and selected != cls.theme_of(win):
+                    cls.apply_to(win, selected)
+
+                # Name the theme this window is on (default when unset).
+                current_theme = cls.theme_of(win)
                 display_theme = current_theme if current_theme else '(default)'
 
                 # Add header showing current theme
@@ -221,11 +288,16 @@ class Theme:
                     win.add_body(line, attr=attr)
 
             def spin_theme_ACTION(self) -> None:
+                win = self.app.win
                 vals = cls.list_all()
-                value = cls.get_current()
+                opts = getattr(self.app, 'opts', None)
+                # Start from the theme the host has selected, falling back to
+                # the theme this window is actually on when there is no option.
+                value = getattr(opts, 'theme', None) or cls.theme_of(win)
                 idx = vals.index(value) if value in vals else -1
                 value = vals[(idx+1) % len(vals)]  # choose next
-                cls.set(value)
-                self.app.opts.theme = value
+                cls.apply_to(win, value)
+                if opts is not None:
+                    opts.theme = value
 
         return ThemePickerScreen

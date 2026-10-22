@@ -19,12 +19,11 @@
 
 The library is small, dependency-free, and unusually disciplined for a single-author project: a real module split, a headless render backend, 268 fast TTY-free tests, a green linter and type checker, changelog and release metadata, and a worked example that is itself smoke-tested. Resolved findings from the 2026-10-15 audit have been removed from this document; [`CHANGELOG.md`](CHANGELOG.md:1) records them.
 
-The remaining risks are narrower than the ones in the original audit. There is no data-loss or security defect, and the interactive core is no longer an untested hole. What is left is one drawing path outside the overflow contract, a body of unreachable or dead-but-broken public surface, residual process-global state, and CI that cannot reproduce its own inputs. Highest-risk findings, in order:
+The remaining risks are narrower than the ones in the original audit. There is no data-loss or security defect, and the interactive core is no longer an untested hole. What is left is a body of unreachable or dead-but-broken public surface, residual process-global state, and CI that cannot reproduce its own inputs. Highest-risk findings, in order:
 
-1. **[`draw()`](console_window/window.py:749) bypasses the pad-overflow policy.** It inflates `row_cnt` without a capacity check and never records row context or attributes, so phantom rows, silently pickable rows and attribute loss can follow (§3.2).
-2. **A meaningful amount of public API is unreachable.** `Theme.create_picker_screen()`, `ScreenStack.act_in()`, `ScreenStack.is_curr()`, `ConsoleWindow.set_pick_range()` and `BasicHelpScreen` have no consumer outside the test suite (§3.3).
-3. **Process-global state is still managed asymmetrically.** The active theme is a class global, and the Ctrl-C policy deliberately latches terminating Ctrl-C for the process lifetime without restoring a host application's prior SIGINT handler (§3.1).
-4. **CI is green but shallow.** Tool versions are unpinned, and there is no coverage or `pylint` gate, so the current 87% coverage and 9.92/10 score are not protected (§3.4).
+1. **A meaningful amount of public API is unreachable.** `ConsoleWindow.set_pick_range()` and `BasicHelpScreen` have no consumer outside the test suite (§3.3).
+2. **The theme is per-window, but colour pairs are per-terminal.** `ConsoleWindowOpts(theme=...)`, `ConsoleWindow.theme` and `set_theme()` make the selection per window and install it through that window's backend; curses owns one pair table per terminal, so windows sharing one screen still show one palette at a time (§3.1).
+3. **CI is green but shallow.** Tool versions are unpinned, and there is no coverage or `pylint` gate, so the current 87% coverage and 9.92/10 score are not protected (§3.4).
 
 None of these is a data-loss or security defect, and the project's own bar remains high. The work left is concentrated in the list above rather than spread across the package.
 
@@ -59,21 +58,21 @@ None of these is a data-loss or security defect, and the project's own bar remai
 
 ## 3. Findings
 
-### 3.1 🟡 Process-global theme, and a one-way Ctrl-C latch
+### 3.1 🟢 Per-window theme and a reversible Ctrl-C policy (resolved)
 
-`Theme._current` is a class attribute ([`theme.py:36`](console_window/theme.py:36)) — documented, but it means two windows in one process cannot differ. The Ctrl-C policy is now safe against the interleaving that used to leave a custom handler installed, because terminating Ctrl-C is a one-way process-lifetime latch ([`signals.py:16`](console_window/signals.py:16)): once [`setup_ctrl_c()`](console_window/signals.py:31) sees a terminating request it installs Python's default handler and [`teardown_ctrl_c()`](console_window/signals.py:45) subsequently no-ops.
+The active theme is per-window. `ConsoleWindowOpts(theme=...)` seeds [`ConsoleWindow.theme`](console_window/window.py:242) ([`opts.py:40`](console_window/opts.py:40)); [`set_theme()`](console_window/window.py:397) installs the palette through that window's backend and repaints its pads; startup ([`_init_screen()`](console_window/window.py:583)) and pad reallocation ([`_apply_pad_theme()`](console_window/window.py:424)) read the window's own theme. [`Theme.set()`](console_window/theme.py:180) remains the process-wide switch and now relabels every live window. All three install paths share [`Theme.pair_specs()`](console_window/theme.py:156), so they cannot drift apart.
 
-**Limits:** the active theme remains global, and the latch deliberately restores `signal.default_int_handler` rather than a handler a host application may have installed before the first window. There is no public reset. An embedding application that manages SIGINT itself can therefore lose its handler for the rest of the process.
+The Ctrl-C policy still latches terminating Ctrl-C while any window depends on it, so a non-terminating window cannot swallow Ctrl-C after a terminating one exists. What changed is the other end: [`setup_ctrl_c()`](console_window/signals.py:82) captures the handler that was installed *before* the first window ([`signals.py:33`](console_window/signals.py:33)), and [`teardown_ctrl_c()`](console_window/signals.py:107) restores it only when the last live window stops. Setups and teardowns are counted per window (including latched no-ops), so stopping one of several windows cannot disarm the others. The restore also clears the latch, so a later window can make Ctrl-C an application key again, and [`reset_ctrl_c()`](console_window/signals.py:116) — exported from the package root — is the deliberate reset for an embedding application that manages SIGINT itself.
 
-**Fix:** make the theme per-window (or document one-theme-per-process explicitly), and either capture/restore the previous SIGINT handler or expose a deliberate reset.
+**Limit (curses, not this library):** colour pairs belong to the terminal, so two windows drawing on one screen cannot show different palettes at the same time. What is per-window is the recorded choice and what is applied at startup, on pad reallocation, and by `set_theme()`.
 
-### 3.2 🟡 `draw()` bypasses the pad-overflow policy
+### 3.2 🟢 `draw()` now shares the `_add()` overflow contract (resolved)
 
-Overflow through `_add()` is counted (`ns.rows_dropped`, exposed as [`ConsoleWindow.rows_dropped`](console_window/window.py:359)), warned about once per fill episode with a caller-facing `stacklevel`, reset by [`clear()`](console_window/window.py:1759), non-fatal by design, and enforced in this project's own suite via `filterwarnings = ["error::UserWarning"]` ([`pyproject.toml:49`](pyproject.toml:49)).
+Overflow through `_add()` is counted (`ns.rows_dropped`, exposed as [`ConsoleWindow.rows_dropped`](console_window/window.py:413)), warned about once per fill episode with a caller-facing `stacklevel`, reset by [`clear()`](console_window/window.py:1926), non-fatal by design, and enforced in this project's own suite via `filterwarnings = ["error::UserWarning"]` ([`pyproject.toml:49`](pyproject.toml:49)).
 
-**The gap:** [`draw()`](console_window/window.py:749) writes a raw row and inflates `ns.row_cnt = max(ns.row_cnt, y+1)` ([`window.py:755`](console_window/window.py:755)) **without any capacity check**, so it can put `row_cnt` past the pad's real row count — after which `calc()` computes `max_scroll_pos` from phantom rows, `highlight_picked()` walks rows that do not exist, and `rows_dropped` reports nothing. `draw()` also never appends to `contexts`/`text_attrs`, so drawn rows fall through to the default-pickable branch in [`_is_pickable()`](console_window/window.py:367) and lose their attributes on the next full redraw.
+The earlier gap no longer describes the implementation. Under the viewport-sized-pad model, [`draw()`](console_window/window.py:823) writes the row model, bounds `y` against `ns.rows` (the same `max_rows` ceiling `_add()` enforces, not the pad height), fills any gap in `texts`/`text_attrs`/`contexts`, and records the span in `ns.drawn` for replay by `_paint_row()`/`_overlay_spans()` on a full repaint. [`highlight_picked()`](console_window/window.py:865) goes through `_pad_row()`, which skips rows outside the viewport and rows beyond `texts`, so there are no phantom rows to walk.
 
-**Fix:** clamp in `draw()` (or route it through `_add`) and let the same counter warn.
+One real gap remained: `draw()` returned silently when `y >= ns.rows`. That path now calls [`_warn_rows_dropped()`](console_window/window.py:716) with `stacklevel=3`, so an over-ceiling draw is counted in `rows_dropped`, warned about once per fill episode, and attributed to the caller's line — the same policy as `_add()`. [`tests/test_overflow.py`](tests/test_overflow.py:148) pins the body and header cases; [`tests/test_interactive.py`](tests/test_interactive.py:377) keeps negative/out-of-width coordinates as silent no-ops.
 
 ### 3.3 🟡 Unreachable public surface (and dead code in the example)
 
@@ -81,9 +80,6 @@ No consumer outside the test suite for:
 
 | Symbol | Where | Note |
 | --- | --- | --- |
-| `Theme.create_picker_screen()` | [`theme.py:187`](console_window/theme.py:187) | Untested; duplicates the sample app's theme screen; the factory reaches into `app.opts.theme` |
-| `ScreenStack.act_in()` | [`screens.py:181`](console_window/screens.py:181) | Duplicates what `perform_actions()` already does; `getattr` raises on a missing flag |
-| `ScreenStack.is_curr()` | [`screens.py:168`](console_window/screens.py:168) | Only reachable from `act_in()` |
 | `ConsoleWindow.set_pick_range()` | [`window.py:518`](console_window/window.py:518) | The `pick_range` feature's only public entry point; called only by [`tests/test_interactive.py`](tests/test_interactive.py:1) |
 | `BasicHelpScreen` | [`screens.py:227`](console_window/screens.py:227) | Exported in `__all__`, unused; the sample app writes its own help screen |
 | `OptionSpinner.add()` | [`spinner.py:163`](console_window/spinner.py:163) | Retired shim; raises `NotImplementedError` pointing to `add_key()` (see below) |
@@ -93,7 +89,9 @@ No consumer outside the test suite for:
 
 `OptionSpinner.add()` was a pre-2.0 compatibility shim that truncated `ns.vals` and *then* sliced it with the pre-truncation index, so `ns.comments` was always empty — the parameter it existed for was silently dropped. Since no in-repo consumer uses it, it is kept only as a tombstone: the signature remains (so old callers fail at the call rather than at import) and it raises `NotImplementedError` naming `add_key()` and showing the replacement call.
 
-The same is true of two example methods: `DemoApp.do_key()` ([`SampleApp.py:219`](SampleApp.py:219)) is never called (`main_loop` calls [`handle_key()`](SampleApp.py:184), which calls `spin.do_key` directly), and `ThemeScreen.theme_screen()` ([`SampleApp.py:512`](SampleApp.py:512)) is never called and, unlike the live [`theme_screen_ACTION()`](SampleApp.py:426) path and `Theme.create_picker_screen`'s `spin_theme_ACTION`, does not update `app.opts.theme`.
+`ScreenStack.act_in()` and `is_curr()` were promoted rather than removed: the README now documents them, [`tests/test_screens.py`](tests/test_screens.py:1) covers one-shot flag consumption, screen filtering and the missing-flag case, and `act_in()` returns `False` for a flag that was never set instead of raising `AttributeError`.
+
+The same is true of one example method: `DemoApp.do_key()` ([`SampleApp.py:219`](SampleApp.py:219)) is never called (`main_loop` calls [`handle_key()`](SampleApp.py:184), which calls `spin.do_key` directly). The sample's `THEMES` screen is now generated by [`Theme.create_picker_screen()`](console_window/theme.py:186) and covered by [`tests/test_theme.py`](tests/test_theme.py:1), so its hand-written draw/cycle pair is gone.
 
 **Fix:** delete what no consumer needs (these are pre-2.0 leftovers), or promote it deliberately: give each survivor a test and a README mention. `OptionSpinner.add()` is done: it now fails loudly instead of registering a broken option.
 
@@ -112,7 +110,7 @@ The same is true of two example methods: `DemoApp.do_key()` ([`SampleApp.py:219`
 
 ### 3.6 🟢 Lint findings lack rationale
 
-`pylint` remains in the high 9s only because its warnings are few, not because they are annotated. Current examples: protected-member access ([`window.py:78`](console_window/window.py:78), [`window.py:84`](console_window/window.py:84), [`theme.py:171`](console_window/theme.py:171)), unused arguments ([`window.py:1742`](console_window/window.py:1742), [`backend.py:252`](console_window/backend.py:252), [`backend.py:278`](console_window/backend.py:278)), global statements and unused handler arguments in [`signals.py:19`](console_window/signals.py:19), a not-callable method ([`screens.py:67`](console_window/screens.py:67)), and broad exceptions in the example ([`SampleApp.py:150`](SampleApp.py:150), [`SampleApp.py:523`](SampleApp.py:523)). Each is plausibly deliberate, but none says why.
+`pylint` remains in the high 9s only because its warnings are few, not because they are annotated. Current examples: protected-member access ([`window.py:78`](console_window/window.py:78), [`window.py:84`](console_window/window.py:84), [`theme.py:201`](console_window/theme.py:201)), unused arguments ([`window.py:1742`](console_window/window.py:1742), [`backend.py:252`](console_window/backend.py:252), [`backend.py:278`](console_window/backend.py:278)), a not-callable method ([`screens.py:67`](console_window/screens.py:67)), and broad exceptions in the example ([`SampleApp.py:150`](SampleApp.py:150), [`SampleApp.py:523`](SampleApp.py:523)). Each is plausibly deliberate, but none says why. The `signals.py` findings are now annotated (module-level rationale for the process-global policy, a scoped disable on the signal handler's fixed signature).
 
 **Fix:** add a short rationale comment or a scoped `# pylint: disable=...` at each site, so a future reader can distinguish intent from accident.
 
@@ -120,19 +118,18 @@ The same is true of two example methods: `DemoApp.do_key()` ([`SampleApp.py:219`
 
 **P1 — robustness and surface**
 
-1. Clamp `draw()` to the pad and route its overflow through the existing counter (§3.2).
-2. Delete or promote the unreachable API (§3.3) and delete `DemoApp.do_key()` and `ThemeScreen.theme_screen()`.
-3. Pin CI tool versions and add a coverage floor (even a low one, e.g. `--cov-fail-under=80`) so the suite cannot silently shrink (§3.4).
+1. Delete or promote the unreachable API (§3.3) and delete `DemoApp.do_key()`.
+2. Pin CI tool versions and add a coverage floor (even a low one, e.g. `--cov-fail-under=80`) so the suite cannot silently shrink (§3.4).
 
 **P2 — honesty and hygiene**
 
-4. Make the active theme per-window (or document one-theme-per-process), and capture/restore the host SIGINT handler or expose a reset (§3.1).
+4. ~~Make the active theme per-window (or document one-theme-per-process), and capture/restore the host SIGINT handler or expose a reset (§3.1).~~ Done: `ConsoleWindowOpts(theme=...)` / `ConsoleWindow.set_theme()`, captured-and-restored SIGINT handler, and the exported `reset_ctrl_c()`.
 5. Make the dialog retry budget configurable and stop discarding keys during resize recovery (§3.5).
 6. Add rationale comments or scoped disables for the remaining `pylint` findings (§3.6).
 
 ## 5. What is genuinely good (protect it)
 
-* **The test suite is fast and genuinely TTY-free** (268 tests in 1.5 s) and includes headless smoke tests for the example ([`tests/test_sample_app.py`](tests/test_sample_app.py:1)), the interactive core ([`tests/test_interactive.py`](tests/test_interactive.py:1)) and the overflow contract ([`tests/test_overflow.py`](tests/test_overflow.py:1)).
+* **The test suite is fast and genuinely TTY-free** (290 tests in 1.5 s) and includes headless smoke tests for the example ([`tests/test_sample_app.py`](tests/test_sample_app.py:1)), the interactive core ([`tests/test_interactive.py`](tests/test_interactive.py:1)) and the overflow contract ([`tests/test_overflow.py`](tests/test_overflow.py:1)).
 * **The overflow contract for `_add()` is a model of restraint** — counted, warned once, non-fatal for users, fatal in the project's own suite ([`pyproject.toml:49`](pyproject.toml:49)), and it paid for itself in the same commit by finding the sample app's clipped help screen.
 * **The `prompt()` loop is decomposed and guarded** — the one 160-line, complexity-43 function is now a 12-line intake loop over small helpers (worst `prompt`-family helper: 4), and `C901` at a ratcheted threshold of 12 prevents a new monolith ([`pyproject.toml:62`](pyproject.toml:62)).
 * **`textwidth` and `geometry` are pure and near-fully covered** (95%/100%) — the right place for the fiddly math.

@@ -18,6 +18,7 @@ PUBLIC_NAMES = [
     'HOME_ST',
     'NAVIGATION_KEYS',
     'TerminalTooSmallError',
+    'reset_ctrl_c',
 ]
 
 

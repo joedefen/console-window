@@ -179,9 +179,20 @@ class ScreenStack:
         return test_one(screen=screens)
 
     def act_in(self, action: str, screens: int | str | list | tuple | set | None = None) -> bool:
+        """Consume one boolean action flag from ``self.obj``.
+
+        This is the single-action, caller-dispatched companion to
+        ``perform_actions()``: it clears the flag and reports whether it fired
+        while *screens* was current.  A flag that was never set reads as
+        ``False`` instead of raising ``AttributeError``, so an options object
+        need not pre-seed every action.  The flag is consumed even when the
+        screen does not match, preserving the one-shot semantics.
+        """
+        if not hasattr(self.obj, action):
+            return False
         val = getattr(self.obj, action)
         setattr(self.obj, action, False)
-        return val and (screens is None or self.is_curr(screens))
+        return bool(val) and (screens is None or self.is_curr(screens))
 
     def perform_actions(self, spinner: OptionSpinner) -> int:
         if self.curr is None:

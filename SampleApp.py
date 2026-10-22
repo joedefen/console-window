@@ -8,6 +8,7 @@ import traceback
 from types import SimpleNamespace
 
 from console_window import (
+    BasicHelpScreen,
     ConsoleWindow,
     ConsoleWindowOpts,
     Context,
@@ -18,7 +19,6 @@ from console_window import (
     Screen,
     ScreenStack,
     Theme,
-    BasicHelpScreen,
 )
 
 # Screen IDs
@@ -264,6 +264,7 @@ class DemoScreen(Screen):
         sys.exit(0)
 
 class MainScreen(DemoScreen):
+    header_cnt = 0
     def __init__(self, app):
         super().__init__('MAIN', app)
 
@@ -339,11 +340,25 @@ class MainScreen(DemoScreen):
         else:
             line.text('/')
 
-        # Show spinner keys
+        header_test = self.header_cnt % 3
+        self.header_cnt += 1
+
+        # Show spinner keys.
+        #
+        # Every key below is spelled with bracket_key(), because the third
+        # strategy round-trips the line through str() and the legacy string
+        # scanner, which only knows two KEY spellings: '[x]' (exactly one
+        # character between brackets) and 'UPPERCASE:' (one or more capitals
+        # followed by a colon).  An unbracketed key('l') or key('?') keeps its
+        # KEY role in the token paths, but str(line) is just text: 'l:alrtDemo'
+        # and '?:help' fail both legacy rules, so the re-parse would render the
+        # same characters with no styling.  Bracket-spelling them makes all
+        # three strategies produce the same runs.  (key('SPC') is fine: it is
+        # the 'UPPERCASE:' form.)
         line.text(' ').bracket_key('v').text(f'iew={app.opts.view_mode}')
         line.text(' ').bracket_key('s').text(f'ort={app.opts.sort_by}')
         line.text(' ').bracket_key('a').text('nsDemo')
-        line.text(' ').key('l').text(':alrtDemo')
+        line.text(' ').bracket_key('l').text(':alrtDemo')
         line.text(' ').key('SPC').text(':process')
         # line.text(' ').bracket_key('p').text(f'ick={app.opts.pick_size}')
         line.text(' ').bracket_key('n').text(f'ame={app.opts.name or "-"}')
@@ -351,9 +366,13 @@ class MainScreen(DemoScreen):
         # line.text(' ').key('z').text(':stress')
         # line.text(' ').bracket_key('t').text('hemes')
         # line.text(' ').bracket_key('h').text('ist')
-        line.text(' ').key('?').text(':help')
-        app.win.add_header_line(line, mode='Underline')
-        app.win.add_fancy_header(line, mode='Underline')
+        line.text(' ').bracket_key('?').text(':help')
+        if header_test == 0:  # tokens, emitted verbatim (brackets are literal)
+            app.win.add_header_line(line, mode='Underline')
+        elif header_test == 1:  # tokens, brackets treated as markup only
+            app.win.add_fancy_header(line, mode='Underline')
+        else:  # str(line) re-parsed by the legacy scanner (lossy by design)
+            app.win.add_fancy_header(str(line), mode='Underline')
 
         # Column headers
         view_mode = app.opts.view_mode
@@ -479,46 +498,11 @@ class HistoryScreen(DemoScreen):
                            'SPACE on an item to process it.')
 
 
-class ThemeScreen(DemoScreen):
+class ThemeScreen(Theme.create_picker_screen(DemoScreen)):
+    """THEMES screen supplied by Theme.create_picker_screen()."""
+
     def __init__(self, app):
         super().__init__('THEMES', app)
-
-    def draw_screen(self):
-        app = self.app
-        win = app.win
-        win.set_pick_mode(False)
-        if app.opts.theme != Theme.get_current():
-            Theme.set(app.opts.theme)
-
-        theme = app.opts.theme
-        win.add_header(f'COLOR THEMES: [t]heme={theme}',
-                          attr=cs.A_BOLD)
-        win.add_header('  ESC:return', attr=cs.A_DIM, resume=True)
-
-        win.add_body('Color samples:')
-        win.add_body('')
-
-        # Color samples
-        color_samples = [
-            (Theme.DANGER, 'DANGER', 'Destructive operations'),
-            (Theme.SUCCESS, 'SUCCESS', 'Completed operations'),
-            (Theme.WARNING, 'WARNING', 'Warnings and cautions'),
-            (Theme.INFO, 'INFO', 'Informational messages'),
-            (Theme.EMPHASIS, 'EMPHASIS', 'Emphasized text'),
-            (Theme.ERROR, 'ERROR', 'Error messages'),
-            (Theme.PROGRESS, 'PROGRESS', 'Progress indicators'),
-        ]
-
-        for color_id, label, description in color_samples:
-            line = f'  {label:<12} ████████  {description}'
-            win.add_body(line, attr=cs.color_pair(color_id))
-
-    def theme_screen(self):
-        themes = Theme.list_all()
-        current = Theme.get_current()
-        idx = themes.index(current) if current in themes else -1
-        next_theme = themes[(idx + 1) % len(themes)]
-        Theme.set(next_theme)
 
 def main(backend=None, singleton=True):
     try:

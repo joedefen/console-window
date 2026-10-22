@@ -207,6 +207,47 @@ def test_add_fancy_header_headerline_preserves_explicit_roles():
         win.stop_curses()
 
 
+def test_string_reparse_drops_keys_the_legacy_grammar_cannot_spell():
+    # str(line) is pure text, so the legacy scanner's two KEY rules ('[x]' and
+    # 'UPPERCASE:') are all that survive a round trip.  'l:' and '?:' match
+    # neither, which is why the sample spells those keys as '[l]'/'[?]'.
+    win = _make_window()
+    try:
+        win.add_fancy_header(' l:alrtDemo ?:help', mode='Underline')
+        assert win.head.texts[0] == ' l:alrtDemo ?:help'
+        attrs = [attr for attr, _count in win.head.text_attrs[0]]
+        assert KEY_ATTR not in attrs
+    finally:
+        win.stop_curses()
+
+
+def _expand_cells(attrs):
+    return [attr for attr, count in attrs for _ in range(count)]
+
+
+def test_token_and_string_paths_converge_for_legacy_spelled_keys():
+    # A HeaderLine whose KEY spans are spelled the way the string grammar reads
+    # them back renders cell-for-cell identically whether it is handed over as
+    # tokens or as str(line) re-parsed by the legacy scanner.
+    line = (HeaderLine()
+            .text('  ').bracket_key('v').text('iew=full')
+            .text(' ').bracket_key('?').text(':help')
+            .text(' ').key('SPC').text(':process'))
+    as_tokens = _make_window()
+    as_string = _make_window()
+    try:
+        as_tokens.add_fancy_header(line, mode='Underline')
+        as_string.add_fancy_header(str(line), mode='Underline')
+        assert as_string.head.texts[0] == as_tokens.head.texts[0]
+        # Runs may differ in grouping ('iew=full ' vs 'iew=full' + ' '), so
+        # compare the per-cell attributes, which is what the pad paints.
+        assert (_expand_cells(as_string.head.text_attrs[0])
+                == _expand_cells(as_tokens.head.text_attrs[0]))
+    finally:
+        as_tokens.stop_curses()
+        as_string.stop_curses()
+
+
 @pytest.mark.parametrize('role', [KEY, LABEL, SEARCH, PLAIN])
 
 

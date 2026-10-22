@@ -7,6 +7,7 @@ from .header import HeaderLine, Span
 from .keys import NAVIGATION_KEYS
 from .opts import ConsoleWindowOpts
 from .screens import HOME_ST, BasicHelpScreen, Screen, ScreenStack
+from .signals import reset_ctrl_c
 from .spinner import OptionSpinner
 from .theme import Theme
 from .widgets import IncrementalSearchBar, InlineConfirmation
@@ -28,4 +29,5 @@ __all__ = [
     'Span',
     'TerminalTooSmallError',
     'Theme',
+    'reset_ctrl_c',
 ]
