@@ -68,13 +68,14 @@ def _current_handler() -> object:
         return signal.default_int_handler
 
 
-def _install(handler: object) -> None:
+def _install(handler: object) -> bool:
     # signal.signal() only works on the main thread; a window created elsewhere
     # simply runs with the host's handler rather than failing construction.
     try:
         signal.signal(signal.SIGINT, cast(Any, handler))
     except ValueError:
-        pass
+        return False
+    return True
 
 
 def set_ctrl_c_policy(ctrl_c_terminates: bool) -> None:
@@ -104,8 +105,7 @@ def setup_ctrl_c() -> None:
         handler = signal.default_int_handler
     else:
         handler = _ctrl_c_handler
-    if handler is not _ctrl_c_installed:
-        _install(handler)
+    if handler is not _ctrl_c_installed and _install(handler):
         _ctrl_c_installed = handler
 
 
