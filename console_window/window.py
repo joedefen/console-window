@@ -439,9 +439,11 @@ class ConsoleWindow:
         if not self._backend.has_colors():
             return
         theme = Theme.THEMES[Theme.resolve(getattr(self, 'theme', None))]
-        default_fg = theme.get('default_fg', -1)
-        default_bg = theme.get('default_bg', -1)
-        if default_fg != -1 or default_bg != -1:
+        if ('default_fg' in theme and 'default_bg' in theme
+                and Theme.DEFAULT_BG < self._backend.color_pairs()):
+            # Theme.install() has already installed this pair with either the
+            # literal values or the low-colour mapping, so bkgd() never sees a
+            # stale/out-of-range pair.
             pad.bkgd(' ', self._backend.color_pair(Theme.DEFAULT_BG))
 
     def _sync_pad_geometry(self) -> None:
@@ -578,14 +580,18 @@ class ConsoleWindow:
 
         Colour pairs are per-terminal (one table, not one per window), so both
         startup and ``set_theme()`` call this; the caller decides *whose*
-        theme wins.  Returns the resolved theme name.
+        theme wins.  The actual installation (including low-colour mapping and
+        ``-1`` resolution) lives in :meth:`Theme.install`, which ``Theme.set()``
+        uses too, so the two entry points cannot diverge.  Returns the resolved
+        theme name.
         """
-        name = Theme.resolve(theme_name or Theme.get_current())
+        name = Theme.install(backend, theme_name)
         theme = Theme.THEMES[name]
-        for pair_id, fg, bg in Theme.pair_specs(name):
-            backend.init_pair(pair_id, fg, bg)
-        # Can't change pair 0, so the screen background is set directly.
-        if theme.get('default_fg', -1) != -1 or theme.get('default_bg', -1) != -1:
+        # Can't change pair 0, so the screen background is set directly.  The
+        # pair has just been installed above (with mapped values on low-colour
+        # terminals), so this never references a stale or out-of-range pair.
+        if ('default_fg' in theme and 'default_bg' in theme
+                and Theme.DEFAULT_BG < backend.color_pairs()):
             scr.bkgd(' ', backend.color_pair(Theme.DEFAULT_BG))
         return name
 
@@ -599,8 +605,10 @@ class ConsoleWindow:
         # Initialize color support with theme.  Every colour call goes through
         # the backend, so a non-curses backend that reports colours can use it.
         if backend.has_colors():
+            # start_color() is where a curses backend captures COLORS and
+            # COLOR_PAIRS; Theme.install() then enables default colours (and
+            # remembers whether -1 is usable) before resolving each pair.
             backend.start_color()
-            backend.use_default_colors()  # Allow -1 for default terminal colors
             # The window's own theme (per-window since AUDIT.md §3.1) or the
             # process default for a window that has not chosen one yet.
             name = ConsoleWindow._install_theme(backend, scr, theme_name)

@@ -52,6 +52,7 @@ The wrapper handles several advanced terminal interaction patterns automatically
   * **Viewport-Sized Pads:** Separate `head` and `body` pads give the static header band and the independently scrolling body, but the pads are blit buffers sized to the terminal rather than content stores. `add_body()`/`add_header()`/`draw()` write the model, and `render()` paints the visible page into pad row 0, so pad memory and per-frame `clear()` cost stay constant no matter how many rows an app adds. Row counts need no configuration at all: `opts.body_rows` / `opts.head_rows` are advisory hints only, and `opts.max_rows` (default `32767`, `None` for unlimited) is the single content ceiling.
   * **Loud Content Limits:** A row added past `opts.max_rows` is discarded, but no longer quietly: the first discarded row of each fill episode emits a `UserWarning` naming the namespace and the option to change, and every discarded row is counted in `ConsoleWindow.rows_dropped`. It stays non-fatal — run `python -W error::UserWarning` if you would rather it killed the app.
   * **Seamless Resizing:** Automatically detects terminal size changes (`KEY_RESIZE`) and recalculates layout dimensions, with robust error handling to prevent common `curses.error` crashes during resizing.
+  * **Graceful Colour Degradation:** Themes are written against the 256-colour xterm palette, but installation asks the backend how many colours the terminal actually exposes. A 256-colour terminal gets the theme's literal specs; 16-, 88- and 8-colour terminals get the nearest available palette entry, with a contrast guard so a pair never collapses to `fg == bg`; below 8 colours (or with no colour support) the theme falls back to attributes. `-1` is only emitted when `use_default_colors()` succeeds, and `COLOR_PAIRS` is respected. Stock tmux (`TERM=screen`, 8 colours) therefore works instead of raising `ValueError: Color number is greater than COLORS-1`.
   * **Scroll & Pick Synchronization:** The `Window` class manages **scroll position** and a separate **pick position** (highlighted row) simultaneously.
     * When using pick mode, scrolling automatically tracks the highlighted element to keep it visible in `.pick_pos`.
     * To use that value, you must separately be able to associate `.pick_pos` to its value by, say, keeping an array of values for every added line to the `body`. 
@@ -91,7 +92,10 @@ demonstrates:
   per-window state: `ConsoleWindowOpts(theme=...)` seeds `window.theme`,
   `window.set_theme()` switches it (and re-initialises the terminal's colour
   pairs, which curses keeps per terminal rather than per window), and
-  `Theme.set()` remains the process-wide switch.
+  `Theme.set()` remains the process-wide switch. Theme names are semantic:
+  asking for `nord` on an 8-colour terminal installs the closest supported
+  representation rather than raising, and startup, `set_theme()` and
+  `Theme.set()` all share `Theme.install()`.
 * **Dialogs** — `a` calls `answer()` for text input, `l` calls `alert()`, and `n`
   drives `answer()` from an `OptionSpinner` option (`add_key(..., prompt=...)`).
   `answer()` returns `None` only when the user aborts; if the terminal cannot

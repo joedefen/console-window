@@ -3,6 +3,138 @@ from __future__ import annotations
 import curses
 from typing import ClassVar
 
+from .backend import CursesBackend, RenderBackend
+
+# --- palette model -----------------------------------------------------------
+# Standard xterm palette model.  0..15 are the ANSI/base colours, 16..231 the
+# 6x6x6 colour cube with the levels below, and 232..255 the grayscale ramp
+# ``8 + 10 * n``.  The RGB values are the conventional xterm ones; exact
+# fidelity is not required because the result only picks the closest entry a
+# low-colour terminal can actually display.
+_ANSI_RGB: tuple[tuple[int, int, int], ...] = (
+    (0, 0, 0),        # 0 black
+    (128, 0, 0),      # 1 red
+    (0, 128, 0),      # 2 green
+    (128, 128, 0),    # 3 yellow
+    (0, 0, 128),      # 4 blue
+    (128, 0, 128),    # 5 magenta
+    (0, 128, 128),    # 6 cyan
+    (192, 192, 192),  # 7 white
+    (128, 128, 128),  # 8 bright black
+    (255, 0, 0),      # 9 bright red
+    (0, 255, 0),      # 10 bright green
+    (255, 255, 0),    # 11 bright yellow
+    (0, 0, 255),      # 12 bright blue
+    (255, 0, 255),    # 13 bright magenta
+    (0, 255, 255),    # 14 bright cyan
+    (255, 255, 255),  # 15 bright white
+)
+_CUBE_LEVELS: tuple[int, ...] = (0, 95, 135, 175, 215, 255)
+
+
+def palette_rgb(index: int) -> tuple[int, int, int]:
+    """Return the conventional xterm RGB value for palette *index*.
+
+    Unknown/negative indices (``-1`` is "terminal default", resolved before
+    this function is called) fall back to black so callers never raise.
+    """
+    if 0 <= index < 16:
+        return _ANSI_RGB[index]
+    if 16 <= index <= 231:
+        offset = index - 16
+        return (
+            _CUBE_LEVELS[offset // 36],
+            _CUBE_LEVELS[(offset // 6) % 6],
+            _CUBE_LEVELS[offset % 6],
+        )
+    if 232 <= index <= 255:
+        level = 8 + 10 * (index - 232)
+        return (level, level, level)
+    return (0, 0, 0)
+
+
+def _rgb_distance(left: tuple[int, int, int],
+                  right: tuple[int, int, int]) -> int:
+    return sum((a - b) ** 2 for a, b in zip(left, right, strict=False))
+
+
+def nearest_palette_index(index: int, colors: int) -> int:
+    """Map 256-colour *index* to the nearest entry a *colors*-terminal has.
+
+    Entries 0..15 are the base palette, so the search is restricted to
+    ``0 .. min(colors, 16) - 1``.  A 256-colour terminal gets *index* back
+    unchanged (exact theme specs, no visual regression).  Returns ``-1`` when
+    the terminal has no usable colours at all.
+    """
+    if colors >= 256:
+        return index
+    limit = max(0, min(int(colors), 16))
+    if limit <= 0:
+        return -1
+    if 0 <= index < limit:
+        return index
+    target = palette_rgb(index)
+    best = 0
+    best_distance = _rgb_distance(target, palette_rgb(0))
+    for candidate in range(1, limit):
+        distance = _rgb_distance(target, palette_rgb(candidate))
+        if distance < best_distance:
+            best = candidate
+            best_distance = distance
+    return best
+
+
+def _contrast_partner(color: int, colors: int) -> int | None:
+    """Return the palette entry furthest from *color*, or None if impossible."""
+    limit = max(0, min(int(colors), 16))
+    if limit <= 1:
+        return None
+    base = palette_rgb(color)
+    best: int | None = None
+    best_distance = -1
+    for candidate in range(limit):
+        if candidate == color:
+            continue
+        distance = _rgb_distance(base, palette_rgb(candidate))
+        if distance > best_distance:
+            best = candidate
+            best_distance = distance
+    return best
+
+
+def resolve_color_pair(fg: int, bg: int, colors: int,
+                       default_colors: bool) -> tuple[int, int] | None:
+    """Resolve a theme's ``(fg, bg)`` to values *colors* can accept.
+
+    ``-1`` is passed through only when :meth:`RenderBackend.use_default_colors`
+    succeeded; otherwise it is replaced with concrete defaults (fg 7, bg 0).
+    On terminals with fewer than 256 colours each index is mapped to the
+    nearest available palette entry.  If the mapping would collapse the pair to
+    ``fg == bg`` the foreground is moved to the most contrasting entry.  Returns
+    ``None`` when no legible pair exists (e.g. a 1-colour terminal), in which
+    case the caller falls back to attributes and installs nothing.
+    """
+    if colors <= 0:
+        return None
+    if fg == -1 and not default_colors:
+        fg = 7
+    if bg == -1 and not default_colors:
+        bg = 0
+    if colors < 256:
+        if fg != -1:
+            fg = nearest_palette_index(fg, colors)
+        if bg != -1:
+            bg = nearest_palette_index(bg, colors)
+    # A pair of terminal defaults is left alone: the terminal guarantees a
+    # legible default combination, and preserving (-1, -1) keeps the 256-colour
+    # path byte-for-byte identical to the theme spec.
+    if fg != -1 and bg != -1 and fg == bg:
+        partner = _contrast_partner(bg, colors)
+        if partner is None:
+            return None
+        fg = partner
+    return fg, bg
+
 
 class Theme:
     # Semantic color-pair IDs.  The pairs themselves are (re)initialized per theme
@@ -159,8 +291,8 @@ class Theme:
         ``DEFAULT_BG`` comes first (the screen and pad background), then the
         semantic roles in ``SEMANTIC_PAIRS`` order.  Startup
         (``ConsoleWindow._init_screen``), :meth:`set` and
-        ``ConsoleWindow.set_theme`` all install colours from this one list, so
-        the paths cannot drift apart.
+        ``ConsoleWindow.set_theme`` all install colours through :meth:`install`
+        from this one list, so the paths cannot drift apart.
         """
         theme = cls.THEMES[cls.resolve(theme_name)]
         specs: list[tuple[int, int, int]] = []
@@ -177,22 +309,58 @@ class Theme:
         return list(cls.THEMES.keys())
 
     @classmethod
+    def install(cls, backend: RenderBackend,
+                theme_name: str | None = None) -> str:
+        """Install *theme_name*'s colours through *backend*, degrading safely.
+
+        This is the single installation path used by startup
+        (``ConsoleWindow._init_screen``), ``ConsoleWindow.set_theme()`` and
+        :meth:`set`.  It consults the backend's colour capability instead of the
+        ``curses`` globals: on a 256-colour terminal the theme's literal specs
+        are used unchanged, while fewer colours are mapped to the nearest
+        available palette entry and ``-1`` is only emitted when the terminal
+        accepted ``use_default_colors()``.  Pair ids beyond ``COLOR_PAIRS`` and
+        pairs with no legible mapping are skipped rather than raising.  Returns
+        the resolved theme name.
+        """
+        name = cls.resolve(theme_name if theme_name is not None
+                           else cls.get_current())
+        colors = int(backend.colors())
+        max_pairs = int(backend.color_pairs())
+        default_colors = bool(backend.use_default_colors()) if colors > 0 else False
+        for pair_id, fg, bg in cls.pair_specs(name):
+            if pair_id >= max_pairs:
+                continue
+            pair = resolve_color_pair(fg, bg, colors, default_colors)
+            if pair is None:
+                continue
+            backend.init_pair(pair_id, pair[0], pair[1])
+        return name
+
+    @classmethod
     def set(cls, theme_name: str) -> bool:
         if theme_name not in cls.THEMES:
             return False
 
-        if not curses.has_colors():
-            return False
-
-        cls._current = theme_name
-        theme = cls.THEMES[theme_name]
-
         # Late import to avoid a circular import at module load time.
         from .window import ConsoleWindow
 
-        # Reinitialize every pair this theme defines (DEFAULT_BG first).
-        for pair_id, fg, bg in cls.pair_specs(theme_name):
-            curses.init_pair(pair_id, fg, bg)
+        # Colour pairs are terminal-global, so a live window's backend is the
+        # authoritative seam.  Without one, fall back to curses itself, but go
+        # through CursesBackend so this method never calls curses.init_pair()
+        # directly (that path used to bypass every low-colour guard).
+        win = ConsoleWindow.primary_window()
+        backend = getattr(win, '_backend', None) if win is not None else None
+        if backend is None:
+            backend = CursesBackend()
+            backend.start_color()
+        if not backend.has_colors():
+            return False
+
+        cls._current = theme_name
+        name = cls.install(backend, theme_name)
+        cls._current = name
+        theme = cls.THEMES[name]
 
         # Set the screen/pad background too, even when it is (-1, -1) — i.e.
         # "back to the terminal default" — and broadcast it to *every* live
@@ -200,14 +368,15 @@ class Theme:
         # Theme.set() is the process-wide entry point, so it owns this internal
         # step; exposing a public hook would only invite apps to bypass the
         # pair-table installation above.
-        if 'default_fg' in theme and 'default_bg' in theme:
+        if ('default_fg' in theme and 'default_bg' in theme
+                and cls.DEFAULT_BG < backend.color_pairs()):
             ConsoleWindow._apply_default_colors(  # pylint: disable=protected-access
-                curses.color_pair(cls.DEFAULT_BG))
+                backend.color_pair(cls.DEFAULT_BG))
 
         # A process-wide switch leaves every window reporting the same theme,
         # so per-window state cannot contradict the pair table just installed.
         for win in ConsoleWindow.active_windows():
-            win.theme = theme_name
+            win.theme = name
 
         return True
 

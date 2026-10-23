@@ -67,11 +67,22 @@ def test_startup_initialises_every_semantic_pair(monkeypatch):
         win.stop_curses()
 
 
-def test_theme_set_initialises_the_same_pair_set(colour_recorder, monkeypatch):
+def test_theme_set_initialises_the_same_pair_set(monkeypatch):
+    # Theme.set() must go through the live window's backend, not curses
+    # directly: the old direct path bypassed every low-colour guard.
     monkeypatch.setattr(Theme, '_current', None)
-    assert Theme.set('dark-mono') is True
-    assert set(Theme.SEMANTIC_PAIRS) <= set(colour_recorder)
-    assert Theme.DEFAULT_BG in colour_recorder
+    backend = HeadlessBackend(colors=True)
+    win = ConsoleWindow(opts=ConsoleWindowOpts(body_rows=10, head_rows=3),
+                        backend=backend, singleton=False)
+    try:
+        backend.init_pair_calls.clear()
+        assert Theme.set('dark-mono') is True
+        initialised = {pair for pair, _fg, _bg in backend.init_pair_calls}
+        assert set(Theme.SEMANTIC_PAIRS) <= initialised
+        assert Theme.DEFAULT_BG in initialised
+        assert win.theme == 'dark-mono'
+    finally:
+        win.stop_curses()
 
 
 # --- the shared picker screen ----------------------------------------------

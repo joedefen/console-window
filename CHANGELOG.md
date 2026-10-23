@@ -122,6 +122,27 @@ This project follows [Semantic Versioning](https://semver.org/).
   No in-repo code used it.
 
 ### Fixed
+- Starting a window on a terminal with fewer than 256 colours (including tmux's
+  stock `TERM=screen`, whose terminfo entry has 8 colours) no longer crashes with
+  `ValueError: Color number is greater than COLORS-1`. Theme installation now
+  asks the backend for its capabilities through the new
+  `RenderBackend.colors()` / `color_pairs()` seam (captured after
+  `start_color()`), so `theme.py` and `window.py` never read the `curses`
+  globals directly. On 256-colour terminals the theme's literal specs are used
+  unchanged; on 16/88/8-colour terminals each index is mapped to the nearest
+  entry of the standard xterm palette (base colours 0..15, the 6x6x6 cube and
+  the grayscale ramp are modelled), with a contrast guard that moves the
+  foreground if mapping would collapse a pair to `fg == bg`. Below 8 colours, or
+  when colours are unavailable, installation falls back to attributes instead
+  of raising. `use_default_colors()` is now guarded by `except curses.error` and
+  its result is remembered, so `-1` becomes a concrete default (fg 7, bg 0) on
+  terminals that reject it; pair ids at or past `COLOR_PAIRS` are skipped.
+  Startup, `ConsoleWindow.set_theme()` and `Theme.set()` all install through the
+  new `Theme.install()`, and `Theme.set()` no longer calls `curses.init_pair()`
+  directly, so the built-in theme picker gets the same degradation.
+  `HeadlessBackend(colors=...)` now accepts a colour count (plus optional
+  `color_pairs=` and `default_colors=`) so the low-colour paths are covered by
+  `tests/test_low_colour.py`.
 - `draw()` now routes rows at or past the `max_rows` content ceiling through the
   same `rows_dropped` counter and once-per-fill warning as `add_body()` /
   `add_header()`, with the warning attributed to the caller's line. Previously

@@ -91,11 +91,17 @@ class RenderBackend(Protocol):
     def has_colors(self) -> bool:
         ...
 
+    def colors(self) -> int:
+        """Number of colours the terminal supports (0 when unknown/none)."""
+
+    def color_pairs(self) -> int:
+        """Size of the terminal's colour-pair table."""
+
     def start_color(self) -> None:
         ...
 
-    def use_default_colors(self) -> None:
-        ...
+    def use_default_colors(self) -> bool:
+        """Enable ``-1`` as "terminal default"; return whether it worked."""
 
     def init_pair(self, pair: int, fg: int, bg: int) -> None:
         ...
@@ -108,6 +114,19 @@ class RenderBackend(Protocol):
 
 
 class CursesBackend:
+    # Curses exposes COLORS/COLOR_PAIRS only after start_color(), so the values
+    # are captured there.  Before that, colours()/color_pairs() fall back to the
+    # module globals (valid once initscr() has run) and finally to a conservative
+    # default so a caller never sees a bogus zero-capability terminal merely
+    # because it constructed a second backend for an already-running curses
+    # session.
+    _FALLBACK_COLOR_PAIRS = 64  # the ncurses floor for a colour terminal
+
+    def __init__(self) -> None:
+        self._colors = 0
+        self._color_pairs = 0
+        self._default_colors = False
+
     def start(self, timeout_ms: int) -> Surface:
         scr = curses.initscr()
         curses.set_escdelay(25)  # Reduce ESC key delay from 1000ms to 25ms
@@ -140,11 +159,55 @@ class CursesBackend:
         except curses.error:  # curses not initialised yet
             return False
 
-    def start_color(self) -> None:
-        curses.start_color()
+    def colors(self) -> int:
+        if self._colors > 0:
+            return self._colors
+        try:
+            return max(int(getattr(curses, 'COLORS', 0)), 0)
+        except (AttributeError, curses.error, TypeError, ValueError):
+            return 0
 
-    def use_default_colors(self) -> None:
-        curses.use_default_colors()
+    def color_pairs(self) -> int:
+        if self._color_pairs > 0:
+            return self._color_pairs
+        try:
+            pairs = max(int(getattr(curses, 'COLOR_PAIRS', 0)), 0)
+        except (AttributeError, curses.error, TypeError, ValueError):
+            pairs = 0
+        if pairs > 0:
+            return pairs
+        # A colour-capable terminal always has at least the ncurses minimum;
+        # reporting 0 here would make a theme install silently do nothing.
+        return self._FALLBACK_COLOR_PAIRS if self.colors() > 0 else 0
+
+    def start_color(self) -> None:
+        try:
+            curses.start_color()
+        except curses.error:
+            # No colour support after all: degrade to monochrome instead of
+            # letting the caller crash during startup.
+            self._colors = 0
+            self._color_pairs = 0
+            return
+        try:
+            self._colors = max(int(getattr(curses, 'COLORS', 0)), 0)
+        except (AttributeError, curses.error, TypeError, ValueError):
+            self._colors = 0
+        try:
+            self._color_pairs = max(int(getattr(curses, 'COLOR_PAIRS', 0)), 0)
+        except (AttributeError, curses.error, TypeError, ValueError):
+            self._color_pairs = 0
+
+    def use_default_colors(self) -> bool:
+        try:
+            curses.use_default_colors()
+        except curses.error:
+            # Some terminals reject -1; the theme resolver then substitutes
+            # concrete defaults rather than passing -1 to init_pair().
+            self._default_colors = False
+        else:
+            self._default_colors = True
+        return self._default_colors
 
     def init_pair(self, pair: int, fg: int, bg: int) -> None:
         curses.init_pair(pair, fg, bg)
@@ -216,13 +279,27 @@ class _NoopSurface:
 
 
 class HeadlessBackend:
-    def __init__(self, rows: int = 24, cols: int = 80, colors: bool = False) -> None:
+    def __init__(self, rows: int = 24, cols: int = 80,
+                 colors: bool | int = False,
+                 color_pairs: int | None = None,
+                 default_colors: bool = True) -> None:
         self.rows = rows
         self.cols = cols
         self.screen = _NoopSurface(rows, cols)
         self.pads: list[_NoopSurface] = []
         self.stopped = False
-        self._colors = colors
+        # ``colors`` used to be a bare bool.  It still accepts one (True means a
+        # 256-colour terminal, False means none) but now also accepts the exact
+        # count, so the low-colour degradation paths are unit-testable without a
+        # real terminal.
+        if isinstance(colors, bool):
+            self._colors = 256 if colors else 0
+        else:
+            self._colors = max(int(colors), 0)
+        if color_pairs is None:
+            color_pairs = 64 if 0 < self._colors <= 16 else 256
+        self._color_pairs = max(int(color_pairs), 0)
+        self._default_colors = bool(default_colors)
         # Process-global curses calls the window used to make directly are
         # recorded here instead, so the dialog/render paths are backend-driven
         # and observable headlessly.
@@ -264,13 +341,20 @@ class HeadlessBackend:
         self.screen.queue_keys(*keys)
 
     def has_colors(self) -> bool:
+        return self._colors > 0
+
+    def colors(self) -> int:
         return self._colors
+
+    def color_pairs(self) -> int:
+        return self._color_pairs
 
     def start_color(self) -> None:
         self.start_color_calls += 1
 
-    def use_default_colors(self) -> None:
+    def use_default_colors(self) -> bool:
         self.use_default_colors_calls += 1
+        return self._default_colors
 
     def init_pair(self, pair: int, fg: int, bg: int) -> None:
         self.init_pair_calls.append((pair, fg, bg))
