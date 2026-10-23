@@ -6,6 +6,19 @@ This project follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- `suspend_curses()`/`resume_curses()` on `ConsoleWindow`: leave curses mode
+  with `endwin()` while keeping the window (pads, content model, pick state)
+  alive, then reattach a screen and repaint.  This is the supported way for an
+  app to shell out to a command or an editor and come back.  The pads survive
+  because `endwin()` restores the terminal without destroying the curses
+  SCREEN; `resume_curses()` refreshes the screen handle, backend, dimensions,
+  pad backgrounds and redraw bookkeeping.
+- Singleton-mode compatibility for the pre-2.0 start/stop pair:
+  `stop_curses()` now *suspends* the shared screen and `start_curses()`
+  resumes it, so `stop_curses(); ...; start_curses()` works again (this is what
+  efibootdude's write/reboot paths needed).  `ConsoleWindow.stop_all()` remains
+  the permanent teardown and is the atexit hook; per-instance windows keep
+  `stop_curses()` as a one-way teardown and use suspend/resume explicitly.
 - Per-window themes. `ConsoleWindow.theme` records the theme a window is on,
   `ConsoleWindowOpts(theme=...)` seeds it, and `ConsoleWindow.set_theme()`
   switches it: colours are reinstalled through the window's own backend (curses

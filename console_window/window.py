@@ -74,6 +74,14 @@ _PASSTHROUGH_EDITING_KEYS = frozenset({
 _WINDOWS: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
 _WINDOW_IDS = itertools.count()
 
+# Windows that have left curses mode (endwin) but are still resumable.  A
+# strong reference is deliberate: the live registry is weak, and a suspended
+# window must survive until resume_curses()/start_curses() reattaches it.  The
+# screen itself is not kept here: in singleton mode the screen's owner stays
+# reachable through ``static_win``/``_static_backend`` (``static_scr`` is None
+# while suspended), and a per-instance window keeps its own backend handle.
+_SUSPENDED: list[ConsoleWindow] = []
+
 # None until the first ConsoleWindow is constructed.  The value is process-wide
 # and deliberately never reset: ConsoleWindow(singleton=...) must agree on every
 # construction or the assertion in __init__ fires.
@@ -136,6 +144,14 @@ class _StopCurses:
     ``ConsoleWindow.stop_curses()``; the per-instance model needs the bound
     window.  A descriptor distinguishes the two call shapes, which a plain
     method with ``self=None`` cannot do without lying to type checkers.
+
+    Semantics depend on the window model:
+
+    * singleton (the pre-2.0 model): ``stop_curses()`` *suspends* the shared
+      screen and ``start_curses()`` resumes it, which keeps the historical
+      stop/start pair working.  Use ``stop_all()`` for a permanent teardown.
+    * per-instance: ``stop_curses()`` is a permanent teardown; use
+      ``suspend_curses()``/``resume_curses()`` to pause and continue.
     """
 
     def __get__(self, obj: ConsoleWindow | None,
@@ -261,6 +277,11 @@ class ConsoleWindow:
         # drawing API is described by CursesSurface, which is only a cast target
         # (curses.window and HeadlessBackend's no-op surface both satisfy it at
         # runtime).  This keeps addstr/border/insstr/... type-checked.
+        if self.singleton and _SUSPENDED:
+            # A suspended shared screen must be resumed before another window
+            # can join it; otherwise the new window would draw into a terminal
+            # that is still in shell mode.
+            ConsoleWindow._resume_singleton()
         if self.singleton and ConsoleWindow.static_scr is not None:
             # Singleton mode: every instance draws through the process screen
             # and the backend that owns it, even if a different backend was
@@ -345,6 +366,10 @@ class ConsoleWindow:
         # created but unreachable (the view snapped back to the last pickable
         # row every frame).
         self.free_scroll = False
+        # True between suspend_curses() and resume_curses()/start_curses(): the
+        # terminal was handed back (endwin) but the pads and content model stay
+        # valid, so the window can be reattached to a screen later.
+        self.suspended = False
         self.rows, self.cols = 0, 0
         self.body_cols, self.body_rows = self.opts.body_cols, self.opts.body_rows
         self.scroll_view_size = 0  # no. viewable lines of the body
@@ -559,10 +584,76 @@ class ConsoleWindow:
     def _start_curses(self) -> CursesSurface:
         return self._init_screen(self._backend, self.theme)
 
+    def _attach_screen(self, scr: CursesSurface, backend: RenderBackend) -> None:
+        """Point this window at a (re)started screen and force a full repaint.
+
+        Used by resume_curses()/start_curses() after a suspend.  The content
+        model and pads survive ``endwin()``; only the screen handle, the
+        backend that owns it, the dimensions, the pad backgrounds and the
+        redraw bookkeeping have to be refreshed.
+        """
+        self._backend = backend
+        self.scr = scr
+        self.suspended = False
+        _register_window(self)
+        self.calc()  # dimensions + pad reallocation through the new backend
+        self._set_scr_timeout(self._scr_timeout_ms)
+        for ns in (self.head, self.body):
+            self._apply_pad_theme(cast(CursesSurface, ns.pad))
+        self._mark_pads_for_redraw()
+        self._pick_clear_pending = True
+
+    def suspend_curses(self) -> None:
+        """Leave curses mode without destroying this window.
+
+        ``endwin()`` restores the terminal but keeps the curses SCREEN (and
+        therefore the pads) alive, so the next :meth:`resume_curses` can
+        reattach a screen and the next ``render()`` repaints.  In singleton
+        mode all windows share one screen, so this suspends them together.
+        Use :meth:`stop_curses` when the window is finished for good.
+        """
+        if getattr(self, 'singleton', False):
+            ConsoleWindow._suspend_singleton()
+            return
+        scr = getattr(self, 'scr', None)
+        if scr is None or self.suspended:
+            return
+        try:
+            backend = getattr(self, '_backend', None) or CursesBackend()
+            backend.stop(scr)
+        finally:
+            self.scr = cast(CursesSurface, None)
+            self.suspended = True
+            _unregister_window(self)
+            signals.teardown_ctrl_c()
+
+    def resume_curses(self) -> CursesSurface | None:
+        """Re-enter curses after :meth:`suspend_curses`.
+
+        Returns the (new) screen, or None when the window was not suspended.
+        The next ``render()`` repaints from the preserved content model.
+        """
+        if getattr(self, 'singleton', False):
+            return ConsoleWindow._resume_singleton()
+        if not self.suspended:
+            return self.scr
+        backend = getattr(self, '_backend', None) or CursesBackend()
+        scr = self._init_screen(backend, self.theme)
+        self._attach_screen(scr, backend)
+        return scr
+
     @classmethod
     def start_curses(cls, backend: RenderBackend | None = None) -> CursesSurface:
         # Legacy class-level entry point: in singleton mode it shares the one
-        # process screen rather than starting a second terminal session.
+        # process screen rather than starting a second terminal session.  When
+        # windows were suspended by stop_curses()/suspend_curses(), this is the
+        # matching resume: every suspended window is reattached to the screen
+        # (the backend argument is ignored then -- the screen belongs to the
+        # backend that created it).
+        if _SINGLETON_MODE and _SUSPENDED:
+            scr = cls._resume_singleton()
+            if scr is not None:
+                return scr
         if _SINGLETON_MODE and cls.static_scr is not None:
             return cls.static_scr
         screen_backend = backend if backend is not None else CursesBackend()
@@ -571,6 +662,45 @@ class ConsoleWindow:
         if _SINGLETON_MODE:
             cls.static_scr = scr
             cls._static_backend = screen_backend
+        return scr
+
+    @classmethod
+    def _suspend_singleton(cls) -> None:
+        """Leave the shared screen, keeping every window resumable."""
+        scr = cls.static_scr
+        if scr is None:
+            return
+        backend = cls._static_backend or CursesBackend()
+        windows = list(_WINDOWS.values())
+        try:
+            backend.stop(scr)
+        finally:
+            cls.static_scr = None
+            for win in windows:
+                win.scr = cast(CursesSurface, None)
+                win.suspended = True
+                _unregister_window(win)
+                signals.teardown_ctrl_c()
+                if win not in _SUSPENDED:
+                    _SUSPENDED.append(win)
+            # static_win is deliberately kept: it is the anchor that
+            # start_curses()/resume_curses() uses to restore the theme and is
+            # replaced by the next singleton window construction.
+
+    @classmethod
+    def _resume_singleton(cls) -> CursesSurface | None:
+        """Re-enter the shared screen and reattach every suspended window."""
+        if not _SUSPENDED:
+            return cls.static_scr
+        backend = cls._static_backend or CursesBackend()
+        anchor = cls.static_win
+        scr = cls._init_screen(backend, anchor.theme if anchor is not None else None)
+        cls.static_scr = scr
+        cls._static_backend = backend
+        windows = list(_SUSPENDED)
+        del _SUSPENDED[:]
+        for win in windows:
+            win._attach_screen(scr, backend)  # pylint: disable=protected-access
         return scr
 
     @staticmethod
@@ -634,25 +764,31 @@ class ConsoleWindow:
             self._pick_clear_pending = True
 
     def _stop_instance(self) -> None:
-        """Stop this window (and, in singleton mode, the shared screen)."""
+        """Stop this window (and, in singleton mode, suspend the shared screen)."""
         if getattr(self, 'singleton', False):
-            self._stop_singleton()
+            # Backward compatibility: in singleton mode the legacy
+            # stop_curses()/start_curses() pair is a suspend/resume pair, so
+            # stop_curses() leaves the screen resumable.  stop_all() is the
+            # permanent teardown.
+            ConsoleWindow._suspend_singleton()
             return
 
         scr = getattr(self, 'scr', None)
         if scr is None:
+            self.suspended = False
             return
         try:
             backend = getattr(self, '_backend', None) or CursesBackend()
             backend.stop(scr)
         finally:
             self.scr = cast(CursesSurface, None)
+            self.suspended = False
             _unregister_window(self)
             signals.teardown_ctrl_c()
 
     @classmethod
     def _stop_legacy(cls) -> None:
-        """The pre-2.0 ``ConsoleWindow.stop_curses()`` call."""
+        """The pre-2.0 ``ConsoleWindow.stop_curses()`` call (suspends in singleton mode)."""
         assert _SINGLETON_MODE is not False, (
             'ConsoleWindow.stop_curses() without an instance is only valid '
             'in singleton mode; use win.stop_curses() or ConsoleWindow.stop_all()')
@@ -662,24 +798,31 @@ class ConsoleWindow:
 
     @classmethod
     def _stop_singleton(cls) -> None:
-        """Tear down the shared screen and mark every window stopped."""
+        """Tear down the shared screen and forget every window (including suspended)."""
         scr = ConsoleWindow.static_scr
-        if scr is None:
-            return
-        backend = ConsoleWindow._static_backend or CursesBackend()
         windows = list(_WINDOWS.values())
+        suspended = list(_SUSPENDED)
+        del _SUSPENDED[:]
         ConsoleWindow.static_scr = None
         ConsoleWindow.static_win = None
+        backend = ConsoleWindow._static_backend
         ConsoleWindow._static_backend = None
-        for win in windows:
+        for win in windows + suspended:
             win.scr = cast(CursesSurface, None)
+            win.suspended = False
+        if scr is None:
+            # Already in shell mode (all windows suspended); nothing to end,
+            # but the suspended windows still have to be forgotten.
+            for win in windows + suspended:
+                _unregister_window(win)
+            return
         try:
-            backend.stop(scr)
+            (backend or CursesBackend()).stop(scr)
         finally:
             # One teardown per window, matching the per-window setup in
             # _init_screen: the SIGINT handler is only restored once the last
             # live window is gone (AUDIT.md §3.1).
-            for win in windows:
+            for win in windows + suspended:
                 _unregister_window(win)
                 signals.teardown_ctrl_c()
 
@@ -704,6 +847,10 @@ class ConsoleWindow:
 
     @classmethod
     def stop_all(cls) -> None:
+        """Permanently tear down every window (the atexit hook)."""
+        if _SINGLETON_MODE:
+            cls._stop_singleton()
+            return
         for win in cls.active_windows():
             win.stop_curses()
 

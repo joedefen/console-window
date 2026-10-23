@@ -259,7 +259,7 @@ def test_theme_broadcast_reaches_all_windows():
         second.stop_curses()
 
 
-def test_singleton_mode_shares_the_process_screen_and_tears_down_globally():
+def test_singleton_mode_shares_the_process_screen():
     # Singleton mode is process-wide, so prove it in a fresh interpreter rather
     # than perturb the per-instance mode this test session has latched.
     code = '''
@@ -276,13 +276,83 @@ assert ConsoleWindow.static_scr is first.scr
 assert second.scr is first.scr
 assert ConsoleWindow.static_win is second
 assert ConsoleWindow.primary_window() is second
-ConsoleWindow.stop_curses()   # the pre-2.0 unbound call
+ConsoleWindow.stop_all()   # permanent teardown
 assert first.scr is None and second.scr is None
 assert ConsoleWindow.static_scr is None and ConsoleWindow.static_win is None
 assert first_backend.stopped is True
 assert ConsoleWindow.active_windows() == []
 '''
     subprocess.run([sys.executable, '-c', code], check=True)
+
+
+def test_singleton_stop_curses_suspends_and_start_curses_resumes():
+    # The pre-2.0 stop_curses()/start_curses() pair must keep working: in
+    # singleton mode it is a suspend/resume pair, not a one-way teardown.
+    code = '''
+from console_window.backend import HeadlessBackend
+from console_window.opts import ConsoleWindowOpts
+from console_window.window import ConsoleWindow
+
+first_backend = HeadlessBackend()
+first = ConsoleWindow(opts=ConsoleWindowOpts(body_rows=3, head_rows=2),
+                      backend=first_backend, singleton=True)
+second = ConsoleWindow(opts=ConsoleWindowOpts(body_rows=3, head_rows=2),
+                       backend=HeadlessBackend())
+first.add_body('kept across the suspend')
+old_screen = first.scr
+
+ConsoleWindow.stop_curses()   # the pre-2.0 unbound call: suspend
+assert first_backend.stopped is True
+assert first.scr is None and second.scr is None
+assert first.suspended and second.suspended
+assert ConsoleWindow.static_scr is None
+assert ConsoleWindow.active_windows() == []
+# static_win is kept as the resume anchor.
+assert ConsoleWindow.static_win is second
+
+scr = ConsoleWindow.start_curses()   # matching resume
+assert scr is not None
+assert ConsoleWindow.static_scr is scr
+assert first.scr is scr and second.scr is scr
+assert not first.suspended and not second.suspended
+assert first_backend.stopped is False
+assert ConsoleWindow.active_windows() == [first, second]
+# The content model and pads survived endwin().
+assert first.body.texts == ['kept across the suspend']
+assert first.body.pad is not None
+
+ConsoleWindow.stop_all()   # permanent teardown
+assert first.scr is None and second.scr is None
+assert ConsoleWindow.static_scr is None and ConsoleWindow.static_win is None
+assert ConsoleWindow.active_windows() == []
+'''
+    subprocess.run([sys.executable, '-c', code], check=True)
+
+
+def test_per_instance_suspend_and_resume_curses():
+    backend = HeadlessBackend()
+    win = _make(backend)
+    try:
+        win.add_body('kept across the suspend')
+        win.suspend_curses()
+        assert win.suspended is True
+        assert win.scr is None
+        assert backend.stopped is True
+        assert win not in ConsoleWindow.active_windows()
+
+        scr = win.resume_curses()
+        assert scr is not None
+        assert win.scr is scr
+        assert win.suspended is False
+        assert backend.stopped is False
+        assert win in ConsoleWindow.active_windows()
+        assert win.body.texts == ['kept across the suspend']
+        # A second resume is a no-op that returns the live screen.
+        assert win.resume_curses() is scr
+    finally:
+        win.stop_curses()
+    assert win.scr is None
+    assert win not in ConsoleWindow.active_windows()
 
 
 def test_mixing_singleton_modes_asserts():

@@ -176,14 +176,35 @@ as `False`, so an options object need not pre-seed every action.
 
 * **`singleton=True` (default)** — the historical process-wide model. Every
   window draws through one shared screen, `ConsoleWindow.static_scr` and
-  `ConsoleWindow.static_win` are populated, and the unbound
-  `ConsoleWindow.stop_curses()` tears that screen down. Calling
-  `win.stop_curses()` on any singleton window does the same. A second window
-  reuses the first window's screen and backend.
+  `ConsoleWindow.static_win` are populated, and a second window reuses the
+  first window's screen and backend. `stop_curses()` here *suspends* the shared
+  screen and `start_curses()` resumes it (the pre-2.0 pair, kept working);
+  `ConsoleWindow.stop_all()` is the permanent teardown and the `atexit` hook.
 * **`singleton=False`** — per-instance windows. Each window owns its screen,
-  pads and teardown; `win.stop_curses()` stops only that window,
+  pads and teardown; `win.stop_curses()` stops only that window for good,
   `ConsoleWindow.stop_all()` stops every live window, and the unbound
   `ConsoleWindow.stop_curses()` is an error.
+
+### Pausing to run another program
+
+To shell out (an editor, a package manager, `efibootmgr`, a confirmation
+prompt) and then come back, suspend instead of stopping:
+
+```python
+win.suspend_curses()          # endwin(): the terminal is yours again
+try:
+    ... prints, input(), subprocess.run(...) ...
+finally:
+    win.resume_curses()       # reattaches a screen; the next render() repaints
+```
+
+`endwin()` restores the terminal without destroying the curses SCREEN, so the
+pads, the content model and the pick state all survive; resume refreshes the
+screen handle, backend, dimensions, pad backgrounds and redraw bookkeeping.
+In singleton mode `suspend_curses()` suspends every window that shares the
+screen, and `resume_curses()` reattaches all of them. The legacy pair works the
+same way there: `ConsoleWindow.stop_curses(); ...; ConsoleWindow.start_curses()`.
+Only `stop_all()` is a permanent teardown.
 
 The first successful construction latches the mode for the whole process.
 Mixing the two values raises `AssertionError` rather than silently changing what

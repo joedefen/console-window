@@ -313,6 +313,9 @@ class HeadlessBackend:
 
     def start(self, timeout_ms: int) -> Surface:
         self.screen.timeout(timeout_ms)
+        # A backend that has been (re)started is live again; resume paths rely
+        # on this, so a suspend/resume cycle does not leave ``stopped`` latched.
+        self.stopped = False
         return self.screen
 
     def newpad(self, rows: int, cols: int) -> Surface:
