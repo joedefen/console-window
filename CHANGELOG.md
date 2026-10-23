@@ -240,6 +240,9 @@ This project follows [Semantic Versioning](https://semver.org/).
   and that both init paths agree (AUDIT.md §3.9).
 
 ### Removed
+- `SampleApp.do_key()`, a dead method with no caller: `main_loop` dispatches
+  through `handle_key()`, which already forwards spinner keys to
+  `spin.do_key()`. No behaviour changed (AUDIT.md §3.1).
 - `console_window/_selftest.py`, the TTY-only dev self-test. The old
   `python -m console_window._selftest` entry point is gone; the features it
   demonstrated — multi-row picking, a prompt-style option, forced
