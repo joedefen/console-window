@@ -207,6 +207,48 @@ def test_add_fancy_header_headerline_preserves_explicit_roles():
         win.stop_curses()
 
 
+def test_add_fancy_header_line_attr_dims_every_run():
+    # line_attr is OR'd into each span's own style, so a dimmed legend keeps
+    # its underlined keys and its explicitly styled search field.
+    win = _make_window()
+    try:
+        win.add_fancy_header('[v]iew /pat', mode='Underline',
+                             search_pattern_attr=curses.A_BOLD,
+                             line_attr=curses.A_DIM)
+        assert win.head.texts[0] == 'view /pat'
+        attrs = [attr for attr, _count in win.head.text_attrs[0]]
+        assert all(attr & curses.A_DIM for attr in attrs)
+        assert KEY_ATTR | curses.A_DIM in attrs
+        assert curses.A_BOLD | curses.A_DIM in attrs
+    finally:
+        win.stop_curses()
+
+
+def test_add_fancy_header_line_attr_applies_in_off_mode():
+    # mode='Off' emits the raw string, but the whole-line attribute still
+    # applies (otherwise a caller could not dim it at all).
+    win = _make_window()
+    try:
+        win.add_fancy_header('[v]iew', mode='Off', line_attr=curses.A_DIM)
+        assert win.head.texts[0] == '[v]iew'
+        assert all(attr & curses.A_DIM
+                   for attr, _count in win.head.text_attrs[0])
+    finally:
+        win.stop_curses()
+
+
+def test_add_header_line_line_attr_dims_plain_spans():
+    win = _make_window()
+    try:
+        win.add_header_line(HeaderLine().text('plain').label('T'),
+                            mode='Underline', line_attr=curses.A_DIM)
+        attrs = [attr for attr, _count in win.head.text_attrs[0]]
+        assert curses.A_DIM in attrs             # the PLAIN run
+        assert curses.A_BOLD | curses.A_DIM in attrs  # the LABEL run
+    finally:
+        win.stop_curses()
+
+
 def test_string_reparse_drops_keys_the_legacy_grammar_cannot_spell():
     # str(line) is pure text, so the legacy scanner's two KEY rules ('[x]' and
     # 'UPPERCASE:') are all that survive a round trip.  'l:' and '?:' match
@@ -253,3 +295,15 @@ def test_token_and_string_paths_converge_for_legacy_spelled_keys():
 
 def test_resolve_header_attr_off_is_plain(role):
     assert ConsoleWindow._resolve_header_attr(role, 'Off', None) is None
+
+
+def test_resolve_header_attr_line_attr_combines_with_roles():
+    assert (ConsoleWindow._resolve_header_attr(
+                PLAIN, 'Underline', None, curses.A_DIM)
+            == curses.A_DIM)
+    assert (ConsoleWindow._resolve_header_attr(
+                KEY, 'Underline', None, curses.A_DIM)
+            == KEY_ATTR | curses.A_DIM)
+    assert (ConsoleWindow._resolve_header_attr(
+                SEARCH, 'Underline', curses.A_BOLD, curses.A_DIM)
+            == curses.A_BOLD | curses.A_DIM)

@@ -103,7 +103,9 @@ demonstrates:
   sizes.
 * **`flash()`** — transient, non-destructive status messages.
 * **Token-based headers** — `HeaderLine` (`text`, `bracket_key`, `key`, `extend`)
-  rendered with `add_header_line()`, rather than string markup.
+  rendered with `add_header_line()`, rather than string markup. Both header
+  helpers accept `line_attr`, an attribute OR'd into every span, so a whole
+  header can be dimmed (`curses.A_DIM`) without losing its per-span styling.
 * **`Ctrl-C` as an application key** — `ctrl_c_terminates=False` and
   `keys={0x3, ord('q')}` on the quit action. This works only while no live
   window in the process has requested terminating Ctrl-C: once any window uses

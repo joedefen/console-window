@@ -985,7 +985,8 @@ class ConsoleWindow:
         self._add(self.body, text, attr, resume, context, is_body=True)
 
     def add_fancy_header(self, line: str | HeaderLine, mode: str = 'Underline',
-                         search_pattern_attr: int | None = None) -> None:
+                         search_pattern_attr: int | None = None,
+                         line_attr: int | None = None) -> None:
         """Add a header line with legacy ``[x]``/``KEY:``/``/pattern`` markup.
 
         String input is parsed unless ``mode='Off'``.  A :class:`HeaderLine`
@@ -993,44 +994,67 @@ class ConsoleWindow:
         treated as markup too: in every mode except ``'Off'`` they are removed,
         while the enclosed key keeps its ``KEY`` styling.  Use
         :meth:`add_header_line` when literal brackets are wanted.
+
+        *line_attr* is OR'd into the attribute of every span (and into the raw
+        line emitted for ``mode='Off'``), so a caller can, for example, dim a
+        whole header with ``line_attr=curses.A_DIM`` while keeping each span's
+        own bold/underline/reverse styling.
         """
         if isinstance(line, str):
             if mode == 'Off':
-                # Legacy: no markup processing, add the raw line unchanged.
-                self.add_header(line)
+                # Legacy: no markup processing, add the raw line unchanged
+                # (except for the caller's whole-line attribute).
+                self.add_header(line, attr=line_attr)
                 return
             spans = parse_fancy_header(line)
         else:
             spans = list(line)
             if mode != 'Off':
                 spans = strip_key_brackets(spans)
-        self._emit_header_spans(spans, mode, search_pattern_attr)
+        self._emit_header_spans(spans, mode, search_pattern_attr, line_attr)
 
     def add_header_line(self, header_line: HeaderLine | Iterable[Span],
                         mode: str = 'Underline',
-                        search_pattern_attr: int | None = None) -> None:
-        self._emit_header_spans(list(header_line), mode, search_pattern_attr)
+                        search_pattern_attr: int | None = None,
+                        line_attr: int | None = None) -> None:
+        """Render explicit header spans; see :meth:`add_fancy_header`.
+
+        *line_attr* is OR'd into every span's resolved attribute, including
+        plain spans, so the whole line can carry an extra style such as
+        ``curses.A_DIM``.
+        """
+        self._emit_header_spans(list(header_line), mode, search_pattern_attr,
+                                line_attr)
 
     @staticmethod
     def _resolve_header_attr(role: str, mode: str,
-                             search_pattern_attr: int | None) -> int | None:
+                             search_pattern_attr: int | None,
+                             line_attr: int | None = None) -> int | None:
         if mode == 'Off' or role == PLAIN:
-            return None
-        if role == LABEL:
-            return curses.A_BOLD
-        if role == SEARCH:
+            attr = None
+        elif role == LABEL:
+            attr = curses.A_BOLD
+        elif role == SEARCH:
             if search_pattern_attr is not None:
-                return search_pattern_attr
-            return curses.A_BOLD | curses.A_REVERSE
+                attr = search_pattern_attr
+            else:
+                attr = curses.A_BOLD | curses.A_REVERSE
         # KEY (and any unknown role) follows the mode's key styling.
-        if mode == 'Underline':
-            return curses.A_UNDERLINE | curses.A_BOLD
-        return curses.A_REVERSE
+        elif mode == 'Underline':
+            attr = curses.A_UNDERLINE | curses.A_BOLD
+        else:
+            attr = curses.A_REVERSE
+        if line_attr is not None:
+            attr = (attr or 0) | line_attr
+        return attr
 
     def _emit_header_spans(self, spans: Iterable[Span], mode: str,
-                           search_pattern_attr: int | None = None) -> None:
+                           search_pattern_attr: int | None = None,
+                           line_attr: int | None = None) -> None:
         result_sections = [
-            (span.text, self._resolve_header_attr(span.role, mode, search_pattern_attr))
+            (span.text,
+             self._resolve_header_attr(span.role, mode, search_pattern_attr,
+                                       line_attr))
             for span in spans
         ]
 

@@ -6,6 +6,10 @@ This project follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- `line_attr` on `add_fancy_header()`/`add_header_line()`: an attribute OR'd
+  into every span of the header (including plain spans and the raw line emitted
+  for `mode='Off'`), so a caller can dim a whole fancy header while keeping the
+  per-span bold/underline/reverse styling.
 - `suspend_curses()`/`resume_curses()` on `ConsoleWindow`: leave curses mode
   with `endwin()` while keeping the window (pads, content model, pick state)
   alive, then reattach a screen and repaint.  This is the supported way for an
