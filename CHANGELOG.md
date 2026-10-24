@@ -135,6 +135,16 @@ This project follows [Semantic Versioning](https://semver.org/).
   No in-repo code used it.
 
 ### Fixed
+- `win._start_curses()` once again *reattaches* the window.  The 1.4.x
+  compatibility hook is still called in the wild (psistat's "dump event log"
+  path uses `self.window._start_curses()` to return from shell mode), but the
+  2.0 implementation only created and returned a screen, leaving `win.scr` as
+  `None`; the next `clear()`/`render()` then raised
+  `AttributeError: 'NoneType' object has no attribute 'clear'`.  It now resumes
+  a suspended window through `resume_curses()` (singleton mode reattaches every
+  window sharing the screen), so the pads and the content model survive, and
+  `clear()` while suspended resets the content model without dereferencing the
+  missing screen.
 - Starting a window on a terminal with fewer than 256 colours (including tmux's
   stock `TERM=screen`, whose terminfo entry has 8 colours) no longer crashes with
   `ValueError: Color number is greater than COLORS-1`. Theme installation now

@@ -291,7 +291,7 @@ class ConsoleWindow:
             self._backend = ConsoleWindow._static_backend or self._backend
             self.scr = ConsoleWindow.static_scr
         else:
-            self.scr = self._start_curses()
+            self.scr = self._new_screen()
             if self.singleton:
                 ConsoleWindow.static_scr = self.scr
                 ConsoleWindow._static_backend = self._backend
@@ -581,8 +581,41 @@ class ConsoleWindow:
 
         return True
 
-    def _start_curses(self) -> CursesSurface:
+    def _new_screen(self) -> CursesSurface:
+        """Create and initialise a brand-new screen for this window."""
         return self._init_screen(self._backend, self.theme)
+
+    def _start_curses(self) -> CursesSurface:
+        """Re-enter curses for this window and return the live screen.
+
+        Pre-2.0 exposed ``_start_curses()`` as the "come back after
+        ``stop_curses()``" call, and applications (psistat among them) kept
+        calling it on the instance.  It therefore has to *reattach* the
+        window, not merely create a screen: the old implementation returned a
+        fresh screen without storing it, so ``self.scr`` stayed ``None`` and
+        the first ``clear()``/``render()`` after returning from shell mode
+        raised ``AttributeError: 'NoneType' object has no attribute 'clear'``.
+
+        A suspended window resumes through :meth:`resume_curses` (in singleton
+        mode that reattaches every window sharing the screen), so the pads and
+        the content model survive.  ``start_curses()`` remains the class-level
+        entry point for both models.
+        """
+        if self.suspended:
+            scr = self.resume_curses()
+            if scr is not None:
+                return scr
+        if self.scr is not None:
+            return self.scr
+        # Not suspended but screen-less: restart a screen and attach this
+        # window to it.  Singleton mode owns a process-wide screen, so reuse the
+        # class-level starter; per-instance windows create their own.
+        scr = ConsoleWindow.start_curses() if self.singleton else self._new_screen()
+        if self.scr is None:  # start_curses() may have reattached it already
+            backend = (ConsoleWindow._static_backend if self.singleton else None) \
+                or self._backend
+            self._attach_screen(scr, backend)
+        return scr
 
     def _attach_screen(self, scr: CursesSurface, backend: RenderBackend) -> None:
         """Point this window at a (re)started screen and force a full repaint.
@@ -2149,7 +2182,12 @@ class ConsoleWindow:
         pad.refresh(scroll_top, 0, row0 + 1, col0 + 1, row0 + visible_rows, col9 - 1)
 
     def clear(self) -> None:
-        self.scr.clear()
+        # A suspended window has no screen handle until resume_curses()/
+        # start_curses(); the content model still has to be reset so the next
+        # repaint is complete.  Calling clear() while suspended used to raise
+        # AttributeError on self.scr.
+        if self.scr is not None:
+            self.scr.clear()
         # Viewport-sized pads: clearing costs one screenful, not one high-water
         # mark, and no shrink/grow decision is needed at a frame boundary.
         self.head.pad.clear()

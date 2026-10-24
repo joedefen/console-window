@@ -204,6 +204,9 @@ screen handle, backend, dimensions, pad backgrounds and redraw bookkeeping.
 In singleton mode `suspend_curses()` suspends every window that shares the
 screen, and `resume_curses()` reattaches all of them. The legacy pair works the
 same way there: `ConsoleWindow.stop_curses(); ...; ConsoleWindow.start_curses()`.
+The pre-2.0 instance hook `win._start_curses()` is also supported: it reattaches
+that window (resuming a suspended screen) and returns the live screen, so the
+old `win.stop_curses(); ...; win._start_curses()` sequence keeps working.
 Only `stop_all()` is a permanent teardown.
 
 The first successful construction latches the mode for the whole process.

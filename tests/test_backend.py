@@ -355,6 +355,84 @@ def test_per_instance_suspend_and_resume_curses():
     assert win not in ConsoleWindow.active_windows()
 
 
+def test_clear_while_suspended_only_resets_the_content_model():
+    # A suspended window has no screen, but clear() must still work: the next
+    # repaint after resume comes from the content model, not a stale screen.
+    backend = HeadlessBackend()
+    win = _make(backend)
+    try:
+        win.add_body('old row')
+        win.suspend_curses()
+        win.clear()  # regression: raised AttributeError on self.scr
+        assert win.body.texts == []
+        assert win.scr is None
+        win.add_body('new row')
+        scr = win._start_curses()
+        assert win.scr is scr
+        assert win.body.texts == ['new row']
+        win.clear()  # the live screen is cleared again
+        assert scr.calls_named('clear')
+    finally:
+        win.stop_curses()
+
+
+def test_legacy_instance_start_curses_reattaches_after_suspend():
+    # psistat's dump/return path calls self.window._start_curses() (the 1.4.x
+    # hook that was kept as a compatibility method).  It must leave the window
+    # usable, not create a screen and leave self.scr as None.
+    backend = HeadlessBackend()
+    win = _make(backend)
+    try:
+        win.add_body('kept across the dump')
+        win.suspend_curses()
+        assert win.scr is None and win.suspended
+
+        scr = win._start_curses()
+        assert scr is not None
+        assert win.scr is scr
+        assert win.suspended is False
+        assert win in ConsoleWindow.active_windows()
+        assert win.body.texts == ['kept across the dump']
+        win.clear()   # the call that crashed psistat after returning
+        assert scr.calls_named('clear')
+        win.add_body('after clear')
+    finally:
+        win.stop_curses()
+    assert win.scr is None
+
+
+def test_singleton_legacy_instance_start_curses_resumes_shared_screen():
+    # Same compatibility hook, but in the pre-2.0 singleton model, where
+    # stop_curses() suspends the shared screen rather than tearing it down.
+    code = '''
+from console_window.backend import HeadlessBackend
+from console_window.opts import ConsoleWindowOpts
+from console_window.window import ConsoleWindow
+
+backend = HeadlessBackend()
+win = ConsoleWindow(opts=ConsoleWindowOpts(body_rows=3, head_rows=2),
+                    backend=backend, singleton=True)
+win.add_body('kept across the dump')
+win.stop_curses()                 # pre-2.0 call: suspend
+assert win.scr is None and win.suspended
+
+scr = win._start_curses()         # psistat's "come back" call
+assert scr is not None
+assert win.scr is scr
+assert ConsoleWindow.static_scr is scr
+assert win.suspended is False
+assert win in ConsoleWindow.active_windows()
+assert win.body.texts == ['kept across the dump']
+win.clear()
+assert scr.calls_named('clear')
+win.add_body('after clear')
+
+ConsoleWindow.stop_all()          # permanent teardown
+assert win.scr is None and ConsoleWindow.static_scr is None
+'''
+    subprocess.run([sys.executable, '-c', code], check=True)
+
+
 def test_mixing_singleton_modes_asserts():
     code = '''
 from console_window.backend import HeadlessBackend
