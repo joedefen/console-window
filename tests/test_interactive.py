@@ -95,6 +95,49 @@ def test_prompt_passthrough_records_demo_indicator(make):
     assert win.last_demo_key == ' p '
 
 
+def test_prompt_passthrough_forwards_escape_without_handled_keys(make):
+    # The gap that forced every InlineConfirmation caller to discover
+    # handled_keys: ESC must reach a passthrough editor as a normal key.
+    win, backend = make()
+    win.passthrough_mode = True
+    backend.queue_keys(27)
+    assert win.prompt(seconds=0.5) == 27
+
+
+def test_prompt_passthrough_forwards_delete(make):
+    win, backend = make()
+    win.passthrough_mode = True
+    backend.queue_keys(curses.KEY_DC)
+    assert win.prompt(seconds=0.5) == curses.KEY_DC
+
+
+def test_temp_handled_keys_is_reversible(make):
+    win, backend = make(relax_handled_keys=False)
+    with win.temp_handled_keys(ord('x')) as scoped:
+        assert scoped is win
+        assert ord('x') in win.handled_keys
+        backend.queue_keys(ord('x'))
+        assert win.prompt(seconds=0.5) == ord('x')
+    assert ord('x') not in win.handled_keys
+
+
+def test_temp_handled_keys_preserves_preexisting_binding(make):
+    win, _backend = make(keys={ord('q')}, relax_handled_keys=False)
+    with win.temp_handled_keys(ord('q'), ord('x')):
+        assert ord('q') in win.handled_keys
+        assert ord('x') in win.handled_keys
+    assert ord('q') in win.handled_keys
+    assert ord('x') not in win.handled_keys
+
+
+def test_temp_handled_keys_restores_on_exception(make):
+    win, _backend = make()
+    with pytest.raises(RuntimeError):
+        with win.temp_handled_keys(27):
+            raise RuntimeError('boom')
+    assert 27 not in win.handled_keys
+
+
 # --- prompt(): Ctrl-C as an application key --------------------------------
 
 def test_prompt_returns_etx_when_ctrl_c_is_handled(monkeypatch, make):

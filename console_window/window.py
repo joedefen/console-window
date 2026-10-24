@@ -14,7 +14,8 @@ import sys
 import time
 import warnings
 import weakref
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from curses.textpad import rectangle
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Callable, ClassVar, cast
@@ -58,8 +59,13 @@ _CTRL_PAGE_UP, _CTRL_HALF_DOWN, _CTRL_PAGE_DOWN, _CTRL_HALF_UP = 2, 4, 6, 21
 
 # Editing keys that passthrough mode hands to the application unchanged, in
 # addition to printable characters, navigation keys and `handled_keys`.
+# ESC and DELETE are editing keys too: an in-place widget such as
+# InlineConfirmation must be able to cancel and rub out at the caret, and
+# callers should not have to discover `handled_keys` to make that work.
 _PASSTHROUGH_EDITING_KEYS = frozenset({
     curses.KEY_BACKSPACE, 127, 8, 263,  # backspace variants
+    curses.KEY_DC,                      # delete at the caret
+    27,                                 # ESC: cancel an in-place edit
     curses.KEY_LEFT, curses.KEY_RIGHT,
     curses.KEY_HOME, curses.KEY_END,
     1, 5,  # Ctrl-A, Ctrl-E
@@ -390,6 +396,30 @@ class ConsoleWindow:
             self.handled_keys = set(keys)
         else:
             self.handled_keys = set()
+
+    @contextmanager
+    def temp_handled_keys(self, *keys: int) -> Iterator[ConsoleWindow]:
+        """Temporarily add key codes to ``handled_keys``.
+
+        ``prompt()`` only returns a key that is in ``handled_keys`` (or one of
+        the built-in passthrough editing keys).  This context manager makes
+        that forwarding reversible by construction: only the keys it actually
+        added are removed on exit, so nested uses leave a pre-existing binding
+        intact.
+
+        Example: forwarding an application key for one inline edit::
+
+            win.passthrough_mode = True
+            with win.temp_handled_keys(27):
+                key = win.prompt(seconds=0.5)
+            win.passthrough_mode = False
+        """
+        added = {key for key in keys if key not in self.handled_keys}
+        self.handled_keys.update(added)
+        try:
+            yield self
+        finally:
+            self.handled_keys.difference_update(added)
 
     def set_demo_mode(self, enabled: bool | None) -> bool:
         if enabled is None: # toggle if not explicit

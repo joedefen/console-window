@@ -182,3 +182,106 @@ def test_searchbar_display_string_inactive():
 def test_searchbar_display_string_empty():
     bar = IncrementalSearchBar()
     assert bar.get_display_string() == ''
+
+
+# --- InlineConfirmation: caret and line editing ----------------------------
+
+def test_inline_start_seeds_buffer_and_caret():
+    c = InlineConfirmation()
+    c.start(mode='text', initial='hello')
+    assert c.input_buffer == 'hello'
+    assert c.cursor_pos == 5
+    c.handle_key(ord('!'))
+    assert c.input_buffer == 'hello!'
+    assert c.cursor_pos == 6
+    assert c.handle_key(10) == 'confirmed'
+
+
+def test_inline_cursor_movement_and_insertion():
+    c = InlineConfirmation()
+    c.start(mode='text', initial='abc')
+    c.handle_key(curses.KEY_LEFT)
+    c.handle_key(curses.KEY_LEFT)
+    c.handle_key(ord('X'))
+    assert c.input_buffer == 'aXbc'
+    assert c.cursor_pos == 2
+
+
+def test_inline_home_end_and_delete_at_caret():
+    c = InlineConfirmation()
+    c.start(mode='text', initial='abc')
+    c.handle_key(curses.KEY_HOME)
+    assert c.cursor_pos == 0
+    c.handle_key(curses.KEY_DC)
+    assert c.input_buffer == 'bc'
+    assert c.cursor_pos == 0
+    c.handle_key(curses.KEY_END)
+    assert c.cursor_pos == 2
+    c.handle_key(curses.KEY_DC)  # at end: no-op
+    assert c.input_buffer == 'bc'
+
+
+def test_inline_ctrl_a_and_ctrl_e_move_the_caret():
+    c = InlineConfirmation()
+    c.start(mode='text', initial='abc')
+    c.handle_key(1)
+    assert c.cursor_pos == 0
+    c.handle_key(5)
+    assert c.cursor_pos == 3
+
+
+def test_inline_backspace_deletes_before_the_caret():
+    c = InlineConfirmation()
+    c.start(mode='text', initial='abcd')
+    c.handle_key(curses.KEY_LEFT)  # caret before 'd'
+    c.handle_key(curses.KEY_BACKSPACE)
+    assert c.input_buffer == 'abd'
+    assert c.cursor_pos == 2
+
+
+def test_inline_input_buffer_assignment_keeps_caret_in_range():
+    c = InlineConfirmation()
+    c.start(mode='text', initial='abc')
+    c.input_buffer = 'z'
+    assert c.cursor_pos == 1
+
+
+def test_inline_display_string_has_prompt_and_caret():
+    c = InlineConfirmation()
+    c.start(mode='text', initial='abc')
+    c.handle_key(curses.KEY_LEFT)
+    assert c.get_display_string(prompt='> ', cursor_char='|') == '> ab|c'
+
+
+def test_inline_display_string_inactive_is_empty():
+    c = InlineConfirmation()
+    c.start(mode='text', initial='abc')
+    c.cancel()
+    assert c.get_display_string(prompt='> ') == ''
+
+
+def test_inline_display_string_single_key_mode_has_no_caret():
+    c = InlineConfirmation()
+    c.start(mode='y')
+    assert c.get_display_string(prompt='Process?') == 'Process?'
+
+
+def test_inline_wide_and_combining_caret_uses_cell_width():
+    c = InlineConfirmation()
+    c.start(mode='text', initial='a\u0301界')
+    assert c.cursor_pos == 3
+    assert c.cursor_cell == 3  # 'a' + combining mark = 1 cell, '界' = 2
+    c.handle_key(curses.KEY_LEFT)  # skip the whole wide character
+    assert c.cursor_cell == 1
+    c.handle_key(curses.KEY_LEFT)  # skip the base + combining mark
+    assert c.cursor_pos == 0
+
+
+def test_inline_display_split_never_splits_a_grapheme():
+    c = InlineConfirmation()
+    c.start(mode='text')
+    # Place the caret between the base character and its combining mark; the
+    # display split snaps forward so the glyph stays after the whole grapheme.
+    c._input_buffer = 'a\u0301'
+    c._cursor_pos = 1
+    assert c.get_display_string(cursor_char='|') == 'a\u0301|'

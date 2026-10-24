@@ -86,7 +86,8 @@ demonstrates:
 * **`IncrementalSearchBar`** — `/` filters the list as you type, using
   `passthrough_mode` to hand keys to the bar.
 * **`InlineConfirmation`** — `SPACE` asks you to confirm with `y` before
-  "processing" the picked row.
+  "processing" the picked row. The widget is also a curses-free line editor
+  (`initial=''`, caret movement, Delete, and `get_display_string()`).
 * **Themes** — a `THEMES` screen of colour samples backed by
   `Theme.list_all()` / `get_current()` / `set()`. The active theme is now
   per-window state: `ConsoleWindowOpts(theme=...)` seeds `window.theme`,
@@ -162,6 +163,33 @@ if __name__ == '__main__':
 For anything beyond a single list, subclass `Screen` and drive it with
 `ScreenStack` — that is what the sample app does, and it is the paradigm the
 library is designed around.
+
+### Inline editing and key forwarding
+
+`InlineConfirmation` is a curses-free line editor. `start(..., initial='x')`
+seeds the buffer with the caret at the end; `LEFT`/`RIGHT`, Home/End (and
+Ctrl-A/Ctrl-E), Backspace and Delete edit at the caret. The
+`get_display_string(prompt='…')` method returns the prompt plus the buffer and
+caret glyph, so wording and layout stay in the application, while `cursor_pos`
+(string index) and `cursor_cell` (terminal column, measured with `textwidth`)
+are available to callers that need them.
+
+Passthrough widgets receive printable ASCII, navigation keys, Backspace,
+Delete, Home/End, ESC and the keys in `handled_keys` while
+`passthrough_mode` is `True`. For any additional application key, use the
+reversible context manager rather than mutating `handled_keys` by hand:
+
+```python
+win.passthrough_mode = True
+try:
+    with win.temp_handled_keys(27):
+        key = win.prompt(seconds=0.5)
+finally:
+    win.passthrough_mode = False
+```
+
+Only keys the context actually added are removed on exit, so a pre-existing
+binding is left in place and nested uses are safe.
 
 `ScreenStack.perform_actions()` is the normal router: it walks the spinner
 options, honours their scopes, and calls the matching `<attr>_ACTION` method.

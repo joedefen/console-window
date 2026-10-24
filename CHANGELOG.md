@@ -65,8 +65,27 @@ This project follows [Semantic Versioning](https://semver.org/).
   without a TTY. Coverage of `window.py` rises from 55% to 84% (missing
   statements 444 → 161), so the half of the engine users actually feel is now
   smoke-tested in CI (AUDIT.md §3.2).
+- `InlineConfirmation` is now a real line editor, matching the
+  `IncrementalSearchBar` beside it: `start(..., initial='')` seeds the buffer
+  with the caret at the end, and `LEFT`/`RIGHT`/`HOME`/`END` (also Ctrl-A/
+  Ctrl-E), `KEY_DC` and Backspace edit at the caret instead of only appending.
+  `cursor_pos` exposes the string index, `cursor_cell` the terminal column
+  (measured with `textwidth`), and `get_display_string(prompt='',
+  cursor_char='│')` renders the prompt plus the caret for a body row.
+  Movement, insertion and deletion use the `textwidth` helpers so wide
+  characters and combining marks cannot split a grapheme.
+- `ConsoleWindow.temp_handled_keys(*keys)`: a context manager that adds keys to
+  `handled_keys` for one prompt and removes only the keys it actually added, so
+  an application key can be forwarded reversibly and nested uses leave existing
+  bindings intact.
 
 ### Changed
+- Passthrough mode now forwards ESC (`27`) and Delete (`curses.KEY_DC`) as
+  editing keys, in addition to printable characters, Backspace, the arrow keys
+  and Home/End. This closes the gap that forced every `InlineConfirmation`
+  caller to discover `win.handled_keys.add(27)` to receive the cancel key; the
+  resize-abort path already treated `27` as an application key when bound, so
+  the behaviour is consistent rather than a silent widening.
 - Every `pylint` warning now states why it is deliberate (AUDIT.md §3.3), taking
   `pylint --disable=C,R` from 9.94/10 to **10.00/10**. Protected-access and
   protocol-signature findings carry scoped disables with an adjacent reason,

@@ -303,17 +303,19 @@ class MainScreen(DemoScreen):
             ctx = Context(genre='item', item=item)
             app.win.add_body(line, attr=attr, context=ctx)
 
-            # Show inline confirmation if active for this item
+            # Show inline confirmation if active for this item.  The wording and
+            # the warning glyph stay here (product decisions); the widget owns
+            # the buffer/caret composition.
             if app.confirmation.active and \
                app.confirmation.identity == username:
-                msg = f'    ⚠️  Process {username}?'
+                prompt = f'    ⚠️  Process {username}?'
                 if app.confirmation.mode == 'y':
-                    msg += " - Press 'y' or ESC"
+                    prompt += " - Press 'y' or ESC"
                 elif app.confirmation.mode == 'Y':
-                    msg += " - Press 'Y' or ESC"
+                    prompt += " - Press 'Y' or ESC"
 
                 app.win.add_body(
-                    msg,
+                    app.confirmation.get_display_string(prompt=prompt),
                     attr=cs.color_pair(Theme.WARNING) | cs.A_BOLD,
                     context=Context(genre='DECOR')
                 )

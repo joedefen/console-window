@@ -4,6 +4,7 @@ import curses
 from typing import Callable, ClassVar
 
 from .header import HeaderLine
+from .textwidth import cell_to_index, char_width, string_width
 
 # Keys treated as backspace (all terminal variants).  Shared by both widgets so
 # the list cannot drift between them.
@@ -18,20 +19,23 @@ class InlineConfirmation:
         self.action_type: str | None = None  # e.g., 'wipe' or 'verify'
         self.identity: str | None = None     # e.g., 'sda1'
         self.choices: list[str] | None = None
-        self.input_buffer: str = ''
+        self._input_buffer: str = ''
+        self._cursor_pos: int = 0
         self.mode: str | None = None
         self.min_abbrev_chars: int | None = min_abbrev_chars
         self._calculated_min_abbrev: int | None = None  # Cached calculated value
 
     def start(self, action_type: str | None = None, identity: str | None = None,
               choices: str | list[str] | tuple[str, ...] | None = None,
-              mode: str | None = None, min_abbrev_chars: int | None = None) -> None:
+              mode: str | None = None, min_abbrev_chars: int | None = None,
+              initial: str = '') -> None:
         self.active = True
         self.action_type = action_type
         self.identity = identity
         self.choices = (list(choices) if isinstance(choices, (list, tuple))
                     else [choices] if isinstance(choices, str) else None)
-        self.input_buffer = ''
+        self._input_buffer = initial
+        self._cursor_pos = len(initial)
 
         # Override min_abbrev_chars if provided
         if min_abbrev_chars is not None:
@@ -52,7 +56,86 @@ class InlineConfirmation:
         self.active = False
         self.action_type = None
         self.choices = None
-        self.input_buffer = ''
+        self._input_buffer = ''
+        self._cursor_pos = 0
+
+    @property
+    def input_buffer(self) -> str:
+        return self._input_buffer
+
+    @input_buffer.setter
+    def input_buffer(self, value: str) -> None:
+        # Callers and older code seed the buffer by assignment; keeping the
+        # caret at the end means the next key appends where a reader expects.
+        self._input_buffer = value
+        self._cursor_pos = len(value)
+
+    @property
+    def cursor_pos(self) -> int:
+        return self._cursor_pos
+
+    @property
+    def cursor_cell(self) -> int:
+        """Caret column in terminal cells (wide chars occupy two)."""
+        pos = self._snap_index(self._cursor_pos)
+        return string_width(self._input_buffer[:pos])
+
+    def _snap_index(self, index: int) -> int:
+        # The caret is a string index, but a display-cell split must not land
+        # between a base character and its combining marks.  textwidth maps the
+        # index's cell back to a safe code-point boundary.
+        index = max(0, min(index, len(self._input_buffer)))
+        return cell_to_index(self._input_buffer,
+                             string_width(self._input_buffer[:index]))
+
+    def _move_cursor_left(self) -> None:
+        pos = self._snap_index(self._cursor_pos)
+        if pos <= 0:
+            self._cursor_pos = 0
+            return
+        pos -= 1
+        while pos > 0 and char_width(self._input_buffer[pos]) == 0:
+            pos -= 1
+        self._cursor_pos = pos
+
+    def _move_cursor_right(self) -> None:
+        pos = self._snap_index(self._cursor_pos)
+        end = len(self._input_buffer)
+        if pos >= end:
+            self._cursor_pos = end
+            return
+        pos += 1
+        while pos < end and char_width(self._input_buffer[pos]) == 0:
+            pos += 1
+        self._cursor_pos = pos
+
+    def _insert_text(self, text: str) -> None:
+        pos = self._snap_index(self._cursor_pos)
+        self._input_buffer = (self._input_buffer[:pos] + text
+                              + self._input_buffer[pos:])
+        self._cursor_pos = pos + len(text)
+
+    def _delete_backward(self) -> None:
+        end = self._snap_index(self._cursor_pos)
+        if end <= 0:
+            self._cursor_pos = 0
+            return
+        self._cursor_pos = end
+        self._move_cursor_left()
+        self._input_buffer = (self._input_buffer[:self._cursor_pos]
+                              + self._input_buffer[end:])
+
+    def _delete_forward(self) -> None:
+        start = self._snap_index(self._cursor_pos)
+        end = len(self._input_buffer)
+        if start >= end:
+            self._cursor_pos = start
+            return
+        pos = start + 1
+        while pos < end and char_width(self._input_buffer[pos]) == 0:
+            pos += 1
+        self._input_buffer = self._input_buffer[:start] + self._input_buffer[pos:]
+        self._cursor_pos = start
 
     def _calculate_min_abbrev_chars(self) -> int:
         choices = self.choices
@@ -136,9 +219,19 @@ class InlineConfirmation:
 
         # Handle buffered input
         if 32 <= key <= 126:
-            self.input_buffer += chr(key)
+            self._insert_text(chr(key))
         elif key in _BACKSPACE_KEYS:  # Backspace (all variants)
-            self.input_buffer = self.input_buffer[:-1]
+            self._delete_backward()
+        elif key == curses.KEY_DC:
+            self._delete_forward()
+        elif key == curses.KEY_LEFT:
+            self._move_cursor_left()
+        elif key == curses.KEY_RIGHT:
+            self._move_cursor_right()
+        elif key in (curses.KEY_HOME, 1):  # Home / Ctrl-A
+            self._cursor_pos = 0
+        elif key in (curses.KEY_END, 5):  # End / Ctrl-E
+            self._cursor_pos = len(self._input_buffer)
         elif key in (10, 13):  # Enter
             return self._handle_enter()
 
@@ -175,6 +268,24 @@ class InlineConfirmation:
             return 'YES' if self.input_buffer == 'YES' else None
         # 'yes' or other permissive modes
         return self.input_buffer if self.input_buffer.lower() == 'yes' else None
+
+    def get_display_string(self, prompt: str = '', cursor_char: str = '│') -> str:
+        """Return the prompt and editable buffer with a caret glyph.
+
+        The caret index is split on a textwidth cell boundary, so a pasted
+        wide character or combining mark cannot put the glyph mid-grapheme.
+        Single-key modes (``Y``/``y``) have no editable text and return the
+        prompt unchanged; an inactive widget returns ``''`` so a caller can
+        decide when the row should disappear.
+        """
+        if not self.active:
+            return ''
+        if self.mode in ('Y', 'y'):
+            return prompt
+        pos = self._snap_index(self._cursor_pos)
+        before = self._input_buffer[:pos]
+        after = self._input_buffer[pos:]
+        return f'{prompt}{before}{cursor_char}{after}'
 
     #: Hints whose text does not depend on runtime state.
     _STATIC_HINTS: ClassVar[dict[str, str]] = {
