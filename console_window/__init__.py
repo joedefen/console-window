@@ -1,6 +1,6 @@
 # Single source of truth for the package version: pyproject.toml declares
 # ``dynamic = ["version"]``, so flit reads this value instead of duplicating it.
-__version__ = "2.0.1"
+__version__ = "2.0.2"
 
 from .context import Context
 from .header import HeaderLine, Span

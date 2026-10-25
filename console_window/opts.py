@@ -2,15 +2,62 @@ from __future__ import annotations
 
 import curses
 import difflib
+import logging
+from collections.abc import Iterable, Mapping
 from typing import Any, Callable
+
+from .keys import NAVIGATION_KEYS, VERTICAL_NAV_KEYS
+
+logger = logging.getLogger(__name__)
+
+
+def _normalize_taken_nav_keys(raw: object) -> dict[int, str]:
+    """Normalize ``taken_nav_keys`` to ``{key_code: app_label}``.
+
+    A mapping gives the help screen an app-facing label per key; a bare
+    iterable of key codes is accepted too and normalizes to an empty label.
+    Non-integer entries are rejected (they cannot be dispatched), and duplicate
+    entries collapse to one binding (the last label wins).  Keys that are not in
+    ``NAVIGATION_KEYS`` are kept but warned about: they subtract nothing, so
+    silently accepting them would hide a typo.
+    """
+    if raw is None:
+        return {}
+    if isinstance(raw, Mapping):
+        items: Iterable[tuple[object, object]] = raw.items()
+    elif isinstance(raw, Iterable) and not isinstance(raw, (str, bytes)):
+        items = ((key, '') for key in raw)
+    else:
+        raise TypeError(
+            'taken_nav_keys must be a mapping of {key_code: label} or an '
+            f'iterable of key codes, got {type(raw).__name__}'
+        )
+
+    normalized: dict[int, str] = {}
+    for key, label in items:
+        # bool is an int subclass; a True/False key code is always a mistake.
+        if isinstance(key, bool) or not isinstance(key, int):
+            raise ValueError(
+                f'taken_nav_keys entries must be integer key codes, got {key!r}'
+            )
+        normalized[key] = '' if label is None else str(label)
+
+    unknown = sorted(set(normalized) - NAVIGATION_KEYS)
+    if unknown:
+        logger.warning(
+            'taken_nav_keys: %s not a navigation key; these entries have no effect',
+            ', '.join(str(key) for key in unknown),
+        )
+    return normalized
 
 
 class ConsoleWindowOpts:
     __slots__ = ['answer_show_redraws', 'body_cols', 'body_rows', 'ctrl_c_terminates',
                  'demo_mode', 'dialog_abort', 'dialog_return', 'head_line', 'head_rows',
-                 'keys', 'max_rows', 'min_cols_rows', 'mod_pick', 'pick_attr', 'pick_mode',
-                 'pick_range', 'pick_size', 'relax_handled_keys', 'return_if_pos_change',
-                 'single_cell_scroll_indicator', 'strip_attrs_in_pick_mode', 'theme']
+                 'keys', 'max_rows', 'min_cols_rows', 'mod_pick', 'nav_keys', 'pick_attr',
+                 'pick_mode', 'pick_range', 'pick_size', 'relax_handled_keys',
+                 'return_if_pos_change', 'single_cell_scroll_indicator',
+                 'strip_attrs_in_pick_mode', 'taken_nav_keys', 'theme']
 
     # Explicit attribute types: assignments below come from **kwargs, so without
     # these every option would be typed as ``object`` and every read would need a
@@ -29,6 +76,11 @@ class ConsoleWindowOpts:
     keys: set | list | None
     min_cols_rows: tuple[int, int]
     mod_pick: Callable[[str], str] | None
+    # Effective navigation set for this window: ``NAVIGATION_KEYS`` minus the
+    # keys the application took.  Computed, never passed in.
+    nav_keys: frozenset[int]
+    # App-owned navigation keys: {key_code: label shown on the help screen}.
+    taken_nav_keys: dict[int, str]
     pick_attr: int
     pick_mode: bool
     pick_range: list[int] | None
@@ -59,6 +111,21 @@ class ConsoleWindowOpts:
         self.max_rows = kwargs.get('max_rows', 32767)
         self.body_cols = kwargs.get('body_cols', 200)
         self.keys = kwargs.get('keys')
+        if 'nav_keys' in kwargs:
+            raise TypeError(
+                'ConsoleWindowOpts() computes nav_keys from taken_nav_keys; '
+                'pass taken_nav_keys={key: label} instead of nav_keys.'
+            )
+        self.taken_nav_keys = _normalize_taken_nav_keys(kwargs.get('taken_nav_keys'))
+        self.nav_keys = frozenset(NAVIGATION_KEYS - set(self.taken_nav_keys))
+        if self.taken_nav_keys and not (self.nav_keys & VERTICAL_NAV_KEYS):
+            # Explicit user choice, not an error: the app has taken over
+            # scrolling.  Still worth a diagnostic, because "the arrow keys do
+            # nothing" is otherwise indistinguishable from a bug.
+            logger.warning(
+                'taken_nav_keys removes every vertical navigation key; this '
+                'window has reduced (custom) navigation'
+            )
         self.pick_mode = kwargs.get('pick_mode', False)
         self.pick_size = kwargs.get('pick_size', 1)
         self.mod_pick = kwargs.get('mod_pick')

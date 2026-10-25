@@ -3,6 +3,53 @@
 All notable changes to `console-window` are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [2.0.2]
+
+### Added
+- `ConsoleWindowOpts(taken_nav_keys=...)`: hand specific navigation keys to the
+  application on a per-window basis. The value is a mapping of
+  `{key_code: help_label}` (a bare iterable of key codes is also accepted and
+  normalizes to empty labels), so the help screen can show what the app bound
+  them to (`←: prev`). The normalized mapping is available as
+  `opts.taken_nav_keys`, and the effective set as `opts.nav_keys` (a
+  `frozenset` of `NAVIGATION_KEYS` minus the taken keys).
+- `OptionSpinner(nav_keys=...)`: the spinner validates `add_key()` against the
+  supplied set instead of the module global, so
+  `OptionSpinner(nav_keys=opts.nav_keys)` accepts a key the window took.
+- `ConsoleWindow.nav_help_lines()`: renders navigation help for the window's
+  effective key set and appends a separate `App:` line for taken keys with
+  their labels. `OptionSpinner.show_help_nav_keys(win)` now uses it.
+
+### Changed
+- Navigation help is generated from the structured `NAV_HELP_ROWS` table, so a
+  key the app took disappears from the rendered help instead of being
+  advertised and doing nothing. `NAV_KEY_LINES`, `get_nav_key_lines()` and
+  `get_nav_keys_blurb()` remain the static default output, and the default
+  rendering is unchanged.
+- `_navigation_target()` refuses a taken key before consulting its movement
+  table. Subtracting from `NAVIGATION_KEYS` alone was not enough: UP/DOWN,
+  page and HOME/END movements are dispatched by that hardcoded table, so a
+  taken key would still have scrolled.
+- Demo-mode highlighting and passthrough classification treat taken keys as
+  application keys, and `_handle_prompt_app_key()` no longer treats them as
+  navigation.
+- `NAVIGATION_KEYS` is still a `set` for 2.0 compatibility, but the library no
+  longer mutates it. Applications should pass `taken_nav_keys` (and can delete
+  their `NAVIGATION_KEYS.remove(...)` monkeypatches); two windows with
+  different bindings no longer contaminate each other.
+
+### Notes
+- A taken key is withdrawn from *navigation dispatch* only. Text editing
+  (`_DIALOG_SIMPLE_MOVES`, widget carets, dialogs) still uses
+  LEFT/RIGHT/HOME/END normally.
+- Return behaviour follows the existing `handled_keys`/`relax_handled_keys`
+  rules: a taken key bound through the spinner is returned; with
+  `relax_handled_keys=False` and no binding it may still be swallowed.
+- Invalid entries (non-integer key codes) raise `ValueError`; duplicate codes
+  collapse to one binding. Codes that are not navigation keys are kept but
+  logged as having no effect, and taking every vertical key logs a
+  "reduced navigation" warning instead of failing.
+
 ## [Unreleased]
 
 ### Added
@@ -446,4 +493,5 @@ fully backward compatible (`from console_window import ...` and
 - `Development Status` classifier aligned with the release; version bumped to
   `2.0.1`.
 
+[2.0.2]: https://github.com/joedefen/console-window
 [2.0.1]: https://github.com/joedefen/console-window

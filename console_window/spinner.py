@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import curses
+from collections.abc import Iterable
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
@@ -12,9 +13,18 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 
 class OptionSpinner:
-    def __init__(self, stack: ScreenStack | None = None) -> None:
+    def __init__(self, stack: ScreenStack | None = None,
+                 nav_keys: Iterable[int] | None = None) -> None:
         self.options: list[SimpleNamespace] = []
         self.keys: set[int] = set()
+        # The navigation set this spinner validates against.  Pass the owning
+        # window's ``opts.nav_keys`` when the window takes navigation keys for
+        # the app; otherwise the process default applies.  Keeping this
+        # per-spinner (rather than reading/mutating the module global) lets two
+        # windows with different bindings coexist.
+        self.nav_keys: frozenset[int] = frozenset(
+            NAVIGATION_KEYS if nav_keys is None else nav_keys
+        )
         self.margin = 4 # + actual width (1st column right pos)
         self.align = self.margin # + actual width (1st column right pos)
         self._default_obj: object = SimpleNamespace() # if not given one (private)
@@ -125,7 +135,7 @@ class OptionSpinner:
         return chr(key) if 32 <= key < 127 else f'<{key}>'
 
     def _reject_navigation_key(self, key: int) -> None:
-        if key in NAVIGATION_KEYS:
+        if key in self.nav_keys:
             raise ValueError(
                 f'Key {self._key_label(key)} ({key}) conflicts with a navigation key. '
                 f'Navigation keys are reserved for cursor movement and scrolling.'
@@ -253,9 +263,9 @@ class OptionSpinner:
 
     @staticmethod
     def show_help_nav_keys(win: ConsoleWindow) -> None:
-        # Late import to avoid a circular import at module load time.
-        from .window import ConsoleWindow
-        for line in ConsoleWindow.get_nav_key_lines():
+        # Render from the live window so its own opts.taken_nav_keys are
+        # honoured: keys the app owns are not advertised as navigation.
+        for line in win.nav_help_lines():
             win.add_header(line)
 
     def show_help_body(self, win: ConsoleWindow, screen_filter: int | list | set | None = None) -> None:

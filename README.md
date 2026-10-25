@@ -191,6 +191,36 @@ finally:
 Only keys the context actually added are removed on exit, so a pre-existing
 binding is left in place and nested uses are safe.
 
+### Taking navigation keys for the application
+
+Navigation keys are reserved by default, but an app may take specific ones for
+itself without monkeypatching the module global. Declare them on the window's
+options; the mapping value is the label the help screen shows:
+
+```python
+import curses
+from console_window import ConsoleWindowOpts, OptionSpinner
+
+opts = ConsoleWindowOpts(
+    taken_nav_keys={
+        curses.KEY_LEFT: 'prev page',
+        curses.KEY_RIGHT: 'next page',
+    },
+)
+win = ConsoleWindow(opts=opts)
+spin = OptionSpinner(stack=stack, nav_keys=opts.nav_keys)  # accept them in add_key()
+spin.add_key('prev', '← - previous', genre='action', keys=[curses.KEY_LEFT])
+```
+
+A taken key is withdrawn from navigation dispatch for that window only: it no
+longer scrolls, it is no longer advertised as navigation, and it takes the
+normal `handled_keys`/`relax_handled_keys` path on return. Text editing is
+unchanged — dialogs and widgets still use LEFT/RIGHT/HOME/END for the caret.
+Because ownership lives in `ConsoleWindowOpts`, two windows in one process can
+have different bindings; `NAVIGATION_KEYS` itself is never mutated. Taking every
+vertical key is allowed (and logged as "reduced navigation"), since the
+application is then responsible for its own scrolling.
+
 `ScreenStack.perform_actions()` is the normal router: it walks the spinner
 options, honours their scopes, and calls the matching `<attr>_ACTION` method.
 For apps that dispatch an action themselves, `ScreenStack.act_in(action,

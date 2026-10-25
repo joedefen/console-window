@@ -40,22 +40,115 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 logger = logging.getLogger(__name__)
 
-# Navigation help is stored as complete lines, not a dedented triple-quoted
-# string: editing the indentation can no longer change what the help screen
-# renders.  ``ConsoleWindow.nav_keys`` remains the joined string for callers
-# that want the whole blurb at once.
-NAV_KEY_LINES: tuple[str, ...] = (
-    'Navigation:      H/M/L:      top/middle/end-of-page',
-    '  k, UP:  up one row             0, HOME:  first row',
-    'j, DOWN:  down one row           $, END:  last row',
-    '  Ctrl-u:  half-page up     Ctrl-b, PPAGE:  page up',
-    '  Ctrl-d:  half-page down     Ctrl-f, NPAGE:  page down',
-)
-
 # Control keys that drive the same movements as the page keys.  They live here
-# rather than inside `prompt()` so the navigation map and the help text above
+# rather than inside `prompt()` so the navigation map and the help text below
 # cannot drift apart silently.
 _CTRL_PAGE_UP, _CTRL_HALF_DOWN, _CTRL_PAGE_DOWN, _CTRL_HALF_UP = 2, 4, 6, 21
+
+# Display labels for the keys that can appear in the navigation help.  Arrow
+# keys are listed too even though the default rows do not use them: an app that
+# takes LEFT/RIGHT gets `←`/`→` on the "App:" line without supplying a label.
+NAV_KEY_LABELS: dict[int, str] = {
+    curses.KEY_UP: 'UP',
+    curses.KEY_DOWN: 'DOWN',
+    curses.KEY_LEFT: '←',
+    curses.KEY_RIGHT: '→',
+    curses.KEY_HOME: 'HOME',
+    curses.KEY_END: 'END',
+    curses.KEY_PPAGE: 'PPAGE',
+    curses.KEY_NPAGE: 'NPAGE',
+    ord('j'): 'j',
+    ord('k'): 'k',
+    ord('0'): '0',
+    ord('$'): '$',
+    ord('H'): 'H',
+    ord('M'): 'M',
+    ord('L'): 'L',
+    _CTRL_HALF_UP: 'Ctrl-u',
+    _CTRL_HALF_DOWN: 'Ctrl-d',
+    _CTRL_PAGE_UP: 'Ctrl-b',
+    _CTRL_PAGE_DOWN: 'Ctrl-f',
+}
+
+# Structured navigation help: (key codes, description).  The rendered lines are
+# generated from this table and the window's effective key set, so a key the
+# application took disappears from the help instead of being advertised and
+# doing nothing.  Keep this table in step with `_navigation_target()`; the two
+# are the single sources of truth for "what scrolls" and "what we say scrolls".
+NAV_HELP_ROWS: tuple[tuple[tuple[int, ...], str], ...] = (
+    ((ord('k'), curses.KEY_UP), 'up one row'),
+    ((ord('j'), curses.KEY_DOWN), 'down one row'),
+    ((ord('0'), curses.KEY_HOME), 'first row'),
+    ((ord('$'), curses.KEY_END), 'last row'),
+    ((_CTRL_HALF_UP,), 'half-page up'),
+    ((_CTRL_HALF_DOWN,), 'half-page down'),
+    ((_CTRL_PAGE_UP, curses.KEY_PPAGE), 'page up'),
+    ((_CTRL_PAGE_DOWN, curses.KEY_NPAGE), 'page down'),
+    ((ord('H'), ord('M'), ord('L')), 'top/middle/end-of-page'),
+)
+
+_NAV_HELP_COLUMN = 38
+_NAV_HELP_PREFIX = 'Navigation:  '
+_NAV_APP_PREFIX = 'App:         '
+
+
+def _nav_key_label(key: int) -> str:
+    label = NAV_KEY_LABELS.get(key)
+    if label is not None:
+        return label
+    return chr(key) if 32 <= key < 127 else f'<{key}>'
+
+
+def _pair_nav_entries(entries: list[str], prefix: str) -> list[str]:
+    """Render two entries per line under a fixed-width prefix."""
+    lines = []
+    pad = ' ' * len(prefix)
+    for index in range(0, len(entries), 2):
+        left = entries[index]
+        right = entries[index + 1] if index + 1 < len(entries) else ''
+        head = prefix if index == 0 else pad
+        lines.append(f'{head}{left:<{_NAV_HELP_COLUMN}}{right}'.rstrip())
+    return lines
+
+
+def render_nav_help(effective: Iterable[int],
+                    taken: dict[int, str] | None = None) -> tuple[str, ...]:
+    """Render the navigation help for one window's effective key set.
+
+    ``effective`` is the set of key codes still dispatched as navigation;
+    ``taken`` maps the app-owned keys to the label the app wants shown.  The
+    default (no taken keys) output is the public ``NAV_KEY_LINES`` text.
+    """
+    effective = frozenset(effective)
+    entries = []
+    for keys, label in NAV_HELP_ROWS:
+        shown = [_nav_key_label(key) for key in keys if key in effective]
+        if shown:
+            entries.append(f'{", ".join(shown)}: {label}')
+
+    if entries:
+        lines = _pair_nav_entries(entries, _NAV_HELP_PREFIX)
+    else:
+        lines = [
+            _NAV_HELP_PREFIX
+            + '(no navigation keys: all are bound by the application)'
+        ]
+
+    app_entries = []
+    for key, label in (taken or {}).items():
+        name = _nav_key_label(key)
+        app_entries.append(f'{name}: {label}' if label else name)
+    if app_entries:
+        lines.extend(_pair_nav_entries(app_entries, _NAV_APP_PREFIX))
+    return tuple(lines)
+
+
+# Navigation help for the default key set.  Stored as complete lines, not a
+# dedented triple-quoted string: editing the indentation can no longer change
+# what the help screen renders.  ``ConsoleWindow.nav_keys`` remains the joined
+# string for callers that want the whole blurb at once; live windows render
+# through ``nav_help_lines()`` so their own ``taken_nav_keys`` are honoured.
+NAV_KEY_LINES: tuple[str, ...] = render_nav_help(NAVIGATION_KEYS)
 
 # Editing keys that passthrough mode hands to the application unchanged, in
 # addition to printable characters, navigation keys and `handled_keys`.
@@ -576,6 +669,10 @@ class ConsoleWindow:
     @staticmethod
     def get_nav_key_lines() -> tuple[str, ...]:
         return NAV_KEY_LINES
+
+    def nav_help_lines(self) -> tuple[str, ...]:
+        """Navigation help for *this* window's effective key set."""
+        return render_nav_help(self.opts.nav_keys, self.opts.taken_nav_keys)
 
     def _set_screen_dims(self) -> bool:
         rows, cols = self.scr.getmaxyx()
@@ -2304,7 +2401,9 @@ class ConsoleWindow:
         return None
 
     def _record_demo_key(self, key: int) -> None:
-        if self.opts.demo_mode and key not in NAVIGATION_KEYS:
+        # Taken navigation keys are app-owned, so demo mode highlights them
+        # just like any other application key.
+        if self.opts.demo_mode and key not in self.opts.nav_keys:
             self.last_demo_key = self._format_key_for_demo(key)
 
     def _clear_demo_indicator(self) -> None:
@@ -2313,7 +2412,8 @@ class ConsoleWindow:
 
     def _is_passthrough_key(self, key: int) -> bool:
         return (32 <= key <= 126 or key in _PASSTHROUGH_EDITING_KEYS
-                or key in NAVIGATION_KEYS or key in self.handled_keys)
+                or key in NAVIGATION_KEYS or key in self.opts.taken_nav_keys
+                or key in self.handled_keys)
 
     def _passthrough_result(self, key: int) -> int | None:
         if not self.passthrough_mode or not self._is_passthrough_key(key):
@@ -2334,12 +2434,18 @@ class ConsoleWindow:
         if key in self.handled_keys and not self.relax_handled_keys:
             self._record_demo_key(key)
             return True, key  # return for handling
-        if key in NAVIGATION_KEYS:
+        if key in self.opts.nav_keys:
             self._clear_demo_indicator()
         return False, None
 
     def _navigation_target(self, key: int) -> int | None:
         """Map a navigation key to the row it asks for, or None if it is not one."""
+        # A key the application took is withdrawn from navigation dispatch.
+        # This guard must come before the moves table: removing the key from
+        # NAVIGATION_KEYS alone would still let UP/DOWN/page keys scroll,
+        # because the table is what actually dispatches.
+        if key in self.opts.taken_nav_keys:
+            return None
         pos = self.pick_pos if self.pick_mode else self.scroll_pos
         delta = self.pick_size if self.pick_mode else 1
         half = self.scroll_view_size // 2
