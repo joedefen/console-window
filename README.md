@@ -85,9 +85,11 @@ demonstrates:
   skipped by navigation.
 * **`IncrementalSearchBar`** — `/` filters the list as you type, using
   `passthrough_mode` to hand keys to the bar.
-* **`InlineConfirmation`** — `SPACE` asks you to confirm with `y` before
-  "processing" the picked row. The widget is also a curses-free line editor
-  (`initial=''`, caret movement, Delete, and `get_display_string()`).
+* **In-place prompts** — `SPACE` asks you to confirm with `y` before
+  "processing" the picked row through `begin_prompt()` /
+  `handle_prompt_key()`, and `N` edits a note in the header band with the
+  buffered text mode. Both use `PromptLine` underneath; completion callbacks
+  run after passthrough is restored, so they can report with `status()`.
 * **Themes** — a `THEMES` screen of colour samples backed by
   `Theme.list_all()` / `get_current()` / `set()`. The active theme is now
   per-window state: `ConsoleWindowOpts(theme=...)` seeds `window.theme`,
@@ -102,7 +104,13 @@ demonstrates:
   `answer()` returns `None` only when the user aborts; if the terminal cannot
   fit the dialog it raises `TerminalTooSmallError` with the required and actual
   sizes.
-* **`flash()`** — transient, non-destructive status messages.
+* **`status()` and `flash()`** — `status()` is a non-modal one-line message on
+  the separator row; `flash()` is a modal box that clears the screen. The demo
+  uses `status()` for "Processed", "Cancelled" and note-saved feedback.
+* **`BasicTextScreen`** — the HISTORY screen is rebuilt each draw from a
+  `BasicTextScreen` via `set_text()` (headers plus `(text, attr)` lines), and
+  resolves its window at draw time because the screens are constructed before
+  the `ConsoleWindow`.
 * **Token-based headers** — `HeaderLine` (`text`, `bracket_key`, `key`, `extend`)
   rendered with `add_header_line()`, rather than string markup. Both header
   helpers accept `line_attr`, an attribute OR'd into every span, so a whole
@@ -190,6 +198,90 @@ finally:
 
 Only keys the context actually added are removed on exit, so a pre-existing
 binding is left in place and nested uses are safe.
+
+### Transient status on the separator row
+
+`status()` declares a one-line message that is painted on the separator row —
+the row that also owns the scroll indicator — so the listing stays visible.
+Unlike `flash()`, which clears the whole screen, `status()` never takes over
+the display:
+
+```python
+win.status('Backup tag failed', level='error', timeout=5.0)
+```
+
+The message appears on the next `render()`/`prompt()`; `status()` never renders
+by itself. Levels `'info'`, `'warn'` and `'error'` select an attribute from
+`ConsoleWindow.STATUS_LEVELS` (`info` dim, `warn` bold, `error` bold+reverse);
+an unknown level falls back to `'info'` instead of raising, and `attr=` overrides
+the level for that message only. `timeout=None` keeps the message until it is
+replaced or cleared; any number expires it lazily at draw time. `status('')` and
+`clear_status()` remove it, and `current_status` returns `(text, attr)`.
+
+The exact rendering rule is: the text starts at column 0 of `head.view_cnt` and
+is truncated to leave **one blank cell between it and the scroll indicator**.
+If the window currently has no separator row, the text is still stored and
+`status()` returns `False` (the message is deferred, not lost); a later resize
+reveals it.
+
+### In-place prompts
+
+`PromptLine` is the window-independent state machine: text, an editable buffer,
+an optional hint and completion callbacks. It never runs the callbacks itself;
+`take()` returns `(answer, on_confirm, on_cancel)` after cancelling the widget.
+The window wraps it with a lifecycle that keeps key routing and passthrough
+consistent:
+
+```python
+win.begin_prompt('Overwrite the tag?', mode='y',
+                 on_confirm=lambda answer: apply(answer))
+while win.prompt_active:
+    key = win.prompt(seconds=0.5)
+    if win.handle_prompt_key(key) == 'continue':
+        continue          # swallow every key while a prompt is live
+    break
+win.render()
+```
+
+While `prompt_active` is true, route **every** key through
+`handle_prompt_key()` and swallow a `'continue'` result, so no action key can
+fire underneath a live prompt. `begin_prompt()` turns `passthrough_mode` on and
+`end_prompt()` restores its previous value; completion callbacks run *after*
+the prompt is gone and passthrough is restored, so a callback may safely begin
+the next prompt (the "re-edit, then ENTER or ESC" re-ask path).
+
+The display formats are fixed so applications do not have to reproduce them:
+
+* single-key modes `Y`/`y`: `f'{prompt}  [Press "{mode}" or ESC]'`, e.g.
+  `Really quit?  [Press "y" or ESC]`;
+* every other mode: `f'{prompt}: {buffer}{caret}{rest}'`, e.g. `Value: 5│`.
+
+`get_hint_string(width)` returns the hint (truncated when a width is given), and
+`get_choice_lines()` returns one row per choice, marking the currently resolved
+one: `⮞ alpha` versus `  beta`. Drawing is the application's choice:
+`add_prompt_header()` puts a screen-wide question in the header band, while
+`add_prompt_lines()` appends a bold prompt row and a dim hint row as
+`Context(genre='TRANSIENT', pickable=False)` from the application's own row
+loop. The window never learns which item the prompt belongs to.
+
+### Read-only text screens
+
+`BasicTextScreen` is the small `Screen` for preformatted, scrollable text. It
+resolves `app.win` at draw time, disables pick mode, adds each header before the
+body, and adds each line with `add_body()` and no `Context` (so normal
+navigation scrolls it). Content is normalised by `set_text()`, which is safe
+before or after the first draw:
+
+```python
+screen = BasicTextScreen(app, head='COMPARE',
+                         lines=[('first difference', curses.A_BOLD),
+                                'second difference'])
+screen.set_text(lines=['replacement'])
+```
+
+`lines` items are `str` or `(str, attr)`; `head` may be a `str`, a
+`HeaderLine`, or an iterable of either. There is no pick mode, no action
+handler and no spinner: ESC/back remains the application's `escape_ACTION`.
 
 ### Taking navigation keys for the application
 

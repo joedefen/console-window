@@ -18,10 +18,11 @@ from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from curses.textpad import rectangle
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Callable, ClassVar, cast
+from typing import Callable, ClassVar, cast
 
 from . import geometry, signals, textwidth
 from .backend import CursesBackend, CursesSurface, RenderBackend
+from .context import Context
 from .header import (
     LABEL,
     PLAIN,
@@ -34,9 +35,7 @@ from .header import (
 from .keys import NAVIGATION_KEYS
 from .opts import ConsoleWindowOpts
 from .theme import Theme
-
-if TYPE_CHECKING:  # pragma: no cover - typing only
-    from .context import Context
+from .widgets import PromptLine
 
 logger = logging.getLogger(__name__)
 
@@ -266,6 +265,21 @@ class _StopCurses:
 
 
 class ConsoleWindow:
+    """A curses pad-based pager with an independent pick/scroll model.
+
+    In-place prompts
+    ----------------
+    While :attr:`prompt_active` is true, the application must route *every*
+    key through :meth:`handle_prompt_key` and swallow a ``'continue'`` result.
+    Doing so guarantees that no action key fires underneath a live prompt.
+    Completion callbacks run after the prompt is gone and passthrough mode has
+    been restored, so a callback may safely call :meth:`begin_prompt` again
+    (that is how a "re-edit, then ENTER or ESC" flow re-asks).  The application
+    decides where prompt rows are drawn: :meth:`add_prompt_header` for
+    screen-wide questions, :meth:`add_prompt_lines` from its own row loop for
+    item-scoped ones.  The window never learns which row that is.
+    """
+
     stop_curses = _StopCurses()
     timeout_ms: int = 2000
     # Set by _register_window(); None once stop_curses() unregisters the window.
@@ -280,6 +294,13 @@ class ConsoleWindow:
     render_retry_seconds: float = 2.0
     # Seconds to wait between retries; class-level for the same reason.
     render_retry_interval: float = 0.16
+    #: Level -> attribute for :meth:`status`.  A class attribute so a theme or
+    #: application can patch it without subclassing the window.
+    STATUS_LEVELS: ClassVar[dict[str, int]] = {
+        'info': curses.A_DIM,
+        'warn': curses.A_BOLD,
+        'error': curses.A_BOLD | curses.A_REVERSE,
+    }
     # flash() repaints the underlying screen from the pads when it finishes, so
     # callers no longer have to re-render afterwards. Set False to make flash()
     # purely additive (e.g. when the caller is about to redraw anyway).
@@ -477,6 +498,16 @@ class ConsoleWindow:
         self.last_demo_key = ''  # Last key pressed in demo mode
         self.max_header_len = 0  # Max visible header length from previous render
         self.passthrough_mode = False  # When True, all printable keys pass through
+        # In-place prompt widget and the passthrough value to restore when it
+        # ends, so a callback can start the next prompt (see begin_prompt()).
+        self.prompt_line = PromptLine()
+        self._prompt_prev_passthrough = False
+        # Transient status shown on the separator row (see status()).  Kept on
+        # the window rather than a pad because the row belongs to the screen,
+        # not to either pad (render_once() paints it directly on self.scr).
+        self._status_text = ''
+        self._status_attr: int | None = None
+        self._status_deadline: float | None = None
         self.relax_handled_keys = self.opts.relax_handled_keys  # When True, pass non-nav keys without checking handled_keys
         self._set_screen_dims()
         self.calc()  # also creates the viewport-sized pads
@@ -1111,6 +1142,86 @@ class ConsoleWindow:
                  context: Context | None = None) -> None:
         self._add(self.body, text, attr, resume, context, is_body=True)
 
+    # --- in-place prompt lifecycle -----------------------------------------
+
+    @property
+    def prompt_active(self) -> bool:
+        """True while :meth:`begin_prompt` is live."""
+        return self.prompt_line.active
+
+    def begin_prompt(self, prompt: str, *, hint: str = '', mode: str = 'y',
+                     identity: str | None = None, seed: str = '',
+                     choices=None, on_confirm=None,
+                     on_cancel=None) -> bool:
+        """Start an in-place prompt and enable passthrough key routing.
+
+        The window *is* the receiver, so there is no window-existence branch
+        here; an application whose window may be ``None`` guards at its own
+        call site.  Every key must then go through :meth:`handle_prompt_key`
+        and a ``'continue'`` result must be swallowed.
+        """
+        self.prompt_line.start(prompt, hint=hint, mode=mode, identity=identity,
+                               seed=seed, choices=choices,
+                               on_confirm=on_confirm, on_cancel=on_cancel)
+        self._prompt_prev_passthrough = self.passthrough_mode
+        self.passthrough_mode = True
+        return True
+
+    def end_prompt(self) -> None:
+        """Discard the prompt and restore the previous passthrough setting."""
+        self.prompt_line.cancel()
+        self.passthrough_mode = self._prompt_prev_passthrough
+
+    def handle_prompt_key(self, key: int) -> str:
+        """Route one key to the active prompt and run its completion callback.
+
+        Returns ``'continue'``, ``'confirmed'`` or ``'cancelled'``.  The
+        ordering below is the contract: the prompt is torn down and passthrough
+        is restored *before* the callback runs, so a callback may begin the
+        next prompt (the re-ask path).
+        """
+        if not self.prompt_line.active:
+            return 'continue'
+        result = self.prompt_line.handle_key(key)
+        if result == 'continue':
+            return result
+        answer, on_confirm, on_cancel = self.prompt_line.take()
+        self.end_prompt()                     # passthrough restored FIRST
+        if result == 'confirmed' and on_confirm:
+            on_confirm(answer)                # may begin_prompt() the next prompt
+        elif result == 'cancelled' and on_cancel:
+            on_cancel()
+        return result
+
+    def add_prompt_header(self, attr: int | None = None) -> bool:
+        """Draw the prompt as a header row; False when no prompt is active."""
+        if not self.prompt_line.active:
+            return False
+        self.add_header(self.prompt_line.get_display_string(),
+                        attr=attr if attr is not None else curses.A_BOLD)
+        return True
+
+    def add_prompt_lines(self, attr: int | None = None,
+                         hint_attr: int | None = None) -> bool:
+        """Draw the prompt and its hint as transient body rows.
+
+        For item-scoped questions the application calls this from its own row
+        loop right after the row the prompt belongs to; the window never learns
+        which row that is.  Returns False when no prompt is active.
+        """
+        if not self.prompt_line.active:
+            return False
+        transient = Context(genre='TRANSIENT', pickable=False)
+        self.add_body(self.prompt_line.get_display_string(),
+                      attr=attr if attr is not None else curses.A_BOLD,
+                      context=transient)
+        hint = self.prompt_line.get_hint_string()
+        if hint:
+            self.add_body(textwidth.truncate(hint, max(10, self.cols - 2)),
+                          attr=hint_attr if hint_attr is not None else curses.A_DIM,
+                          context=Context(genre='TRANSIENT', pickable=False))
+        return True
+
     def add_fancy_header(self, line: str | HeaderLine, mode: str = 'Underline',
                          search_pattern_attr: int | None = None,
                          line_attr: int | None = None) -> None:
@@ -1650,11 +1761,36 @@ class ConsoleWindow:
     def _draw_separator_and_indicator(self) -> None:
         self.scr.hline(self.head.view_cnt, 0, curses.ACS_HLINE, self.cols)
         ind_pos = self._scroll_indicator_col()
-        if ind_pos < 0:
+        bot, cnt = self._scroll_indicator_span(ind_pos) if ind_pos >= 0 else (-1, 0)
+        # Status first: it must not be able to cover the indicator, and it must
+        # still draw when there is no indicator to draw.
+        self._draw_status_line(bot if ind_pos >= 0 else -1)
+        if ind_pos >= 0:
+            for idx in range(bot, bot + cnt):
+                self.scr.addch(self.head.view_cnt, idx, curses.ACS_HLINE,
+                               curses.A_REVERSE)
+
+    def _draw_status_line(self, indicator_start: int) -> None:
+        """Paint the current status on the separator row, if there is one.
+
+        ``indicator_start`` is the first cell of the scroll indicator, or -1
+        when no indicator is being drawn.  The text never touches that span and
+        one blank cell is always left between the two.
+        """
+        if not self._status_text:
             return
-        bot, cnt = self._scroll_indicator_span(ind_pos)
-        for idx in range(bot, bot+cnt):
-            self.scr.addch(self.head.view_cnt, idx, curses.ACS_HLINE, curses.A_REVERSE)
+        if (self._status_deadline is not None
+                and time.monotonic() >= self._status_deadline):
+            self.clear_status()
+            return
+        budget = (max(indicator_start - 2, 0) if indicator_start >= 0
+                  else self.cols - 1)
+        if budget < 2:
+            return
+        text = textwidth.truncate(self._status_text, budget)
+        self.scr.addstr(self.head.view_cnt, 0, text,
+                        self._status_attr if self._status_attr is not None
+                        else curses.A_NORMAL)
 
     def _scroll_indicator_span(self, ind_pos: int) -> tuple[int, int]:
         if self.opts.single_cell_scroll_indicator or not 0 < ind_pos < self.cols-1:
@@ -2108,7 +2244,61 @@ class ConsoleWindow:
         self.scr.nodelay(False)  # Restore blocking mode
 
 
+    def status(self, text: str = '', level: str = 'info',
+               timeout: float | None = None,
+               attr: int | None = None) -> bool:
+        """Declare a one-line status message for the separator row.
+
+        Unlike :meth:`flash`, this never takes over the screen: the message is
+        painted on the row that holds the separator and scroll indicator, and
+        only when the next ``render()``/``prompt()`` runs.  Calling it does not
+        render by itself.
+
+        ``level`` selects a default attribute from :attr:`STATUS_LEVELS`
+        (``'info'``, ``'warn'`` or ``'error'``); an unknown level falls back to
+        ``'info'`` rather than raising, so an application typo cannot crash a
+        TUI mid-session.  ``attr`` overrides that choice for this message only.
+
+        ``timeout`` is evaluated lazily at draw time: ``None`` keeps the
+        message until it is replaced or cleared, while a number makes it expire
+        that many seconds after this call (no timer and no thread).
+
+        The text is always stored, even when the window currently has no
+        separator row; the return value is ``False`` in that case so a caller
+        can tell that the message is deferred, not lost.  A later resize will
+        reveal it.  An empty ``text`` clears the status and returns ``True``.
+        """
+        if text == '':
+            self._status_text = ''
+            self._status_attr = None
+            self._status_deadline = None
+            return True
+        level_attr = self.STATUS_LEVELS.get(level)
+        if level_attr is None:
+            level_attr = self.STATUS_LEVELS['info']
+        self._status_text = text
+        self._status_attr = attr if attr is not None else level_attr
+        self._status_deadline = (None if timeout is None
+                                 else time.monotonic() + max(timeout, 0.0))
+        # Same availability test render_once() uses for the separator row.
+        return self.head.view_cnt < self.rows
+
+    def clear_status(self) -> bool:
+        """Remove any current status message (equivalent to ``status('')``)."""
+        return self.status('')
+
+    @property
+    def current_status(self) -> tuple[str, int | None]:
+        """The stored status text and its attribute (``('', None)`` if clear)."""
+        return self._status_text, self._status_attr
+
     def flash(self, message: str = '', duration: float = 2.0) -> None:
+        """Show a modal message box for ``duration`` seconds.
+
+        Note that this clears the whole screen before drawing the box (and
+        repaints the pads afterwards), which is why a transient message that
+        must leave the listing visible should use :meth:`status` instead.
+        """
         # Refresh cached dimensions: a resize may have happened since the last
         # render and everything below draws from self.rows/self.cols.
         self._set_screen_dims()

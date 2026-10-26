@@ -9,12 +9,12 @@ from types import SimpleNamespace
 
 from console_window import (
     BasicHelpScreen,
+    BasicTextScreen,
     ConsoleWindow,
     ConsoleWindowOpts,
     Context,
     HeaderLine,
     IncrementalSearchBar,
-    InlineConfirmation,
     OptionSpinner,
     Screen,
     ScreenStack,
@@ -38,9 +38,12 @@ class SampleApp:
         self.filter_text = ''
         self.selected_items = set()  # Track "selected" items for demo
         self.operation_count = 0
-
-        # Inline confirmation handler
-        self.confirmation = InlineConfirmation()
+        # In-place prompt state.  PromptLine itself lives on the window; these
+        # are the application's product decisions about which row/item a live
+        # prompt belongs to (the window deliberately never learns that).
+        self.prompt_item = None
+        self.note_item = None
+        self.notes = {}
 
         # Incremental search bar
         self.filter_bar = IncrementalSearchBar(
@@ -109,6 +112,8 @@ class SampleApp:
                      genre='action', scope={MAIN_ST})
         spin.add_key('alert_demo', 'l - alert demo',
                      genre='action', scope={MAIN_ST})
+        # In-place, buffered prompt rendered as a header row (see note_ACTION).
+        spin.add_key('note', 'N - add a note', genre='action', scope={MAIN_ST})
         spin.add_key('show_keys', 'K - show keys (demo mode)', genre='action')
 
         # Folded in from the retired dev self-test.
@@ -171,32 +176,18 @@ class SampleApp:
         self.filter_text = original_text.lower() if original_text else ''
         self.win.passthrough_mode = False
 
-    def _start_operation(self):
-        if self.confirmation.identity:
-            item_name = self.confirmation.identity
-            # Mark item as "processed"
-            self.selected_items.add(item_name)
-            self.operation_count += 1
-            # Flash success message
-            self.win.flash(f'✓ Processed {item_name}', duration=1.5)
-        self.confirmation.cancel()
-        self.win.passthrough_mode = False
-
     def handle_key(self, key):
-        # Handle filter bar FIRST (highest priority when active)
+        # A live in-place prompt owns every key.  This is the documented
+        # contract: nothing underneath the prompt (filter, spinner actions)
+        # may fire until the prompt has been dealt with.
+        if self.win.prompt_active:
+            self.win.handle_prompt_key(key)
+            return None
+
+        # Handle filter bar NEXT (highest priority when active)
         if self.filter_bar.is_active:
             if self.filter_bar.handle_key(key):
                 return None  # Key was consumed
-
-        # Handle confirmation mode SECOND (high priority when active)
-        if self.confirmation.active:
-            result = self.confirmation.handle_key(key)
-            if result == 'confirmed':
-                self._start_operation()
-            elif result == 'cancelled':
-                self.confirmation.cancel()
-                self.win.passthrough_mode = False
-            return None  # Key was consumed by confirmation
 
         # Handle ENTER for screen navigation
         if key in (cs.KEY_ENTER, 10):
@@ -303,21 +294,14 @@ class MainScreen(DemoScreen):
             ctx = Context(genre='item', item=item)
             app.win.add_body(line, attr=attr, context=ctx)
 
-            # Show inline confirmation if active for this item.  The wording and
-            # the warning glyph stay here (product decisions); the widget owns
-            # the buffer/caret composition.
-            if app.confirmation.active and \
-               app.confirmation.identity == username:
-                prompt = f'    ⚠️  Process {username}?'
-                if app.confirmation.mode == 'y':
-                    prompt += " - Press 'y' or ESC"
-                elif app.confirmation.mode == 'Y':
-                    prompt += " - Press 'Y' or ESC"
-
-                app.win.add_body(
-                    app.confirmation.get_display_string(prompt=prompt),
+            # Draw the in-place confirmation right after the row it belongs to.
+            # The wording and warning glyph stay here (product decisions); the
+            # window's prompt helper owns the display composition and marks both
+            # rows TRANSIENT/non-pickable for us.
+            if app.win.prompt_active and app.prompt_item == username:
+                app.win.add_prompt_lines(
                     attr=cs.color_pair(Theme.WARNING) | cs.A_BOLD,
-                    context=Context(genre='DECOR')
+                    hint_attr=cs.A_DIM,
                 )
 
         if app.opts.stress:
@@ -361,6 +345,7 @@ class MainScreen(DemoScreen):
         line.text(' ').key('SPC').text(':process')
         # line.text(' ').bracket_key('p').text(f'ick={app.opts.pick_size}')
         line.text(' ').bracket_key('n').text(f'ame={app.opts.name or "-"}')
+        line.text(' ').bracket_key('N').text(':note')
         # line.text(' ').key('r').text('edraw')
         # line.text(' ').key('z').text(':stress')
         # line.text(' ').bracket_key('t').text('hemes')
@@ -384,6 +369,12 @@ class MainScreen(DemoScreen):
 
         app.win.add_header(header, attr=cs.A_DIM | cs.A_UNDERLINE)
 
+        # A buffered note prompt is a screen-wide question, so it lives in the
+        # header band rather than under one row.  add_prompt_header() renders
+        # the library's fixed ': buffer│' format.
+        if app.win.prompt_active and app.note_item:
+            app.win.add_prompt_header()
+
     def filter_ACTION(self):
         app = self.app
         app.filter_bar.start(app.filter_text)
@@ -397,16 +388,68 @@ class MainScreen(DemoScreen):
         app.filter_bar._text = ''  # pylint: disable=protected-access
         app.filter_text = ''
         app.win.pick_pos = 0
+        app.win.status('Filter cleared', timeout=1.0)
 
     def select_ACTION(self):
         app = self.app
-        ctx = app.win.get_picked_context()
-        if ctx and hasattr(ctx, 'item'):
-            item = ctx.item
-            username = item['username']
-            # Start inline confirmation (mode 'y' = press 'y' to confirm)
-            app.confirmation.start('process', username, mode='y')
-            app.win.passthrough_mode = True
+        win = app.win
+        ctx = win.get_picked_context()
+        if not ctx or not hasattr(ctx, 'item'):
+            return
+        username = ctx.item['username']
+        app.prompt_item = username
+
+        def confirm(_answer):
+            app.prompt_item = None
+            app.selected_items.add(username)
+            app.operation_count += 1
+            # Non-modal: the listing stays visible on the next render.
+            win.status(f'✓ Processed {username}', timeout=1.5)
+
+        def cancel():
+            app.prompt_item = None
+            win.status('Cancelled', timeout=1.0)
+
+        # Single-key mode 'y'; the window enables passthrough for us and the
+        # callbacks run after the prompt is gone (so status() is safe here).
+        win.begin_prompt(
+            f'    ⚠️  Process {username}?',
+            mode='y',
+            hint='Marks the row as ✓ Processed',
+            on_confirm=confirm,
+            on_cancel=cancel,
+        )
+
+    def note_ACTION(self):
+        app = self.app
+        win = app.win
+        ctx = win.get_picked_context()
+        if not ctx or not hasattr(ctx, 'item'):
+            win.status('Select an item first', level='warn', timeout=2.0)
+            return
+        username = ctx.item['username']
+        app.note_item = username
+
+        def save(answer):
+            app.note_item = None
+            app.notes[username] = answer
+            win.status(f'✓ Note saved for {username}', level='warn',
+                       timeout=2.0)
+
+        def cancel():
+            app.note_item = None
+            win.status('Note cancelled', timeout=1.5)
+
+        # Buffered text mode.  add_prompt_header() draws it in the header band,
+        # including the caret glyph and the fixed ': ' separator.
+        win.begin_prompt(
+            f'Note for {username}',
+            hint='ENTER to save, ESC to cancel',
+            mode='text',
+            seed=app.notes.get(username, ''),
+            on_confirm=save,
+            on_cancel=cancel,
+        )
 
     def answer_demo_ACTION(self):
         app = self.app
@@ -414,9 +457,9 @@ class MainScreen(DemoScreen):
         response = win.answer('Enter your name (or ESC to cancel): ',
                               height=1)
         if response:
-            win.flash(f'Hello, {response}!', duration=2.0)
+            win.status(f'Hello, {response}!', level='warn', timeout=2.0)
         else:
-            win.flash('Cancelled', duration=1.0)
+            win.status('Cancelled', timeout=1.0)
 
     def alert_demo_ACTION(self):
         ctx = self.app.win.get_picked_context()
@@ -472,32 +515,34 @@ class HelpScreen(DemoScreen, BasicHelpScreen):
 class HistoryScreen(DemoScreen):
     def __init__(self, app):
         super().__init__('HISTORY', app)
+        # Constructed before the ConsoleWindow exists, exactly like the other
+        # screens: BasicTextScreen resolves app.win at draw time.
+        self.text_screen = BasicTextScreen(app)
 
     def draw_screen(self):
         app = self.app
-        app.win.set_pick_mode(False)
-
-        app.win.add_header('OPERATION HISTORY', attr=cs.A_BOLD)
-        app.win.add_header('  Press ESC or ENTER to return',
-                          attr=cs.A_DIM, resume=True)
-
+        lines = [('  Press ESC or ENTER to return', cs.A_DIM), '']
         if app.selected_items:
-            app.win.add_body('')
-            app.win.add_body(f'Total processed items: {len(app.selected_items)}')
-            app.win.add_body('')
+            lines.append(f'Total processed items: {len(app.selected_items)}')
+            lines.append('')
             for username in sorted(app.selected_items):
                 # Find the item details
                 item = next((i for i in app.items
                            if i['username'] == username), None)
                 if item:
-                    line = f'  ✓ {username:<16} uid={item["uid"]:<8} {item["home"]}'
-                    app.win.add_body(line, attr=cs.color_pair(Theme.SUCCESS))
+                    line = (f'  ✓ {username:<16} uid={item["uid"]:<8} '
+                            f'{item["home"]}')
+                    lines.append((line, cs.color_pair(Theme.SUCCESS)))
         else:
-            app.win.add_body('')
-            app.win.add_body('No items have been processed yet.')
-            app.win.add_body('')
-            app.win.add_body('Go back to the main screen and press '
-                           'SPACE on an item to process it.')
+            lines.extend([
+                'No items have been processed yet.',
+                '',
+                'Go back to the main screen and press SPACE on an item '
+                'to process it.',
+            ])
+        # Content is rebuilt each draw; nothing is cached across frames.
+        self.text_screen.set_text(lines, head=['OPERATION HISTORY'])
+        self.text_screen.draw_screen()
 
 
 class ThemeScreen(Theme.create_picker_screen(DemoScreen)):

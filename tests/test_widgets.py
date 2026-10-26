@@ -70,6 +70,16 @@ def test_inline_choices_ambiguous_returns_none():
     assert c._resolve_choice() is None
 
 
+def test_inline_resolved_choice_is_the_public_wrapper():
+    c = InlineConfirmation()
+    c.start(choices=['alpha', 'beta'], mode='choices')
+    assert c.resolved_choice is None
+    c.input_buffer = 'alpha'
+    assert c.resolved_choice == 'alpha'
+    c.input_buffer = 'zzz'
+    assert c.resolved_choice is None
+
+
 def test_inline_text_mode_accepts_anything():
     c = InlineConfirmation()
     c.start(mode='text')

@@ -118,3 +118,108 @@ def test_stress_mode_pads_the_body_within_pad_capacity():
         assert app.win.rows_dropped == 0
     finally:
         app.win.stop_curses()
+
+
+# --- the 2.1 in-place prompt, status and BasicTextScreen -------------------
+
+def test_confirm_prompt_consumes_every_key_and_reports_status():
+    sample, app = _app()
+    try:
+        main = app.screens[sample.MAIN_ST]
+        main.draw_screen()
+        app.win.pick_pos = 0
+        username = app.win.get_picked_context().item['username']
+
+        main.select_ACTION()
+        assert app.win.prompt_active is True
+        assert app.prompt_item == username
+        assert app.win.passthrough_mode is True
+
+        # The prompt swallows an action/navigation key underneath it.
+        app.handle_key(ord('j'))
+        assert app.win.prompt_active is True
+        assert app.win.pick_pos == 0
+
+        app.handle_key(ord('y'))
+
+        assert app.win.prompt_active is False
+        assert app.win.passthrough_mode is False
+        assert app.prompt_item is None
+        assert app.selected_items == {username}
+        assert app.operation_count == 1
+        assert app.win.current_status[0] == f'✓ Processed {username}'
+    finally:
+        app.win.stop_curses()
+
+
+def test_confirm_prompt_rows_are_drawn_after_the_item():
+    sample, app = _app()
+    try:
+        main = app.screens[sample.MAIN_ST]
+        main.draw_screen()
+        app.win.pick_pos = 0
+
+        main.select_ACTION()
+        app.win.clear()
+        main.draw_screen()
+
+        assert any('Process ' in text and '[Press "y" or ESC]' in text
+                   for text in app.win.body.texts)
+        assert any(text.strip() == 'Marks the row as ✓ Processed'
+                   for text in app.win.body.texts)
+    finally:
+        app.win.stop_curses()
+
+
+def test_note_prompt_is_buffered_and_rendered_in_the_header():
+    sample, app = _app()
+    try:
+        main = app.screens[sample.MAIN_ST]
+        main.draw_screen()
+        app.win.pick_pos = 0
+        username = app.win.get_picked_context().item['username']
+
+        main.note_ACTION()
+        assert app.win.prompt_active is True
+        assert app.note_item == username
+
+        app.win.clear()
+        main.draw_screen()
+        assert any(text.startswith(f'Note for {username}: ')
+                   and '│' in text for text in app.win.head.texts)
+
+        for ch in 'hello':
+            app.handle_key(ord(ch))
+        assert app.win.prompt_active is True
+
+        app.handle_key(10)  # ENTER
+
+        assert app.win.prompt_active is False
+        assert app.note_item is None
+        assert app.notes[username] == 'hello'
+        assert app.win.current_status[0] == f'✓ Note saved for {username}'
+    finally:
+        app.win.stop_curses()
+
+
+def test_history_screen_is_a_basic_text_screen_resolved_at_draw_time():
+    sample, app = _app()
+    try:
+        history = app.screens[sample.HISTORY_ST]
+        assert isinstance(history.text_screen, sample.BasicTextScreen)
+        # Created before the window existed; draw_screen() resolves app.win.
+        assert history.text_screen.win is None
+
+        username = app.get_filtered_items()[0]['username']
+        app.selected_items.add(username)
+
+        history.draw_screen()
+
+        # The stale ``win`` left by Screen.__init__ is still None; the rows
+        # landed on the window resolved from app.win at draw time.
+        assert history.text_screen.win is None
+        assert app.win.pick_mode is False
+        assert app.win.head.texts[0] == 'OPERATION HISTORY'
+        assert any(username in text for text in app.win.body.texts)
+    finally:
+        app.win.stop_curses()

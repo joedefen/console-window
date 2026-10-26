@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Protocol
 
+from .header import HeaderLine
 from .spinner import OptionSpinner
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -247,3 +248,61 @@ class BasicHelpScreen(Screen):
         if spinner:
             spinner.show_help_nav_keys(win)
             spinner.show_help_body(win)
+
+
+class BasicTextScreen(Screen):
+    """Read-only screen showing preformatted lines under optional headers.
+
+    The window is resolved at draw time: applications may build their Screen
+    objects before the ConsoleWindow exists (BasicHelpScreen relies on the same
+    rule).  ``lines`` items are ``str`` or ``(str, attr)``; ``head`` is a
+    ``str``, a :class:`HeaderLine`, or an iterable of either.  Content is
+    normalised by :meth:`set_text`, so ``draw_screen()`` is a flat loop and
+    nothing is cached across draws.
+
+    There is no pick mode, no action handling and no spinner.  ESC/back stays
+    the application's ``escape_ACTION``, and ``come_from_whitelist`` stays
+    permissive by default.
+    """
+
+    come_from_whitelist = None
+
+    def __init__(self, app: _AppLike, lines=(), head=()) -> None:
+        super().__init__(app)
+        self._lines: list[tuple[str, int | None]] = []
+        self._heads: list[str | HeaderLine] = []
+        self.set_text(lines, head)
+
+    def set_text(self, lines=(), head=()) -> None:
+        """Replace the screen's content.  Safe before or after the first draw."""
+        self._lines = [self._normalize_line(item) for item in (lines or ())]
+        self._heads = self._normalize_heads(head)
+
+    @staticmethod
+    def _normalize_line(item) -> tuple[str, int | None]:
+        if isinstance(item, str):
+            return item, None
+        text, attr = item
+        return str(text), attr
+
+    @staticmethod
+    def _normalize_heads(head) -> list[str | HeaderLine]:
+        if head is None:
+            return []
+        if isinstance(head, (str, HeaderLine)):
+            return [head]
+        return list(head)
+
+    def draw_screen(self) -> None:
+        win = self.app.win
+        win.set_pick_mode(False)
+        for head_item in self._heads:
+            if isinstance(head_item, HeaderLine):
+                # Keep the declared span roles; add_header() takes plain text.
+                win.add_header_line(head_item)
+            else:
+                win.add_header(head_item)
+        for text, attr in self._lines:
+            # No Context: these are plain, scrollable rows (the same shape
+            # ViewScreen/CompareScreen produced before this helper existed).
+            win.add_body(text, attr=attr)

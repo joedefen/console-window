@@ -4,7 +4,7 @@ import curses
 from typing import Callable, ClassVar
 
 from .header import HeaderLine
-from .textwidth import cell_to_index, char_width, string_width
+from .textwidth import cell_to_index, char_width, string_width, truncate
 
 # Keys treated as backspace (all terminal variants).  Shared by both widgets so
 # the list cannot drift between them.
@@ -73,6 +73,16 @@ class InlineConfirmation:
     @property
     def cursor_pos(self) -> int:
         return self._cursor_pos
+
+    @property
+    def resolved_choice(self) -> str | None:
+        """The canonical choice the current buffer would accept, else ``None``.
+
+        Thin public wrapper over the abbreviation/exact matching used by
+        ``handle_key()``; pickers and inline choice menus need to know which
+        entry is currently resolved without duplicating that logic.
+        """
+        return self._resolve_choice()
 
     @property
     def cursor_cell(self) -> int:
@@ -312,6 +322,109 @@ class InlineConfirmation:
             return f'Type {choices[0]} + ENTER or ESC'
         min_chars = self._get_effective_min_abbrev_chars()
         return f'{min_chars}+ chars + ENTER or ESC'
+
+
+class PromptLine:
+    """An in-place prompt: text, an editable buffer, a hint and callbacks.
+
+    Deliberately free of application concepts: it does not know which row or
+    item the prompt belongs to, and it never runs callbacks itself (see
+    :meth:`take`).  ``start()`` composes an internal
+    :class:`InlineConfirmation`; note that ``InlineConfirmation`` forces
+    ``mode='choices'`` when ``choices`` is supplied -- that is intended, not a
+    bug.  The caller's ``prompt`` text is used verbatim, so decorations such as
+    a warning glyph stay in application code rather than in the library.
+    """
+
+    def __init__(self) -> None:
+        self._editor = InlineConfirmation()
+        #: Public state, mirrored from start() so a caller can inspect it.
+        self.active: bool = False
+        self.prompt: str = ''
+        self.hint: str = ''
+        self._on_confirm: Callable[[str], object] | None = None
+        self._on_cancel: Callable[[], object] | None = None
+        self._answer: str | None = None
+        self._result: str | None = None
+
+    def start(self, prompt: str, *, hint: str = '', mode: str = 'y',
+              identity: str | None = None, seed: str = '',
+              choices=None, on_confirm=None, on_cancel=None,
+              min_abbrev_chars: int | None = None) -> None:
+        self._editor.start(action_type=None, identity=identity, choices=choices,
+                           mode=mode, min_abbrev_chars=min_abbrev_chars,
+                           initial=seed)
+        self.active = True
+        self.prompt = prompt
+        self.hint = hint
+        self._on_confirm = on_confirm
+        self._on_cancel = on_cancel
+        self._answer = None
+        self._result = None
+
+    def handle_key(self, key: int) -> str:
+        """Feed one key to the editor; return a pure state-machine result.
+
+        Returns ``'continue'``, ``'confirmed'`` or ``'cancelled'``.  No
+        callback runs here, which is what makes the widget testable without a
+        window (and lets the window restore its own state before callbacks).
+        """
+        if not self.active:
+            return 'continue'
+        result = self._editor.handle_key(key)
+        self._result = result
+        if result == 'confirmed':
+            self._answer = self._editor.input_buffer
+        return result
+
+    def take(self) -> tuple[str | None, Callable[[str], object] | None,
+                            Callable[[], object] | None]:
+        """Cancel the widget and hand back ``(answer, on_confirm, on_cancel)``.
+
+        The answer is only non-``None`` for a confirmed result.  This is the
+        seam that lets the window tear the prompt down *before* running the
+        callbacks; ``take()`` itself never calls them.
+        """
+        answer = self._answer if self._result == 'confirmed' else None
+        on_confirm, on_cancel = self._on_confirm, self._on_cancel
+        self.cancel()
+        return answer, on_confirm, on_cancel
+
+    def cancel(self) -> None:
+        """Discard the prompt.  Idempotent."""
+        self.active = False
+        self._editor.cancel()
+        self.prompt = ''
+        self.hint = ''
+        self._on_confirm = None
+        self._on_cancel = None
+        self._answer = None
+        self._result = None
+
+    def get_display_string(self, cursor_char: str = '│') -> str:
+        """The prompt as one line, with the caret glyph for editable modes."""
+        if not self.active:
+            return ''
+        mode = self._editor.mode or ''
+        if mode in ('Y', 'y'):
+            return f'{self.prompt}  [Press "{mode}" or ESC]'
+        buffer = self._editor.get_display_string('', cursor_char)
+        return f'{self.prompt}: {buffer}'
+
+    def get_hint_string(self, width: int | None = None) -> str:
+        if not self.active or not self.hint:
+            return ''
+        if width is None:
+            return self.hint
+        return truncate(self.hint, width)
+
+    def get_choice_lines(self) -> list[str]:
+        """One line per choice, marking the currently resolved one."""
+        if not self.active or self._editor.mode != 'choices':
+            return []
+        resolved = self._editor.resolved_choice
+        return [f'⮞ {choice}' if choice == resolved else f'  {choice}'
+                for choice in (self._editor.choices or [])]
 
 
 class IncrementalSearchBar:

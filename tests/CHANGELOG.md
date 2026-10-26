@@ -3,6 +3,47 @@
 All notable changes to `console-window` are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [2.1.0]
+
+### Added
+- `ConsoleWindow.status(text='', level='info', timeout=None, attr=None)`: a
+  one-line message painted on the separator row (the row that owns the scroll
+  indicator), so the listing stays visible.  `level` selects an attribute from
+  the patchable `ConsoleWindow.STATUS_LEVELS` map (`info` dim, `warn` bold,
+  `error` bold+reverse); an unknown level falls back to `info` rather than
+  raising, and `attr` overrides the level for one message.  `timeout` is
+  evaluated lazily at draw time.  The text starts at column 0 of
+  `head.view_cnt` and leaves one blank cell before the scroll indicator; when
+  no separator row exists the text is stored (the call returns `False`) and a
+  later resize reveals it.  Also `clear_status()` and the `current_status`
+  property.  `status()` never renders by itself; the message appears on the next
+  `render()`/`prompt()`.
+- `PromptLine`: a window-independent in-place prompt with a fixed display
+  format (`f'{prompt}  [Press "{mode}" or ESC]'` for `Y`/`y`, otherwise
+  `f'{prompt}: {buffer}{caret}{rest}'`), hint truncation and resolved-choice
+  lines (`⮞ choice`).  `take()` returns the answer and callbacks without running
+  them.  `InlineConfirmation.resolved_choice` is the public wrapper over the
+  existing private resolution.
+- `ConsoleWindow` prompt lifecycle: `prompt_active`, `begin_prompt()`,
+  `end_prompt()`, `handle_prompt_key()`, `add_prompt_header()` and
+  `add_prompt_lines()`.  While a prompt is active the application routes every
+  key through `handle_prompt_key()`; completion callbacks run after the prompt
+  is torn down and passthrough is restored, so a callback may begin the next
+  prompt.
+- `BasicTextScreen`: a read-only `Screen` for preformatted lines under optional
+  headers.  It resolves `app.win` at draw time, disables pick mode, and adds
+  body rows without `Context` so normal navigation scrolls them.
+
+### Changed
+- `SampleApp.py` now exercises the new API: `SPACE` uses the window prompt
+  lifecycle with a `PromptLine` single-key confirmation, `N` adds a buffered
+  header note prompt, non-modal feedback uses `status()`, and the HISTORY
+  screen is built from `BasicTextScreen` with `set_text()` on every draw.
+
+### Notes
+- `flash()` is documented as clearing the screen; that difference is why
+  `status()` exists for messages that must leave the listing visible.
+
 ## [2.0.2]
 
 ### Added
