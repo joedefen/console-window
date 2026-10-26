@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Protocol
 
@@ -13,6 +14,12 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 class _AppLike(Protocol):
     # The only part of the host application a Screen touches at construction.
     win: ConsoleWindow
+
+
+#: One body row: plain text, or text paired with a curses attribute.
+_LineItem = str | tuple[str, int | None]
+#: One header entry, or a specification of one or more of them.
+_HeadSpec = str | HeaderLine | Iterable[str | HeaderLine] | None
 
 
 # Default home screen constant (applications should define their own)
@@ -267,26 +274,28 @@ class BasicTextScreen(Screen):
 
     come_from_whitelist = None
 
-    def __init__(self, app: _AppLike, lines=(), head=()) -> None:
+    def __init__(self, app: _AppLike, lines: Iterable[_LineItem] = (),
+                 head: _HeadSpec = ()) -> None:
         super().__init__(app)
         self._lines: list[tuple[str, int | None]] = []
         self._heads: list[str | HeaderLine] = []
         self.set_text(lines, head)
 
-    def set_text(self, lines=(), head=()) -> None:
+    def set_text(self, lines: Iterable[_LineItem] = (),
+                 head: _HeadSpec = ()) -> None:
         """Replace the screen's content.  Safe before or after the first draw."""
         self._lines = [self._normalize_line(item) for item in (lines or ())]
         self._heads = self._normalize_heads(head)
 
     @staticmethod
-    def _normalize_line(item) -> tuple[str, int | None]:
+    def _normalize_line(item: _LineItem) -> tuple[str, int | None]:
         if isinstance(item, str):
             return item, None
         text, attr = item
         return str(text), attr
 
     @staticmethod
-    def _normalize_heads(head) -> list[str | HeaderLine]:
+    def _normalize_heads(head: _HeadSpec) -> list[str | HeaderLine]:
         if head is None:
             return []
         if isinstance(head, (str, HeaderLine)):

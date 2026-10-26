@@ -349,7 +349,9 @@ class PromptLine:
 
     def start(self, prompt: str, *, hint: str = '', mode: str = 'y',
               identity: str | None = None, seed: str = '',
-              choices=None, on_confirm=None, on_cancel=None,
+              choices: str | list[str] | tuple[str, ...] | None = None,
+              on_confirm: Callable[[str], object] | None = None,
+              on_cancel: Callable[[], object] | None = None,
               min_abbrev_chars: int | None = None) -> None:
         self._editor.start(action_type=None, identity=identity, choices=choices,
                            mode=mode, min_abbrev_chars=min_abbrev_chars,

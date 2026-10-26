@@ -1151,8 +1151,9 @@ class ConsoleWindow:
 
     def begin_prompt(self, prompt: str, *, hint: str = '', mode: str = 'y',
                      identity: str | None = None, seed: str = '',
-                     choices=None, on_confirm=None,
-                     on_cancel=None) -> bool:
+                     choices: str | list[str] | tuple[str, ...] | None = None,
+                     on_confirm: Callable[[str], object] | None = None,
+                     on_cancel: Callable[[], object] | None = None) -> bool:
         """Start an in-place prompt and enable passthrough key routing.
 
         The window *is* the receiver, so there is no window-existence branch
@@ -1188,6 +1189,7 @@ class ConsoleWindow:
         answer, on_confirm, on_cancel = self.prompt_line.take()
         self.end_prompt()                     # passthrough restored FIRST
         if result == 'confirmed' and on_confirm:
+            assert answer is not None
             on_confirm(answer)                # may begin_prompt() the next prompt
         elif result == 'cancelled' and on_cancel:
             on_cancel()
