@@ -333,8 +333,16 @@ class PromptLine:
     :class:`InlineConfirmation`; note that ``InlineConfirmation`` forces
     ``mode='choices'`` when ``choices`` is supplied -- that is intended, not a
     bug.  The caller's ``prompt`` text is used verbatim, so decorations such as
-    a warning glyph stay in application code rather than in the library.
+    a warning glyph stay in application code rather than in the library.  The
+    same goes for the trailing answer hint: pass *answer_hint* to replace the
+    default ``[Press "y" or ESC]`` wording, which lets an application bracket
+    the whole line with its own glyphs.
     """
+
+    #: Default trailing hint for the one-key confirmation modes.  ``{mode}`` is
+    #: replaced with the live mode letter, so ``'y'`` and ``'Y'`` both label
+    #: themselves without the caller tracking it.
+    DEFAULT_ANSWER_HINT = '[Press "{mode}" or ESC]'
 
     def __init__(self) -> None:
         self._editor = InlineConfirmation()
@@ -342,6 +350,7 @@ class PromptLine:
         self.active: bool = False
         self.prompt: str = ''
         self.hint: str = ''
+        self.answer_hint: str = ''
         self._on_confirm: Callable[[str], object] | None = None
         self._on_cancel: Callable[[], object] | None = None
         self._answer: str | None = None
@@ -352,13 +361,15 @@ class PromptLine:
               choices: str | list[str] | tuple[str, ...] | None = None,
               on_confirm: Callable[[str], object] | None = None,
               on_cancel: Callable[[], object] | None = None,
-              min_abbrev_chars: int | None = None) -> None:
+              min_abbrev_chars: int | None = None,
+              answer_hint: str = '') -> None:
         self._editor.start(action_type=None, identity=identity, choices=choices,
                            mode=mode, min_abbrev_chars=min_abbrev_chars,
                            initial=seed)
         self.active = True
         self.prompt = prompt
         self.hint = hint
+        self.answer_hint = answer_hint
         self._on_confirm = on_confirm
         self._on_cancel = on_cancel
         self._answer = None
@@ -398,6 +409,7 @@ class PromptLine:
         self._editor.cancel()
         self.prompt = ''
         self.hint = ''
+        self.answer_hint = ''
         self._on_confirm = None
         self._on_cancel = None
         self._answer = None
@@ -409,7 +421,11 @@ class PromptLine:
             return ''
         mode = self._editor.mode or ''
         if mode in ('Y', 'y'):
-            return f'{self.prompt}  [Press "{mode}" or ESC]'
+            hint = self.answer_hint or self.DEFAULT_ANSWER_HINT
+            # replace() rather than format(): the template is caller text and
+            # may legitimately contain braces (``["y" or ESC] {⚠️}`` style
+            # decorations are not worth a formatting error at paint time).
+            return f'{self.prompt}  {hint.replace("{mode}", mode)}'
         buffer = self._editor.get_display_string('', cursor_char)
         return f'{self.prompt}: {buffer}'
 

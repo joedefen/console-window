@@ -35,6 +35,11 @@ This project follows [Semantic Versioning](https://semver.org/).
   body rows without `Context` so normal navigation scrolls them.
 
 ### Changed
+- Demo-mode key labels no longer fall back to `???` for anything curses can
+  name: `curses.KEY_*` codes are rendered from the curses constant names (so a
+  taken `KEY_LEFT`/`KEY_RIGHT` shows `LEFT`/`RIGHT`, and F-keys, shift-arrows,
+  `HOME`, `RESIZE`, etc. show their own names), control characters use caret
+  notation (`^U`), and a code curses does not know is shown as `<code>`.
 - `SampleApp.py` now exercises the new API: `SPACE` uses the window prompt
   lifecycle with a `PromptLine` single-key confirmation, `N` adds a buffered
   header note prompt, non-modal feedback uses `status()`, and the HISTORY
@@ -98,6 +103,17 @@ This project follows [Semantic Versioning](https://semver.org/).
   into every span of the header (including plain spans and the raw line emitted
   for `mode='Off'`), so a caller can dim a whole fancy header while keeping the
   per-span bold/underline/reverse styling.
+- `answer_hint` on `begin_prompt()`/`PromptLine.start()`: replaces the default
+  trailing `[Press "y" or ESC]` text for the `Y`/`y` modes, with `{mode}`
+  substituted for the live mode letter.  The template is plain text (`.replace`,
+  not `.format`), so an application can bracket its own question, e.g.
+  `'["{mode}" or ESC] ⚠️'`, without escaping braces.
+- `add_prompt_header(align='center')`: pads the prompt row so it sits in the
+  middle of the pad width.  The offset is measured in display cells from the
+  composed line, so wide glyphs and emoji presentation selectors stay centred.
+- `ConsoleWindow.prompt_separator_attr`: an attribute applied to the separator
+  rule only while an in-place prompt is live (`None`, the default, keeps the
+  rule plain).  Lets the chrome recede behind the one line keys can reach.
 - `suspend_curses()`/`resume_curses()` on `ConsoleWindow`: leave curses mode
   with `endwin()` while keeping the window (pads, content model, pick state)
   alive, then reattach a screen and repaint.  This is the supported way for an
@@ -246,6 +262,14 @@ This project follows [Semantic Versioning](https://semver.org/).
   No in-repo code used it.
 
 ### Fixed
+- `textwidth` now counts an emoji presentation selector (`U+FE0F`) as a cell
+  when it follows a narrow, non-ASCII base, so `⚠️` measures two cells as
+  terminals draw it instead of one.  Every measurement that follows the glyph
+  (`string_width()`, `truncate()`, `ljust()`/`rjust()`, `cell_to_index()`) was
+  one cell short, which shifted following text left and padded rows short --
+  visible as a crammed space after the glyph.  A base that is already two cells
+  wide (`⌚`, `⌛`) and ASCII bases are left alone, and `char_width()` stays per
+  code point so the cursor can never land between a base and its selector.
 - `win._start_curses()` once again *reattaches* the window.  The 1.4.x
   compatibility hook is still called in the wild (psistat's "dump event log"
   path uses `self.window._start_curses()` to return from shell mode), but the

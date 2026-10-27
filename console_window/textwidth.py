@@ -21,6 +21,14 @@ __all__ = [
 # characters (ZWJ, variation selectors, BOM, …) and control characters.
 _ZERO_WIDTH_CATEGORIES = frozenset({'Mn', 'Me', 'Cf', 'Cc'})
 
+# Variation selectors.  VS16 asks for *emoji* presentation, which terminals
+# draw two cells wide even when the base character's own East-Asian width is
+# Narrow/Ambiguous (U+26A0 WARNING SIGN, U+2714 HEAVY CHECK MARK, U+2139
+# INFORMATION SOURCE).  VS15 asks for text presentation and needs no
+# adjustment: such bases already count as one cell.
+_VS16 = '\ufe0f'
+_VS15 = '\ufe0e'  # no adjustment needed; named for symmetry with _VS16
+
 # Any character that is not printable ASCII needs per-character measurement.
 # Everything else is exactly one cell wide, so measurement can skip whole
 # ASCII runs in C and only visit the glyphs that actually differ.
@@ -51,6 +59,26 @@ def _non_ascii_char_width(ch: str) -> int:
     return 1
 
 
+def _string_char_width(text: str, index: int) -> int:
+    """Width of ``text[index]`` with variation selectors folded into the base.
+
+    ``char_width()`` stays per code point on purpose: the cursor helpers move
+    by code point and must never be able to land between a base and its
+    selector.  String-level measurement is where the one context-dependent
+    rule belongs -- a VS16 after a narrow, non-ASCII base makes that cluster
+    two cells wide, which is how terminals draw ``⚠️``.  A base that already
+    counts two cells (⌚ U+231A, ⌛ U+231B) keeps its width, and ASCII is left
+    alone because terminals do not double it.
+    """
+    ch = text[index]
+    if ch != _VS16 or index == 0:
+        return char_width(ch)
+    base = text[index - 1]
+    if base.isascii() or char_width(base) != 1:
+        return 0
+    return 1
+
+
 def char_width(ch: str) -> int:
     if not ch:
         return 0
@@ -70,7 +98,7 @@ def string_width(text: str) -> int:
     # without needing a whole-string cache large enough for every body row.
     width = len(text)
     for match in _SPECIAL_CHAR.finditer(text):
-        width += char_width(match.group()) - 1
+        width += _string_char_width(text, match.start()) - 1
     return width
 
 
@@ -92,7 +120,7 @@ def truncate(text: str, max_width: int) -> str:
         if total + run > max_width:
             return text[:ascii_start + max_width - total]
         total += run
-        w = char_width(match.group())
+        w = _string_char_width(text, match.start())
         if total + w > max_width:
             return text[:match.start()]
         total += w
@@ -125,7 +153,7 @@ def cell_to_index(text: str, col: int) -> int:
         if total + run > col:
             return ascii_start + col - total
         total += run
-        w = char_width(match.group())
+        w = _string_char_width(text, match.start())
         if total + w > col:
             return match.start()
         total += w

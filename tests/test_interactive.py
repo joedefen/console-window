@@ -95,6 +95,17 @@ def test_prompt_passthrough_records_demo_indicator(make):
     assert win.last_demo_key == ' p '
 
 
+def test_taken_arrow_key_is_named_in_demo_indicator(make):
+    # grub-wiz takes LEFT/RIGHT for itself; the demo header must name the key
+    # it recorded instead of showing the old '???' placeholder.
+    win, backend = make(demo_mode=True,
+                        taken_nav_keys={curses.KEY_LEFT: 'prev',
+                                        curses.KEY_RIGHT: 'next'})
+    backend.queue_keys(curses.KEY_LEFT)
+    assert win.prompt(seconds=0.5) == curses.KEY_LEFT
+    assert win.last_demo_key == 'LEFT'
+
+
 def test_prompt_passthrough_forwards_escape_without_handled_keys(make):
     # The gap that forced every InlineConfirmation caller to discover
     # handled_keys: ESC must reach a passthrough editor as a normal key.

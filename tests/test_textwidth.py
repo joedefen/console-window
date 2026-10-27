@@ -3,6 +3,8 @@ from console_window import textwidth as tw
 CJK = '世'          # U+4E16, East-Asian Wide -> 2 cells
 COMBINING = '\u0301'  # combining acute accent -> 0 cells
 ZWJ = '\u200d'     # zero-width joiner (Cf) -> 0 cells
+VS16 = '\ufe0f'    # emoji presentation selector
+WARN = f'\u26a0{VS16}'  # ⚠️: ambiguous base + VS16, drawn 2 cells by terminals
 
 # --- char_width / string_width ----------------------------------------------
 
@@ -32,6 +34,38 @@ def test_string_width_mixed():
 def test_string_width_ignores_combining_and_zwj():
     assert tw.string_width(f'e{COMBINING}') == 1  # é as e + combining accent
     assert tw.string_width(f'{CJK}{ZWJ}{CJK}') == 4
+
+
+def test_string_width_counts_emoji_presentation_as_two_cells():
+    # ⚠️ is U+26A0 (East-Asian Ambiguous) + VS16.  Terminals honour VS16 and
+    # draw it two cells wide, so a one-cell measurement shifts every following
+    # character by a column and crams the space after the glyph.
+    assert tw.char_width('\u26a0') == 1        # per code point: unchanged
+    assert tw.string_width(WARN) == 2
+    assert tw.string_width(f'{WARN} x') == 4
+
+
+def test_string_width_does_not_widen_wide_or_ascii_bases_again():
+    assert tw.string_width(f'\u231a{VS16}') == 2   # ⌚ already wide
+    assert tw.string_width(f'a{VS16}') == 1        # terminals keep ASCII narrow
+    assert tw.string_width(VS16) == 0              # selector with no base
+
+
+def test_ljust_pads_emoji_presentation_rows_to_the_requested_cells():
+    padded = tw.ljust(f'{WARN} x', 6)
+    assert padded == f'{WARN} x  '
+    assert tw.string_width(padded) == 6
+
+
+def test_truncate_keeps_the_presentation_selector_with_its_base():
+    assert tw.truncate(f'{WARN} commit', 2) == WARN
+    assert tw.truncate(f'{WARN} commit', 1) == '\u26a0'
+
+
+def test_cell_to_index_agrees_with_string_width_for_emoji():
+    text = f'{WARN} x'
+    assert tw.cell_to_index(text, 2) == len(WARN)
+    assert tw.cell_to_index(text, tw.string_width(text)) == len(text)
 
 # --- truncate / ljust / rjust -----------------------------------------------
 

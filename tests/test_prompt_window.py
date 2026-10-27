@@ -2,6 +2,8 @@
 
 import curses
 
+import console_window.window as window_mod
+from console_window import textwidth
 from console_window.backend import HeadlessBackend
 from console_window.opts import ConsoleWindowOpts
 from console_window.window import ConsoleWindow
@@ -148,5 +150,139 @@ def test_every_key_is_consumable_while_active():
         for key in (ord('j'), curses.KEY_DOWN, ord('q')):
             assert win.handle_prompt_key(key) == 'continue'
             assert win.prompt_active is True
+    finally:
+        win.stop_curses()
+
+
+# --- answer hint ------------------------------------------------------------
+
+def test_answer_hint_replaces_the_default_suffix():
+    win = _window()
+    try:
+        win.begin_prompt('Proceed?', mode='y',
+                         answer_hint='["{mode}" or ESC] ⚠️')
+
+        assert win.prompt_line.get_display_string() == 'Proceed?  ["y" or ESC] ⚠️'
+    finally:
+        win.stop_curses()
+
+
+def test_answer_hint_substitutes_the_live_mode_letter():
+    win = _window()
+    try:
+        win.begin_prompt('Proceed?', mode='Y',
+                         answer_hint='["{mode}" or ESC]')
+
+        assert win.prompt_line.get_display_string() == 'Proceed?  ["Y" or ESC]'
+    finally:
+        win.stop_curses()
+
+
+def test_answer_hint_is_plain_text_not_a_format_string():
+    # Braces are caller text; a stray '{' must not raise at paint time.
+    win = _window()
+    try:
+        win.begin_prompt('Proceed?', mode='y',
+                         answer_hint='["{mode}" or ESC] {⚠️}')
+
+        assert win.prompt_line.get_display_string() == 'Proceed?  ["y" or ESC] {⚠️}'
+    finally:
+        win.stop_curses()
+
+
+def test_answer_hint_is_cleared_with_the_prompt():
+    win = _window()
+    try:
+        win.begin_prompt('Proceed?', mode='y', answer_hint='["{mode}" or ESC]')
+        win.end_prompt()
+
+        assert win.prompt_line.answer_hint == ''
+    finally:
+        win.stop_curses()
+
+
+# --- centered prompt header -------------------------------------------------
+
+def test_add_prompt_header_centers_within_the_pad_width():
+    win = _window(rows=10, cols=40)
+    try:
+        win.begin_prompt('Proceed?', mode='y')
+
+        assert win.add_prompt_header(align='center') is True
+
+        display = 'Proceed?  [Press "y" or ESC]'
+        lead = (win.get_pad_width() - textwidth.string_width(display)) // 2
+        assert win.head.texts == [' ' * lead + display]
+    finally:
+        win.stop_curses()
+
+
+def test_centering_measures_emoji_presentation_width():
+    # Each ⚠️ is two cells but two code points (base + VS16), so a correct
+    # measurement equals the code-point count.  Counting only the base (the
+    # pre-VS16 behaviour) came out two cells short and pushed the line right,
+    # which is what made the space after the glyph look cramped.
+    win = _window(rows=10, cols=40)
+    try:
+        win.begin_prompt('⚠️ Go?', mode='y', answer_hint='["{mode}" or ESC] ⚠️')
+
+        display = win.prompt_line.get_display_string()
+        assert textwidth.string_width(display) == len(display)
+
+        win.add_prompt_header(align='center')
+
+        lead = (win.get_pad_width() - textwidth.string_width(display)) // 2
+        assert win.head.texts == [' ' * lead + display]
+    finally:
+        win.stop_curses()
+
+
+def test_add_prompt_header_align_never_adds_padding_when_too_wide():
+    # Pad width is cols-1, so a 7-column window cannot hold the prompt plus a
+    # pad: centering must degrade to plain (left-aligned, truncated) drawing.
+    win = _window(rows=10, cols=8)
+    try:
+        win.begin_prompt('Proceed?', mode='y')
+
+        win.add_prompt_header(align='center')
+
+        assert win.head.texts[0] == 'Proceed'
+    finally:
+        win.stop_curses()
+
+
+# --- separator dimming ------------------------------------------------------
+
+def _hline_attrs(win):
+    return [args[4] for _name, args, _kwargs in win._backend.screen.calls_named('hline')]
+
+
+def test_separator_dims_only_while_a_prompt_is_live(monkeypatch):
+    if not hasattr(window_mod.curses, 'ACS_HLINE'):
+        monkeypatch.setattr(window_mod.curses, 'ACS_HLINE', '-', raising=False)
+    win = _window(rows=10, cols=40)
+    try:
+        win.prompt_separator_attr = curses.A_DIM
+
+        win._draw_separator_and_indicator()
+        assert _hline_attrs(win)[-1] == curses.A_NORMAL
+
+        win.begin_prompt('Proceed?', mode='y')
+        win._draw_separator_and_indicator()
+        assert _hline_attrs(win)[-1] == curses.A_DIM
+    finally:
+        win.stop_curses()
+
+
+def test_separator_stays_plain_when_no_attr_is_configured(monkeypatch):
+    if not hasattr(window_mod.curses, 'ACS_HLINE'):
+        monkeypatch.setattr(window_mod.curses, 'ACS_HLINE', '-', raising=False)
+    win = _window(rows=10, cols=40)
+    try:
+        win.begin_prompt('Proceed?', mode='y')
+
+        win._draw_separator_and_indicator()
+
+        assert _hline_attrs(win)[-1] == curses.A_NORMAL
     finally:
         win.stop_curses()

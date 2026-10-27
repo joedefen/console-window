@@ -91,11 +91,39 @@ _NAV_HELP_PREFIX = 'Navigation:  '
 _NAV_APP_PREFIX = 'App:         '
 
 
-def _nav_key_label(key: int) -> str:
-    label = NAV_KEY_LABELS.get(key)
+# Every key curses knows, keyed by its integer code.  Deriving the table from
+# the module constants keeps terminal-specific keys (F-keys, shift-arrows,
+# keypad) covered without a hardcoded list.  KEY_MIN/KEY_MAX are range
+# sentinels rather than keys, and KEY_MIN aliases KEY_BREAK, so both are
+# skipped; the surviving alias names a real key.
+_CURSES_KEY_NAMES: dict[int, str] = {
+    getattr(curses, name): name.removeprefix('KEY_')
+    for name in dir(curses)
+    if name.startswith('KEY_') and name not in ('KEY_MIN', 'KEY_MAX')
+}
+
+
+def _key_label(key: int) -> str:
+    """Best human-readable name for a curses key code.
+
+    A ``curses.KEY_*`` name wins (``LEFT``, ``F5``, ``RESIZE``), then control
+    characters in caret notation (``^U``), then a printable character.  An
+    unknown code is shown as ``<code>`` rather than a bare ``???``, so a label
+    never hides *which* key arrived.
+    """
+    label = _CURSES_KEY_NAMES.get(key)
     if label is not None:
         return label
-    return chr(key) if 32 <= key < 127 else f'<{key}>'
+    if 0 <= key < 32:
+        return f'^{chr(key + 64)}'
+    if 32 <= key < 127:
+        return chr(key)
+    return f'<{key}>'
+
+
+def _nav_key_label(key: int) -> str:
+    label = NAV_KEY_LABELS.get(key)
+    return label if label is not None else _key_label(key)
 
 
 def _pair_nav_entries(entries: list[str], prefix: str) -> list[str]:
@@ -162,6 +190,22 @@ _PASSTHROUGH_EDITING_KEYS = frozenset({
     curses.KEY_HOME, curses.KEY_END,
     1, 5,  # Ctrl-A, Ctrl-E
 })
+
+# Compact demo-mode names for the keys whose plain curses name would be
+# unwieldy or ambiguous in the header indicator.  Printable keys are handled
+# separately (centred with spaces), so this table only covers the rest.
+_DEMO_KEY_LABELS: dict[int, str] = {
+    27: 'ESC',
+    ord('\t'): 'TAB',
+    10: 'ENT',  # newline
+    13: 'ENT',  # carriage return (KEY_ENTER on some terminals)
+    curses.KEY_ENTER: 'ENT',
+    ord(' '): 'SPC',
+    8: 'BSP',
+    127: 'BSP',
+    curses.KEY_BACKSPACE: 'BSP',
+    curses.KEY_DC: 'DEL',
+}
 
 # Live ConsoleWindow instances, held by weak reference and keyed by creation
 # order.  The registry keeps creation order (so ``primary_window()`` is
@@ -502,6 +546,11 @@ class ConsoleWindow:
         # ends, so a callback can start the next prompt (see begin_prompt()).
         self.prompt_line = PromptLine()
         self._prompt_prev_passthrough = False
+        # Extra attribute for the separator rule while a prompt is live, so the
+        # chrome can recede behind the only interactive line on screen.  None
+        # (the default) leaves the rule undifferentiated.  This is app policy,
+        # like pick_attr: the window only decides *when* to apply it.
+        self.prompt_separator_attr: int | None = None
         # Transient status shown on the separator row (see status()).  Kept on
         # the window rather than a pad because the row belongs to the screen,
         # not to either pad (render_once() paints it directly on self.scr).
@@ -555,25 +604,14 @@ class ConsoleWindow:
         return self.opts.demo_mode
 
     def _format_key_for_demo(self, key: int) -> str:
-        # Special multi-character keys
-        if key == 27:  # ESC
-            return 'ESC'
-        elif key == ord('\t'):
-            return 'TAB'
-        elif key == ord('\n') or key == curses.KEY_ENTER or key == 10 or key == 13:
-            return 'ENT'
-        elif key == ord(' '):
-            return 'SPC'
-        elif key == curses.KEY_BACKSPACE or key == 127 or key == 8:
-            return 'BSP'
-        elif key == curses.KEY_DC:
-            return 'DEL'
+        label = _DEMO_KEY_LABELS.get(key)
+        if label is not None:
+            return label
         # Printable single character keys - center with spaces
-        elif 32 < key < 127:
+        if 32 < key < 127:
             return f' {chr(key)} '
-        # Default for unrecognized keys
-        else:
-            return '???'
+        # Named curses key, control character, or an explicit <code>
+        return _key_label(key)
 
     def get_pad_width(self) -> int:
         return min(self.cols-1, self.body_cols)
@@ -1153,17 +1191,24 @@ class ConsoleWindow:
                      identity: str | None = None, seed: str = '',
                      choices: str | list[str] | tuple[str, ...] | None = None,
                      on_confirm: Callable[[str], object] | None = None,
-                     on_cancel: Callable[[], object] | None = None) -> bool:
+                     on_cancel: Callable[[], object] | None = None,
+                     answer_hint: str = '') -> bool:
         """Start an in-place prompt and enable passthrough key routing.
 
         The window *is* the receiver, so there is no window-existence branch
         here; an application whose window may be ``None`` guards at its own
         call site.  Every key must then go through :meth:`handle_prompt_key`
         and a ``'continue'`` result must be swallowed.
+
+        *answer_hint* replaces the default trailing ``[Press "y" or ESC]`` text
+        for the one-key modes; ``{mode}`` in it is replaced with the live mode
+        letter.  Use it when the application wants its own bracketing or a
+        trailing decoration (see :class:`PromptLine`).
         """
         self.prompt_line.start(prompt, hint=hint, mode=mode, identity=identity,
                                seed=seed, choices=choices,
-                               on_confirm=on_confirm, on_cancel=on_cancel)
+                               on_confirm=on_confirm, on_cancel=on_cancel,
+                               answer_hint=answer_hint)
         self._prompt_prev_passthrough = self.passthrough_mode
         self.passthrough_mode = True
         return True
@@ -1195,12 +1240,30 @@ class ConsoleWindow:
             on_cancel()
         return result
 
-    def add_prompt_header(self, attr: int | None = None) -> bool:
-        """Draw the prompt as a header row; False when no prompt is active."""
+    def add_prompt_header(self, attr: int | None = None,
+                          align: str | None = None) -> bool:
+        """Draw the prompt as a header row; False when no prompt is active.
+
+        *align* of ``'center'`` pads the row so the prompt sits in the middle of
+        the usable width.  Centering is done here rather than by the caller
+        because the display width of the line is only known after the prompt is
+        composed (glyphs, an emoji presentation selector and the hint all
+        count), and a caller-side ``len()`` would be one cell out for exactly
+        the lines that need centering most.
+        """
         if not self.prompt_line.active:
             return False
-        self.add_header(self.prompt_line.get_display_string(),
-                        attr=attr if attr is not None else curses.A_BOLD)
+        text = self.prompt_line.get_display_string()
+        attr = attr if attr is not None else curses.A_BOLD
+        if align == 'center':
+            lead = max(0, (self.get_pad_width() - textwidth.string_width(text)) // 2)
+            if lead:
+                # Two adds on one row: the pad spaces carry the prompt's own
+                # attribute so the whole band, not just its text, is painted.
+                self.add_header(' ' * lead, attr=attr)
+                self.add_header(text, attr=attr, resume=True)
+                return True
+        self.add_header(text, attr=attr)
         return True
 
     def add_prompt_lines(self, attr: int | None = None,
@@ -1761,7 +1824,12 @@ class ConsoleWindow:
                 self.scr.addstr(pos, 0, '>', curses.A_REVERSE)
 
     def _draw_separator_and_indicator(self) -> None:
-        self.scr.hline(self.head.view_cnt, 0, curses.ACS_HLINE, self.cols)
+        # While an in-place prompt is live it is the only thing keys can reach,
+        # so an application may ask for the rule to recede behind it.
+        rule_attr = (self.prompt_separator_attr
+                     if self.prompt_line.active and self.prompt_separator_attr is not None
+                     else curses.A_NORMAL)
+        self.scr.hline(self.head.view_cnt, 0, curses.ACS_HLINE, self.cols, rule_attr)
         ind_pos = self._scroll_indicator_col()
         bot, cnt = self._scroll_indicator_span(ind_pos) if ind_pos >= 0 else (-1, 0)
         # Status first: it must not be able to cover the indicator, and it must
