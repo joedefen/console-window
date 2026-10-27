@@ -366,6 +366,60 @@ Mixing the two values raises `AssertionError` rather than silently changing what
 teardown means. Use `singleton=False` in tests and in applications that create
 independent windows (for example, one real window plus a headless one).
 
+### Symbols on terminals that cannot draw them
+
+The UI is built around a handful of non-ASCII symbols (`│`, `⮞`, `█`, `←`, `→`,
+`·`, box drawing). A terminal that cannot encode them does not fail loudly: it
+paints a box, or nothing, and the row quietly loses its meaning. `console-window`
+therefore keeps every decorative symbol in one registry, in two spellings, and
+degrades by itself:
+
+* **No code change.** A window detects the terminal when it is constructed — a
+  non-UTF-8 output encoding or `TERM=dumb` selects the ASCII spellings — and
+  text handed to `add_header()` / `add_body()` / `draw()` / `status()` /
+  `flash()` is transliterated before it is measured, so widths and the
+  run-length attribute counts stay correct.
+* **Only decoration is rewritten.** `Grüße` stays `Grüße`: the substitution table
+  contains registered glyphs, never arbitrary text. Set
+  `CONSOLE_WINDOW_GLYPH_AUDIT=1` to log each decorative code point you use but
+  did not register, with the exact `register()` call to add.
+* **App vocabulary.** Register what only your app draws:
+
+  ```python
+  Glyphs.register_many({'tick': ('✓', 'OK')}, probe=('tick',))
+  ```
+
+  or pass it with the window: `ConsoleWindowOpts(glyphs={'tick': ('✓', 'OK')},
+  glyphs_probe=('tick',))`. Once registered, the glyph both degrades with
+  `Glyphs.get('tick')` and appears in the font check via `Glyphs.probe_text()`.
+* **Two switches, no argparse boilerplate.** The bundled helper adds them:
+
+  ```python
+  parser = cli.add_display_arguments(argparse.ArgumentParser())
+  opts = parser.parse_args()
+  cli.apply_display_arguments(opts, prog='myapp')
+  ```
+
+  `--ascii` forces the fallback (`--ascii=no` forces the full set) and
+  `--glyphs {auto,ascii,unicode}` is its symmetric spelling; `--glyphs` wins if
+  both are given. `--theme` seeds the first window's colour theme. Apps without
+  argparse can use `CONSOLE_WINDOW_GLYPHS=auto|ascii|unicode`, which outranks
+  detection.
+* **The mode is process-wide**, like the colour-pair table, because there is one
+  terminal. `ConsoleWindowOpts(ascii=...)` seeds it and `win.ascii_mode` reads
+  it; a window constructed later never reverts an explicit choice.
+* **Help screens can explain it for you.** Return
+  `help.theme_paragraph()` from `Screen.extra_help_paragraphs()` and set
+  `show_display_notes = True` on a `BasicHelpScreen` subclass to append the font
+  check (Unicode mode) or the way back to the full set (ASCII mode). Both are
+  off by default, so an upgrading app's help output is unchanged.
+
+Themes work the same way: `Theme.create_picker_screen(base, cycle_key=None,
+store=None, note=None)` discovers the key you bound to `spin_theme` for its hint
+line, remembers the choice through any object with `load()`/`save()`, and
+`Theme.initial(cli_theme, store)` returns the theme a new process should start
+on. The library never opens a file.
+
 ## Versioning and Deprecation
 
 `console-window` follows semantic versioning: patch releases fix behaviour

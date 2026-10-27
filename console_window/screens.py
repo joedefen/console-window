@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import curses
+import textwrap
 from collections.abc import Iterable
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Protocol
 
+from . import help as help_text
 from .header import HeaderLine
 from .spinner import OptionSpinner
 
@@ -39,6 +42,16 @@ class Screen:
 
     def draw_screen(self) -> None:
         pass
+
+    def extra_help_paragraphs(self) -> Iterable[str]:
+        """Paragraphs appended to this screen's help output, if it draws any.
+
+        An app that owns a feature worth explaining returns its paragraphs here
+        (``help.theme_paragraph()``, its own prose) and lets ``BasicHelpScreen``
+        do the wrapping and dimming.  The default is empty, so an app that says
+        nothing keeps its exact output.
+        """
+        return ()
 
     def on_pause(self) -> bool:
         return not self.cannot_stack_me
@@ -245,6 +258,12 @@ class ScreenStack:
 
 
 class BasicHelpScreen(Screen):
+    #: Append the built-in display notes -- a font check in Unicode mode, and
+    #: how to get the full set back in ASCII mode -- after the app's paragraphs.
+    #: Off by default: an existing help screen must not gain a line merely by
+    #: upgrading the library.  Turn it on with ``show_display_notes = True``.
+    show_display_notes = False
+
     def draw_screen(self) -> None:
         # Resolve the window at draw time: applications may construct their
         # Screen objects before the ConsoleWindow exists (the sample app does),
@@ -255,6 +274,23 @@ class BasicHelpScreen(Screen):
         if spinner:
             spinner.show_help_nav_keys(win)
             spinner.show_help_body(win)
+        self.draw_notes(win)
+
+    def draw_notes(self, win: ConsoleWindow | None = None) -> None:
+        """Append the app's paragraphs and the display notes, dim and wrapped.
+
+        A method rather than inline code so a subclass can add its own notes
+        and still get the wrapping, the indent, and the ``A_DIM`` attribute
+        from one place.
+        """
+        target = win if win is not None else self.app.win
+        paragraphs = list(self.extra_help_paragraphs())
+        if self.show_display_notes:
+            paragraphs.append(help_text.glyph_paragraph(target))
+        width = max(getattr(target, 'cols', 80) - 8, 20)
+        for paragraph in paragraphs:
+            for line in textwrap.wrap(paragraph, width=width):
+                target.add_body(line, attr=curses.A_DIM)
 
 
 class BasicTextScreen(Screen):

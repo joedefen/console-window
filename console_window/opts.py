@@ -6,9 +6,65 @@ import logging
 from collections.abc import Iterable, Mapping
 from typing import Any, Callable
 
+from .glyphs import Glyph
 from .keys import NAVIGATION_KEYS, VERTICAL_NAV_KEYS
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_ascii_flag(raw: object) -> bool | None:
+    """Normalize the ``ascii`` option to ``None`` (auto), ``True`` or ``False``.
+
+    ``None`` is the load-bearing value: it means "detect", and it is what lets a
+    window seed the process mode only when the app actually asked for one.
+    """
+    if raw is None or isinstance(raw, bool):
+        return raw
+    raise TypeError(
+        'ascii must be None (auto-detect), True (force ASCII) or False '
+        f'(force Unicode), got {raw!r}'
+    )
+
+
+def _normalize_glyphs(raw: object) -> dict[str, Glyph] | None:
+    """Normalize ``glyphs`` to ``{name: Glyph}``, accepting pair values too."""
+    if raw is None:
+        return None
+    if not isinstance(raw, Mapping):
+        raise TypeError(
+            'glyphs must be a mapping of {name: (unicode, ascii)} or '
+            f'{{name: Glyph(...)}}, got {type(raw).__name__}'
+        )
+    normalized: dict[str, Glyph] = {}
+    for name, spec in raw.items():
+        if not isinstance(name, str) or not name:
+            raise TypeError(f'glyph names must be non-empty str, got {name!r}')
+        if isinstance(spec, Glyph):
+            normalized[name] = spec
+        elif isinstance(spec, (tuple, list)) and len(spec) == 2:
+            normalized[name] = Glyph(spec[0], spec[1])
+        else:
+            raise TypeError(
+                f'glyph {name!r} must be a Glyph or a (unicode, ascii) pair, '
+                f'got {spec!r}'
+            )
+    return normalized
+
+
+def _normalize_glyphs_probe(raw: object) -> tuple[str, ...]:
+    """Normalize ``glyphs_probe`` to a tuple of names in display order."""
+    if raw is None:
+        return ()
+    if isinstance(raw, (str, bytes)) or not isinstance(raw, Iterable):
+        raise TypeError(
+            'glyphs_probe must be an iterable of glyph names (not a bare str), '
+            f'got {raw!r}'
+        )
+    names = tuple(raw)
+    for name in names:
+        if not isinstance(name, str) or not name:
+            raise TypeError(f'glyphs_probe entries must be non-empty str, got {name!r}')
+    return names
 
 
 def _normalize_taken_nav_keys(raw: object) -> dict[int, str]:
@@ -52,9 +108,10 @@ def _normalize_taken_nav_keys(raw: object) -> dict[int, str]:
 
 
 class ConsoleWindowOpts:
-    __slots__ = ['answer_show_redraws', 'body_cols', 'body_rows', 'ctrl_c_terminates',
-                 'demo_mode', 'dialog_abort', 'dialog_return', 'head_line', 'head_rows',
-                 'keys', 'max_rows', 'min_cols_rows', 'mod_pick', 'nav_keys', 'pick_attr',
+    __slots__ = ['answer_show_redraws', 'ascii', 'body_cols', 'body_rows',
+                 'ctrl_c_terminates', 'demo_mode', 'dialog_abort', 'dialog_return',
+                 'glyphs', 'glyphs_probe', 'head_line', 'head_rows', 'keys',
+                 'max_rows', 'min_cols_rows', 'mod_pick', 'nav_keys', 'pick_attr',
                  'pick_mode', 'pick_range', 'pick_size', 'relax_handled_keys',
                  'return_if_pos_change', 'single_cell_scroll_indicator',
                  'strip_attrs_in_pick_mode', 'taken_nav_keys', 'theme']
@@ -64,12 +121,19 @@ class ConsoleWindowOpts:
     # cast.  ``Any`` for kwargs keeps the dynamic API while the stored attributes
     # are checked.
     answer_show_redraws: bool
+    #: None = detect the terminal, True = force ASCII fallbacks, False = force
+    #: Unicode.  Seeds the process-wide glyph mode when not None.
+    ascii: bool | None
     body_cols: int
     body_rows: int | None  # advisory hint only; see max_rows
     ctrl_c_terminates: bool
     demo_mode: bool
     dialog_abort: str | None
     dialog_return: str
+    #: App vocabulary: {name: Glyph} or {name: (unicode, ascii)}.
+    glyphs: dict[str, Glyph] | None
+    #: Glyph names the font check shows, in reading order.
+    glyphs_probe: tuple[str, ...]
     head_line: bool
     head_rows: int | None  # advisory hint only; see max_rows
     max_rows: int | None
@@ -145,6 +209,12 @@ class ConsoleWindowOpts:
         # theme is current when this window starts", which is the pre-existing
         # process-default behaviour.
         self.theme = kwargs.get('theme')
+        # Glyph mode and app vocabulary.  The mode itself is process state (one
+        # terminal); the option only seeds it, exactly as ``theme`` seeds the
+        # window's theme.
+        self.ascii = _normalize_ascii_flag(kwargs.get('ascii'))
+        self.glyphs = _normalize_glyphs(kwargs.get('glyphs'))
+        self.glyphs_probe = _normalize_glyphs_probe(kwargs.get('glyphs_probe'))
 
         # Validate dialog_abort
         if self.dialog_abort not in [None, 'ESC', 'ESC-ESC']:

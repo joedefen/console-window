@@ -1,9 +1,49 @@
 from __future__ import annotations
 
 import curses
-from typing import ClassVar
+import logging
+from typing import ClassVar, Protocol
 
+from . import glyphs
 from .backend import CursesBackend, RenderBackend
+
+logger = logging.getLogger(__name__)
+
+
+class ThemeStore(Protocol):
+    """Minimal persistence seam for a remembered theme.
+
+    The library never opens a file: the application owns the path, the format
+    and the permissions, and exposes only these two operations.  A
+    ``UiPrefs``-style wrapper is one adapter; a two-method stub over a dict is
+    another (handy in tests).  ``load()`` returning ``None`` means "nothing
+    remembered", which is not an error.
+    """
+
+    def load(self) -> str | None:
+        ...
+
+    def save(self, name: str) -> None:
+        ...
+
+
+def _discover_cycle_key(screen: object, fallback: str = 't') -> str:
+    """Find the printable key the host bound to ``spin_theme``.
+
+    The picker used to hard-code ``t`` in its hint line, which was wrong for any
+    app that bound the cycle to another key.  Reading the spinner keeps the hint
+    true without adding an option; a host that binds nothing keeps the
+    historical ``t``.
+    """
+    getter = getattr(screen, 'get_spinner', None)
+    spinner = getter() if callable(getter) else None
+    for option in getattr(spinner, 'options', None) or ():
+        if getattr(option, 'attr', None) != 'theme':
+            continue
+        for key in getattr(option, 'keys', None) or ():
+            if isinstance(key, int) and not isinstance(key, bool) and 32 <= key < 127:
+                return chr(key)
+    return fallback
 
 # --- palette model -----------------------------------------------------------
 # Standard xterm palette model.  0..15 are the ANSI/base colours, 16..231 the
@@ -285,6 +325,24 @@ class Theme:
         return cls._current
 
     @classmethod
+    def initial(cls, cli_theme: str | None = None,
+                store: ThemeStore | None = None) -> str:
+        """The theme to start on: an explicit choice, else the remembered one.
+
+        An explicit ``--theme`` wins, because a one-off override is the reason
+        the flag exists.  A store that cannot be read must never stop start-up:
+        its failure is logged and the default is used.
+        """
+        remembered: str | None = None
+        if cli_theme is None and store is not None:
+            try:
+                remembered = store.load()
+            except Exception:  # a broken prefs file must not kill start-up
+                logger.warning('theme store could not be read; using the default',
+                               exc_info=True)
+        return cls.resolve(cli_theme or remembered)
+
+    @classmethod
     def pair_specs(cls, theme_name: str | None) -> list[tuple[int, int, int]]:
         """``(pair_id, fg, bg)`` for every pair *theme_name* defines.
 
@@ -407,7 +465,10 @@ class Theme:
         return cls.set(theme_name)
 
     @classmethod
-    def create_picker_screen(cls, base_class: type) -> type:
+    def create_picker_screen(cls, base_class: type, *,
+                             cycle_key: str | None = None,
+                             store: ThemeStore | None = None,
+                             note: str | None = None) -> type:
         """Build a theme-picker screen class on top of *base_class*.
 
         The generated screen renders the current theme, a set of labelled colour
@@ -417,7 +478,16 @@ class Theme:
         theme, so an ordinary cycle binding and the built-in action stay in sync.
         The theme is applied to ``app.win`` itself (``ConsoleWindow.set_theme``),
         so the window reports the theme it is actually drawing with.
+
+        *cycle_key* is the key the hint line advertises; ``None`` discovers it
+        from the host's ``spin_theme`` binding and falls back to ``t``.
+        *store* makes the choice survive a restart: the factory calls
+        ``store.save()`` after each cycle, and a failing store is logged rather
+        than raised.  *note* is one extra dim line (for example "the choice is
+        remembered for the next start").
         """
+        swatch = glyphs.get('swatch') * 8
+
         class ThemePickerScreen(base_class):
             def draw_screen(self) -> None:
                 app = self.app
@@ -435,10 +505,12 @@ class Theme:
                 # Name the theme this window is on (default when unset).
                 current_theme = cls.theme_of(win)
                 display_theme = current_theme if current_theme else '(default)'
+                hint_key = cycle_key or _discover_cycle_key(self)
 
                 # Add header showing current theme
                 win.add_header(f'COLOR THEME:  {display_theme:^18}', attr=curses.A_BOLD)
-                win.add_header('   Press [t] to cycle themes, ESC to return', resume=True)
+                win.add_header(f'   Press [{hint_key}] to cycle themes, ESC to return',
+                               resume=True)
 
                 # Color purpose labels
                 color_labels = [
@@ -455,10 +527,14 @@ class Theme:
 
                 # Show color examples for this theme
                 for color_id, label, description in color_labels:
-                    # Create line with colored block and description
-                    line = f'{label:12} ████████  {description}'
+                    # Create line with colored block and description.  The block
+                    # is a registered glyph, so a terminal that cannot draw U+2588
+                    # shows '#' blocks instead of nine empty cells.
+                    line = f'{label:12} {swatch}  {description}'
                     attr = curses.color_pair(color_id)
                     win.add_body(line, attr=attr)
+                if note:
+                    win.add_body(note, attr=curses.A_DIM)
 
             def spin_theme_ACTION(self) -> None:
                 win = self.app.win
@@ -472,5 +548,11 @@ class Theme:
                 cls.apply_to(win, value)
                 if opts is not None:
                     opts.theme = value
+                if store is not None:
+                    try:
+                        store.save(value)
+                    except Exception:  # persistence never breaks a cycle
+                        logger.warning('could not remember theme %r', value,
+                                       exc_info=True)
 
         return ThemePickerScreen

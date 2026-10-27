@@ -20,7 +20,7 @@ from curses.textpad import rectangle
 from types import SimpleNamespace
 from typing import Callable, ClassVar, cast
 
-from . import geometry, signals, textwidth
+from . import geometry, glyphs, signals, textwidth
 from .backend import CursesBackend, CursesSurface, RenderBackend
 from .context import Context
 from .header import (
@@ -110,7 +110,14 @@ def _key_label(key: int) -> str:
     characters in caret notation (``^U``), then a printable character.  An
     unknown code is shown as ``<code>`` rather than a bare ``???``, so a label
     never hides *which* key arrived.
+
+    The arrow labels are decorative, so they pass through the glyph registry:
+    on a terminal that cannot draw ``←`` the help reads ``<-`` instead.
     """
+    return glyphs.transliterate(_raw_key_label(key))
+
+
+def _raw_key_label(key: int) -> str:
     label = _CURSES_KEY_NAMES.get(key)
     if label is not None:
         return label
@@ -432,6 +439,10 @@ class ConsoleWindow:
         self.theme = Theme.resolve(
             getattr(self.opts, 'theme', None) or Theme.get_current())
 
+        # Glyph mode and vocabulary.  Like the theme, the *mode* is
+        # process-global (there is one terminal); the option seeds it.
+        self._apply_glyph_mode()
+
         # Configure SIGINT policy (Ctrl-C terminates, or is delivered as key 0x3).
         signals.set_ctrl_c_policy(self.opts.ctrl_c_terminates)
         self.ctrl_c_terminates = self.opts.ctrl_c_terminates
@@ -620,6 +631,32 @@ class ConsoleWindow:
     def max_rows(self) -> int | None:
         """The enforced per-namespace content ceiling (None = unlimited)."""
         return self.opts.max_rows
+
+    @property
+    def ascii_mode(self) -> bool:
+        """True when this process draws the plain-ASCII glyph set."""
+        return glyphs.is_ascii()
+
+    def glyph(self, name: str) -> str:
+        """Return a registered glyph in the active set (see ``Glyphs.get``)."""
+        return glyphs.get(name)
+
+    def _apply_glyph_mode(self) -> None:
+        """Register the app's glyphs and seed the process-wide glyph mode.
+
+        ``opts.ascii`` seeds the mode only when it is not ``None``; otherwise
+        auto-detection runs, but only if nothing has decided yet (see
+        :func:`console_window.glyphs.ensure_policy`).  That is what keeps an
+        app-wide ``--ascii`` from being undone by the next window constructed.
+        """
+        if self.opts.glyphs:
+            glyphs.register_many(self.opts.glyphs, probe=self.opts.glyphs_probe)
+        elif self.opts.glyphs_probe:
+            glyphs.probe(*self.opts.glyphs_probe)
+        if self.opts.ascii is not None:
+            glyphs.set_ascii(self.opts.ascii)
+        else:
+            glyphs.ensure_policy()
 
     def set_theme(self, theme_name: str) -> bool:
         """Make *theme_name* this window's theme and install its colours.
@@ -1118,6 +1155,11 @@ class ConsoleWindow:
             self._warn_rows_dropped(ns, 'body' if is_body else 'head')
             return
 
+        # Downgrade decoration *before* the width math below: an emoji is two
+        # cells and its ASCII fallback is one or two, so substituting afterwards
+        # would truncate at the wrong column and mis-size the attribute runs.
+        text = glyphs.transliterate(text)
+
         if attr is None:
             attr = curses.A_NORMAL
         # Apply stripping logic if needed
@@ -1408,6 +1450,7 @@ class ConsoleWindow:
         ns.row_cnt = max(ns.row_cnt, y+1)
 
         uni = text if isinstance(text, str) else text.decode('utf-8')
+        uni = glyphs.transliterate(uni)
 
         if width is not None:
             width = min(width, self.get_pad_width() - x)
@@ -2346,7 +2389,7 @@ class ConsoleWindow:
         level_attr = self.STATUS_LEVELS.get(level)
         if level_attr is None:
             level_attr = self.STATUS_LEVELS['info']
-        self._status_text = text
+        self._status_text = glyphs.transliterate(text)
         self._status_attr = attr if attr is not None else level_attr
         self._status_deadline = (None if timeout is None
                                  else time.monotonic() + max(timeout, 0.0))
@@ -2372,6 +2415,9 @@ class ConsoleWindow:
         # Refresh cached dimensions: a resize may have happened since the last
         # render and everything below draws from self.rows/self.cols.
         self._set_screen_dims()
+        # This message is painted directly, so it never passes through _add();
+        # downgrade its decoration here, before the width math and the frame.
+        message = glyphs.transliterate(message)
 
         if self.rows < 3 or self.cols < textwidth.string_width(message) + 4:
             return
@@ -2386,17 +2432,19 @@ class ConsoleWindow:
             row = self.rows // 2
             col = max((self.cols - msg_len - 2) // 2, 0)
 
+            # The frame is built from registered glyphs, so an ASCII-mode
+            # terminal gets a '+---+' box instead of blank cells.
+            horizontal = glyphs.get('box_h') * msg_len
+            vertical = glyphs.get('box_v')
+            top = glyphs.get('box_tl') + horizontal + glyphs.get('box_tr')
+            middle = vertical + textwidth.ljust(message, msg_len) + vertical
+            bottom = glyphs.get('box_bl') + horizontal + glyphs.get('box_br')
             self.scr.clear()
             try:
-                # Top border
-                self.scr.addstr(row - 1, col, '┌' + '─' * msg_len + '┐',
-                                curses.A_BOLD | curses.A_REVERSE)
+                self.scr.addstr(row - 1, col, top, curses.A_BOLD | curses.A_REVERSE)
                 # Message (padded to msg_len cells so the box stays aligned)
-                self.scr.addstr(row, col, '│' + textwidth.ljust(message, msg_len) + '│',
-                                curses.A_BOLD | curses.A_REVERSE)
-                # Bottom border
-                self.scr.addstr(row + 1, col, '└' + '─' * msg_len + '┘',
-                                curses.A_BOLD | curses.A_REVERSE)
+                self.scr.addstr(row, col, middle, curses.A_BOLD | curses.A_REVERSE)
+                self.scr.addstr(row + 1, col, bottom, curses.A_BOLD | curses.A_REVERSE)
             except curses.error:
                 pass  # Ignore if terminal too small
             self.scr.noutrefresh()
@@ -2581,11 +2629,16 @@ class ConsoleWindow:
         scr = self.scr
         # Scroll affordances on the box's left border.  Both cells are always
         # repainted (marker or plain border) so a marker does not linger once
-        # the viewport scrolls back to that edge.
-        top_char = '▲' if scroll_top > 0 else curses.ACS_VLINE
-        bottom_char = '▼' if scroll_top + visible_rows < content_height else curses.ACS_VLINE
+        # the viewport scrolls back to that edge.  The markers are registered
+        # glyphs, so a terminal without triangles gets ``^`` and ``v``.
+        up_glyph = glyphs.get('alert_up')
+        down_glyph = glyphs.get('alert_down')
+        top_char = up_glyph if scroll_top > 0 else curses.ACS_VLINE
+        bottom_char = (down_glyph if scroll_top + visible_rows < content_height
+                       else curses.ACS_VLINE)
+        markers = (up_glyph, down_glyph)
         for row, char in ((row0 + 1, top_char), (row0 + visible_rows, bottom_char)):
-            scr.addch(row, col0, char, curses.A_BOLD if char in ('▲', '▼') else curses.A_NORMAL)
+            scr.addch(row, col0, char, curses.A_BOLD if char in markers else curses.A_NORMAL)
 
         scr.noutrefresh()
         # Move the pad viewport: pad row scroll_top maps to the box's first

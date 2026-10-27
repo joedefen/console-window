@@ -3,6 +3,7 @@ from __future__ import annotations
 import curses
 from typing import Callable, ClassVar
 
+from . import glyphs
 from .header import HeaderLine
 from .textwidth import cell_to_index, char_width, string_width, truncate
 
@@ -279,7 +280,7 @@ class InlineConfirmation:
         # 'yes' or other permissive modes
         return self.input_buffer if self.input_buffer.lower() == 'yes' else None
 
-    def get_display_string(self, prompt: str = '', cursor_char: str = '│') -> str:
+    def get_display_string(self, prompt: str = '', cursor_char: str | None = None) -> str:
         """Return the prompt and editable buffer with a caret glyph.
 
         The caret index is split on a textwidth cell boundary, so a pasted
@@ -287,11 +288,16 @@ class InlineConfirmation:
         Single-key modes (``Y``/``y``) have no editable text and return the
         prompt unchanged; an inactive widget returns ``''`` so a caller can
         decide when the row should disappear.
+
+        ``cursor_char=None`` (the default) uses the registered ``cursor``
+        glyph, so a terminal without ``│`` gets ``|`` without an app change.
         """
         if not self.active:
             return ''
         if self.mode in ('Y', 'y'):
             return prompt
+        if cursor_char is None:
+            cursor_char = glyphs.get('cursor')
         pos = self._snap_index(self._cursor_pos)
         before = self._input_buffer[:pos]
         after = self._input_buffer[pos:]
@@ -415,10 +421,12 @@ class PromptLine:
         self._answer = None
         self._result = None
 
-    def get_display_string(self, cursor_char: str = '│') -> str:
+    def get_display_string(self, cursor_char: str | None = None) -> str:
         """The prompt as one line, with the caret glyph for editable modes."""
         if not self.active:
             return ''
+        if cursor_char is None:
+            cursor_char = glyphs.get('cursor')
         mode = self._editor.mode or ''
         if mode in ('Y', 'y'):
             hint = self.answer_hint or self.DEFAULT_ANSWER_HINT
@@ -441,7 +449,10 @@ class PromptLine:
         if not self.active or self._editor.mode != 'choices':
             return []
         resolved = self._editor.resolved_choice
-        return [f'⮞ {choice}' if choice == resolved else f'  {choice}'
+        # One cell plus a space on both branches, so the choices stay in one
+        # column whichever glyph the terminal can draw.
+        marker = glyphs.get('choice')
+        return [f'{marker} {choice}' if choice == resolved else f'  {choice}'
                 for choice in (self._editor.choices or [])]
 
 
@@ -543,12 +554,15 @@ class IncrementalSearchBar:
         if self.on_change:
             self.on_change(self._text)
 
-    def get_display_string(self, prefix: str = '/', suffix: str = '', cursor_char: str = '█') -> str:
+    def get_display_string(self, prefix: str = '/', suffix: str = '',
+                           cursor_char: str | None = None) -> str:
         if self._active:
             # Show cursor position with cursor_char (block by default for visibility).
             # The space after the prefix keeps the indicator readable; it also kept
             # the string safe from add_fancy_header's parser.  New code should use
             # as_header_line() (explicit SEARCH spans) and not rely on that.
+            if cursor_char is None:
+                cursor_char = glyphs.get('cursor_block')
             before = self._text[:self._cursor_pos]
             after = self._text[self._cursor_pos:]
             return f'{prefix} {before}{cursor_char}{after}{suffix}'
@@ -556,9 +570,11 @@ class IncrementalSearchBar:
             return f'{prefix}{self._text}{suffix}'
         return ''
 
-    def as_header_line(self, prefix: str = '/', cursor_char: str = '█') -> HeaderLine:
+    def as_header_line(self, prefix: str = '/', cursor_char: str | None = None) -> HeaderLine:
         line = HeaderLine()
         if self._active:
+            if cursor_char is None:
+                cursor_char = glyphs.get('cursor_block')
             before = self._text[:self._cursor_pos]
             after = self._text[self._cursor_pos:]
             line.text(f'{prefix} {before}{cursor_char}{after}')

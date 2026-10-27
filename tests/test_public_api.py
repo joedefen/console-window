@@ -10,6 +10,9 @@ PUBLIC_NAMES = [
     'InlineConfirmation',
     'PromptLine',
     'Theme',
+    'ThemeStore',
+    'Glyph',
+    'Glyphs',
     'Context',
     'Screen',
     'ScreenStack',
@@ -55,7 +58,7 @@ def test_consolewindow_attribute_is_the_class_not_a_module():
 def test_new_submodules_exist():
     for mod in ('window', 'theme', 'context', 'opts', 'widgets', 'spinner',
                 'screens', 'keys', 'signals', 'geometry', 'backend',
-                'header', 'textwidth'):
+                'header', 'textwidth', 'glyphs', 'cli', 'help'):
         importlib.import_module(f'console_window.{mod}')
 
 

@@ -20,6 +20,13 @@ from console_window import (
     ScreenStack,
     Theme,
 )
+from console_window import help as help_text
+
+#: The demo's own vocabulary: a glyph the library does not know about.  It is
+#: handed to the window (not registered globally) to show the option route; the
+#: registered fallback means ``\u2713`` degrades to ``OK`` automatically.
+DEMO_GLYPHS = {'tick': ('\u2713', 'OK')}
+DEMO_PROBE = ('tick', 'cursor', 'choice', 'scroll_prev', 'scroll_next')
 
 # Screen IDs
 MAIN_ST = 0
@@ -67,6 +74,9 @@ class SampleApp:
         # Configure console window
         win_opts = ConsoleWindowOpts(
             head_line=True,
+            # Symbol set: one app glyph plus the font check the HELP screen shows.
+            glyphs=DEMO_GLYPHS,
+            glyphs_probe=DEMO_PROBE,
             # No row sizing needed: the pads are viewport-sized and rows live in
             # the model, so the 'z' stress mode's 2000 filler rows need no
             # option.  max_rows is only a safety ceiling (32767 by default).
@@ -498,8 +508,14 @@ class MainScreen(DemoScreen):
 
 
 class HelpScreen(DemoScreen, BasicHelpScreen):
+    # Show the library's font-check / ASCII-fallback note under our own text.
+    show_display_notes = True
+
     def __init__(self, app):
         super().__init__('HELP', app)
+
+    def extra_help_paragraphs(self):
+        return (help_text.theme_paragraph(open_key='T', cycle_key='t'),)
 
 #   def draw_screen(self):
 #       app = self.app
@@ -545,13 +561,22 @@ class HistoryScreen(DemoScreen):
         self.text_screen.draw_screen()
 
 
-class ThemeScreen(Theme.create_picker_screen(DemoScreen)):
+class ThemeScreen(Theme.create_picker_screen(DemoScreen, cycle_key='t')):
     """THEMES screen supplied by Theme.create_picker_screen()."""
 
     def __init__(self, app):
         super().__init__('THEMES', app)
 
 def main(backend=None, singleton=True):
+    # The same two lines every console-window app needs for --ascii/--theme.
+    import argparse
+
+    from console_window import cli
+
+    parser = cli.add_display_arguments(argparse.ArgumentParser(prog='SampleApp'))
+    opts = parser.parse_args()
+    cli.apply_display_arguments(opts, prog='SampleApp')
+
     try:
         app = SampleApp(backend=backend, singleton=singleton)
         app.main_loop()

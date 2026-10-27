@@ -3,6 +3,68 @@
 All notable changes to `console-window` are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [2.1.3]
+
+### Added
+- `console_window.glyphs`: one registry for every decorative symbol the UI
+  draws, each with a plain-ASCII fallback (`Glyph`, `BUILTIN_GLYPHS`, `Glyphs`).
+  `Glyphs.register()` / `register_many()` add application vocabulary,
+  `Glyphs.get()` returns the form for the active mode, `Glyphs.unicode_of()` and
+  `Glyphs.probe_text()` always return the real glyphs (for a font check), and
+  `Glyphs.reset()` drops app registrations — the suite does it in an autouse
+  fixture because the mode is process state.
+  `Glyphs.apply_policy()` decides the mode from an explicit request, the
+  `CONSOLE_WINDOW_GLYPHS` variable (`auto`/`ascii`/`unicode`), or detection, in
+  that order; `Glyphs.ensure_policy()` runs detection at most once per process,
+  so a window constructed later cannot undo an earlier decision.
+  `Glyphs.transliterate()` rewrites registered decoration and nothing else, so
+  real UTF-8 content is never altered.  `CONSOLE_WINDOW_GLYPH_AUDIT=1` logs
+  unregistered decoration together with the `register()` call that would fix it.
+- `ConsoleWindowOpts(ascii=None, glyphs=None, glyphs_probe=())`, plus
+  `ConsoleWindow.ascii_mode` and `ConsoleWindow.glyph(name)`.  `ascii` seeds the
+  process-wide mode, `glyphs` registers the app's vocabulary, and `glyphs_probe`
+  chooses the font-check order.
+- `console_window.cli`: `add_display_arguments(parser)` and
+  `apply_display_arguments(args)`.  `--ascii` takes an optional boolean
+  (`--ascii`, `--ascii=no`) and `--glyphs {auto,ascii,unicode}` is its symmetric
+  counterpart (`--glyphs` wins when both are given).  `--theme` is added with
+  the installed theme names as choices and seeds the first window's theme.
+- `console_window.help`: `theme_paragraph()` and `glyph_paragraph()`, plus
+  `Screen.extra_help_paragraphs()` and `BasicHelpScreen.draw_notes()` /
+  `show_display_notes = True`, which wrap and dim the result.  The flag is off
+  by default so an existing help screen keeps its exact output.
+- `Theme.create_picker_screen(base, cycle_key=None, store=None, note=None)`: the
+  hint line names the key actually bound to `spin_theme` (discovered from the
+  spinner, default `t`), `store.save()` remembers the choice after each cycle
+  (a failing store is logged, never raised), and `note` adds one dim line.
+- `Theme.initial(cli_theme, store)` and the `ThemeStore` protocol
+  (`load()`/`save()`).  The library never opens a file, so the app keeps owning
+  the path, the format and the permissions.
+
+### Changed
+- Decorative literals the library used to hard-code now come from the registry:
+  the widget cursors (`│`, `█`), the resolved-choice marker (`⮞`), the help-list
+  bullet (`·`), the dialog scroll arrows (`◀`/`▶`), the alert scroll markers
+  (`▲`/`▼`), the help-legend arrows (`←`/`→`), the theme swatch (`█`), and the
+  `flash()` message box.  Unicode output is unchanged; in ASCII mode the same
+  paths paint `|`, `#`, `>`, `.`, `<`, `>`, `^`, `v`, `<-`, `->` and a `+---+`
+  box.
+- `InlineConfirmation.get_display_string()`,
+  `IncrementalSearchBar.get_display_string()` and
+  `IncrementalSearchBar.as_header_line()` accept `cursor_char=None` to mean "the
+  registered glyph".  An explicit character still wins.
+- `Theme.create_picker_screen()`'s new parameters are keyword-only, so existing
+  subclasses and call sites are unaffected.
+
+### Notes
+- Behaviour change worth knowing: on a terminal that cannot encode UTF-8 (or
+  with `TERM=dumb`) a window now starts in ASCII mode by itself.  That is the
+  point of the release; `CONSOLE_WINDOW_GLYPHS=unicode` and
+  `ConsoleWindowOpts(ascii=False)` are the escape hatches.
+- The message-box frame uses registered glyphs rather than `curses.ACS_*`, so it
+  degrades on any backend (including the headless one) and stays assertable in
+  tests.
+
 ## [2.1.0]
 
 ### Added

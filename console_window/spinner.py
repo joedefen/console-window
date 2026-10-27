@@ -5,6 +5,7 @@ from collections.abc import Iterable
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
+from . import glyphs
 from .keys import NAVIGATION_KEYS
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -299,7 +300,7 @@ class OptionSpinner:
         # an explicit placeholder instead of relying on an assert (which would
         # vanish under ``python -O`` and print "None" as the current value).
         value = self.get_value(ns.attr)
-        dot = ' ' if ns.genre == 'action' else '·'
+        dot = ' ' if ns.genre == 'action' else glyphs.get('bullet')
         win.add_body(f'{ns.descr:{dot}<{self.align}} ')
         if value is None:
             win.add_body(f'<unset: {ns.attr!r}>', resume=True, attr=curses.A_DIM)
