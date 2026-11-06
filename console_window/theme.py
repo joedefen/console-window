@@ -337,7 +337,8 @@ class Theme:
         if cli_theme is None and store is not None:
             try:
                 remembered = store.load()
-            except Exception:  # a broken prefs file must not kill start-up
+            # A broken prefs file must not kill start-up.
+            except Exception:  # pylint: disable=broad-exception-caught
                 logger.warning('theme store could not be read; using the default',
                                exc_info=True)
         return cls.resolve(cli_theme or remembered)
@@ -551,7 +552,8 @@ class Theme:
                 if store is not None:
                     try:
                         store.save(value)
-                    except Exception:  # persistence never breaks a cycle
+                    # Persistence never breaks a cycle.
+                    except Exception:  # pylint: disable=broad-exception-caught
                         logger.warning('could not remember theme %r', value,
                                        exc_info=True)
 

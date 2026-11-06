@@ -63,7 +63,8 @@ _COLORS_ENABLED = True
 
 def set_colors_enabled(enabled: bool) -> None:
     """Turn semantic colour on or off for the whole process."""
-    global _COLORS_ENABLED  # one terminal, one process-wide switch
+    # One terminal, so one process-wide switch.
+    global _COLORS_ENABLED  # pylint: disable=global-statement
     _COLORS_ENABLED = bool(enabled)
 
 
@@ -131,5 +132,6 @@ def semantic_attr(pair_id: int) -> int:
         if not curses.has_colors():
             return 0
         return curses.color_pair(pair_id)
-    except Exception:  # terminal not initialised yet; never abort a redraw
+    except Exception:  # pylint: disable=broad-exception-caught
+        # The terminal is not initialised yet; never abort a redraw.
         return 0

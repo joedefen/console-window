@@ -178,7 +178,13 @@ def _reset_state() -> None:
     _audited.clear()
 
 
-def register(name: str, unicode_text: str, ascii_text: str, *, probe: bool = False) -> None:
+def register(
+    name: str,
+    unicode_text: str,
+    ascii_text: str,
+    *,
+    probe: bool = False,  # pylint: disable=redefined-outer-name
+) -> None:
     """Teach the library one decorative glyph.
 
     *ascii_text* must be plain ASCII (it may be empty).  ``probe=True`` adds the
@@ -196,7 +202,7 @@ def register(name: str, unicode_text: str, ascii_text: str, *, probe: bool = Fal
 def register_many(
     mapping: Mapping[str, Glyph | tuple[str, str] | list[str]],
     *,
-    probe: Iterable[str] = (),
+    probe: Iterable[str] = (),  # pylint: disable=redefined-outer-name
 ) -> None:
     """Register a whole table at once.
 
