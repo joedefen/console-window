@@ -220,7 +220,7 @@ def test_add_prompt_header_centers_within_the_pad_width():
 def test_centering_measures_emoji_presentation_width():
     # Each ⚠️ is two cells but two code points (base + VS16), so a correct
     # measurement equals the code-point count.  Counting only the base (the
-    # pre-VS16 behaviour) came out two cells short and pushed the line right,
+    # pre-VS16 behavior) came out two cells short and pushed the line right,
     # which is what made the space after the glyph look cramped.
     win = _window(rows=10, cols=40)
     try:

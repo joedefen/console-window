@@ -1,9 +1,9 @@
-"""Theme installation on terminals with fewer than 256 colours.
+"""Theme installation on terminals with fewer than 256 colors.
 
-The 256-colour themes used to be handed to ``curses.init_pair()`` verbatim, so
-an 8-colour terminal (including tmux's stock ``TERM=screen``) raised
+The 256-color themes used to be handed to ``curses.init_pair()`` verbatim, so
+an 8-color terminal (including tmux's stock ``TERM=screen``) raised
 ``ValueError: Color number is greater than COLORS-1``.  These tests pin the
-degradation contract: install the requested theme, resolve every colour to what
+degradation contract: install the requested theme, resolve every color to what
 the terminal supports, and never raise.
 """
 
@@ -29,7 +29,7 @@ def _window(theme_name, backend):
 
 
 def _assert_within_capability(backend, colors):
-    assert backend.init_pair_calls, 'the theme installed no colour pairs'
+    assert backend.init_pair_calls, 'the theme installed no color pairs'
     for pair_id, fg, bg in backend.init_pair_calls:
         assert pair_id < backend.color_pairs()
         assert -1 <= fg < colors
@@ -39,7 +39,7 @@ def _assert_within_capability(backend, colors):
         assert fg != bg or (fg == -1 and bg == -1), (pair_id, fg, bg)
 
 
-# --- every bundled theme on every supported colour depth --------------------
+# --- every bundled theme on every supported color depth --------------------
 
 @pytest.mark.parametrize('colors', [8, 16, 88, 256])
 @pytest.mark.parametrize('theme_name', Theme.list_all())
@@ -56,9 +56,9 @@ def test_every_theme_installs_within_the_terminals_capability(theme_name, colors
 
 
 @pytest.mark.parametrize('colors', [1, 2, 4, 7])
-def test_below_eight_colours_degrades_to_attributes_without_raising(colors,
+def test_below_eight_colors_degrades_to_attributes_without_raising(colors,
                                                                     monkeypatch):
-    # There is no legible colour mapping for a 1-colour terminal, so nothing is
+    # There is no legible color mapping for a 1-color terminal, so nothing is
     # installed and drawing falls back to A_BOLD/A_REVERSE instead of raising.
     monkeypatch.setattr(Theme, '_current', 'nord')
     backend = HeadlessBackend(colors=colors)
@@ -77,7 +77,7 @@ def test_below_eight_colours_degrades_to_attributes_without_raising(colors,
 
 # --- the picker path (Theme.set) -------------------------------------------
 
-def test_theme_set_on_an_eight_colour_window_does_not_raise(monkeypatch):
+def test_theme_set_on_an_eight_color_window_does_not_raise(monkeypatch):
     monkeypatch.setattr(Theme, '_current', None)
     backend = HeadlessBackend(colors=8)
     win = _window('dark-mono', backend)
@@ -90,7 +90,7 @@ def test_theme_set_on_an_eight_colour_window_does_not_raise(monkeypatch):
         win.stop_curses()
 
 
-def test_window_set_theme_on_an_eight_colour_window_does_not_raise(monkeypatch):
+def test_window_set_theme_on_an_eight_color_window_does_not_raise(monkeypatch):
     monkeypatch.setattr(Theme, '_current', None)
     backend = HeadlessBackend(colors=8)
     win = _window('nord', backend)
@@ -102,9 +102,9 @@ def test_window_set_theme_on_an_eight_colour_window_does_not_raise(monkeypatch):
         win.stop_curses()
 
 
-# --- 256 colours stay byte-for-byte identical -------------------------------
+# --- 256 colors stay byte-for-byte identical -------------------------------
 
-def test_256_colour_install_uses_the_literal_theme_specs(monkeypatch):
+def test_256_color_install_uses_the_literal_theme_specs(monkeypatch):
     monkeypatch.setattr(Theme, '_current', 'nord')
     backend = HeadlessBackend(colors=256)
     win = _window('nord', backend)
@@ -145,7 +145,7 @@ def test_use_default_colors_failure_resolves_minus_one(monkeypatch):
 
 def test_curses_backend_reports_use_default_colors_failure(monkeypatch):
     def _raise():
-        raise curses.error('terminal does not support default colours')
+        raise curses.error('terminal does not support default colors')
 
     monkeypatch.setattr(backend_mod.curses, 'use_default_colors', _raise)
     backend = CursesBackend()
@@ -164,7 +164,7 @@ def test_curses_backend_captures_capabilities_after_start_color(monkeypatch):
 
 def test_curses_backend_start_color_failure_degrades(monkeypatch):
     def _raise():
-        raise curses.error('no colour support')
+        raise curses.error('no color support')
 
     monkeypatch.setattr(backend_mod.curses, 'start_color', _raise)
     backend = CursesBackend()
@@ -190,22 +190,22 @@ def test_palette_rgb_uses_the_xterm_model():
     (232, 8, 0),
     (253, 16, 7),    # gray level 218 -> normal white (192), not bright white
     (255, 16, 15),   # gray level 238 -> bright white
-    (253, 8, 7),     # ... and normal white is all an 8-colour terminal has
+    (253, 8, 7),     # ... and normal white is all an 8-color terminal has
     (196, 16, 9),    # pure red -> bright red
-    (196, 8, 1),     # ... normal red in 8 colours
-    (196, 256, 196),  # 256 colours: unchanged
+    (196, 8, 1),     # ... normal red in 8 colors
+    (196, 256, 196),  # 256 colors: unchanged
     (1, 8, 1),       # already available
 ])
 def test_nearest_palette_index_known_conversions(index, colors, expected):
     assert nearest_palette_index(index, colors) == expected
 
 
-def test_nearest_palette_index_without_colours_returns_minus_one():
+def test_nearest_palette_index_without_colors_returns_minus_one():
     assert nearest_palette_index(196, 0) == -1
 
 
 def test_resolve_color_pair_breaks_a_collapsed_pair():
-    # 232 and 16 both map to black on an 8-colour terminal; the foreground must
+    # 232 and 16 both map to black on an 8-color terminal; the foreground must
     # move so the text stays legible.
     fg, bg = resolve_color_pair(232, 16, 8, True)
     assert bg == 0
@@ -213,7 +213,7 @@ def test_resolve_color_pair_breaks_a_collapsed_pair():
     assert 0 <= fg < 8
 
 
-def test_resolve_color_pair_returns_none_for_a_one_colour_terminal():
+def test_resolve_color_pair_returns_none_for_a_one_color_terminal():
     assert resolve_color_pair(1, 0, 1, True) is None
 
 

@@ -37,7 +37,7 @@ def test_string_width_ignores_combining_and_zwj():
 
 
 def test_string_width_counts_emoji_presentation_as_two_cells():
-    # ⚠️ is U+26A0 (East-Asian Ambiguous) + VS16.  Terminals honour VS16 and
+    # ⚠️ is U+26A0 (East-Asian Ambiguous) + VS16.  Terminals honor VS16 and
     # draw it two cells wide, so a one-cell measurement shifts every following
     # character by a column and crams the space after the glyph.
     assert tw.char_width('\u26a0') == 1        # per code point: unchanged

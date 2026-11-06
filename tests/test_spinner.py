@@ -233,7 +233,7 @@ def test_get_value_is_a_pure_read():
     assert obj.mode is None  # not re-initialized behind the caller's back
 
 
-def test_normalize_initialises_a_missing_option():
+def test_normalize_initializes_a_missing_option():
     spin = OptionSpinner()
     spin.add_key('mode', 'm - mode', vals=['a', 'b'], keys=[ord('m')])
     obj = spin.default_obj

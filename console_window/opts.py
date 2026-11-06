@@ -207,7 +207,7 @@ class ConsoleWindowOpts:
         self.relax_handled_keys = kwargs.get('relax_handled_keys', True)
         # Per-window theme (ConsoleWindow.theme).  None means "inherit whatever
         # theme is current when this window starts", which is the pre-existing
-        # process-default behaviour.
+        # process-default behavior.
         self.theme = kwargs.get('theme')
         # Glyph mode and app vocabulary.  The mode itself is process state (one
         # terminal); the option only seeds it, exactly as ``theme`` seeds the

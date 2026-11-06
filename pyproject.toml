@@ -94,7 +94,7 @@ omit = ["tests/*"]
 
 [tool.coverage.report]
 # Measured at 90.69% when the shared release gate was adopted.  The floor is a
-# ratchet against new code arriving without a test, not a target to optimise;
+# ratchet against new code arriving without a test, not a target to optimize;
 # raise it when the number rises, never lower it.
 fail_under = 90
 show_missing = true

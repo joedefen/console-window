@@ -10,7 +10,7 @@ from console_window.context import Context
 from console_window.opts import ConsoleWindowOpts
 from console_window.window import ConsoleWindow, TerminalTooSmallError
 
-# ``curses.ACS_*`` are only bound once curses has been initialised (i.e. after
+# ``curses.ACS_*`` are only bound once curses has been initialized (i.e. after
 # initscr()).  Stand-ins let the drawing helpers run against HeadlessBackend.
 _ACS_STANDINS = {
     'ACS_HLINE': '-',

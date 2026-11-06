@@ -1,7 +1,7 @@
 """Ready-made help-screen paragraphs for the display features.
 
 A help screen is where a user goes when the display looks wrong, so the two
-things that most often look wrong -- the colour theme and the symbol set --
+things that most often look wrong -- the color theme and the symbol set --
 deserve standard wording.  Keeping the wording here means every app that uses
 this library says the same true thing, and an app that adds a theme picker
 does not have to re-explain what ``t`` does.

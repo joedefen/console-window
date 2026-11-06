@@ -15,7 +15,7 @@ def test_decor_genre_is_not_pickable():
     assert Context(genre='DECOR').pickable is False
 
 
-def test_other_genres_honour_pickable():
+def test_other_genres_honor_pickable():
     assert Context(genre='app').pickable is True
     assert Context(genre='app', pickable=False).pickable is False
 
@@ -32,7 +32,7 @@ def test_custom_attributes_allowed_without_warning():
 def test_near_miss_typo_of_genre_warns():
     with pytest.warns(UserWarning):
         ctx = Context(genere='app')
-    # The attribute is still attached (behaviour preserved), but loudly flagged.
+    # The attribute is still attached (behavior preserved), but loudly flagged.
     assert ctx.genere == 'app'
 
 

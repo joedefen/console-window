@@ -39,7 +39,7 @@ def test_headless_backend_records_process_global_calls():
     assert backend.is_term_resized(24, 80) is False
 
 
-def test_headless_backend_records_colour_calls():
+def test_headless_backend_records_color_calls():
     backend = HeadlessBackend(colors=True)
     backend.start_color()
     backend.use_default_colors()
@@ -249,7 +249,7 @@ def test_theme_broadcast_reaches_all_windows():
     second = _make()
     try:
         # A color-pair integer is enough here: the headless surfaces record the
-        # call without needing an initialised curses terminal.
+        # call without needing an initialized curses terminal.
         ConsoleWindow._apply_default_colors(Theme.DEFAULT_BG << 8)
         assert first.scr.calls_named('bkgd')
         assert second.scr.calls_named('bkgd')

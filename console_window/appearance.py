@@ -1,26 +1,26 @@
-"""Semantic colour roles, and one resolver for the colour switch.
+"""Semantic color roles, and one resolver for the color switch.
 
-Colour here is decoration, never information.  Every role degrades to an
-attribute when colour is off, so the same hierarchy survives on a monochrome
+Color here is decoration, never information.  Every role degrades to an
+attribute when color is off, so the same hierarchy survives on a monochrome
 terminal or under ``--no-color``.  Applications kept writing this layer twice:
 the role-to-attribute mapping, the process-wide switch seeded by ``--no-color``
 or ``NO_COLOR``, and a lookup that must never abort a redraw.  It now lives
 here.
 
-The role ids are :class:`Theme`'s semantic pairs rather than literal colour
+The role ids are :class:`Theme`'s semantic pairs rather than literal color
 numbers.  The library installs those pairs at startup and re-installs them
-whenever a theme is applied, so changing the active theme recolours the whole UI
+whenever a theme is applied, so changing the active theme recolors the whole UI
 without an edit to any draw code.
 
 ``--no-color`` is a per-run switch, not a saved preference: it replaces the
 pairs with the attributes in :data:`MONO_ROLES` for this process.  Picking a
-theme from the colour-theme screen is a request for colour, so the caller can
+theme from the color-theme screen is a request for color, so the caller can
 lift the switch again -- :func:`resolve_appearance` does that when it sees an
 explicit theme.
 
 Nothing application-specific belongs in this module: preference files, app
 vocabulary and app pseudo-themes stay with the application.  An app that has a
-``mono`` pseudo-theme normalises that name to ``''`` plus ``saved_colors=False``
+``mono`` pseudo-theme normalizes that name to ``''`` plus ``saved_colors=False``
 before calling :func:`resolve_appearance`.
 """
 
@@ -40,7 +40,7 @@ __all__ = [
     'set_colors_enabled',
 ]
 
-# Role -> attribute used when colour is off.  The hierarchy is kept with
+# Role -> attribute used when color is off.  The hierarchy is kept with
 # emphasis instead of hue: the destructive roles are bold+reverse, warnings,
 # successes and emphasis are bold, and the informational roles carry nothing
 # (their surrounding structure already distinguishes them).
@@ -62,14 +62,14 @@ _COLORS_ENABLED = True
 
 
 def set_colors_enabled(enabled: bool) -> None:
-    """Turn semantic colour on or off for the whole process."""
+    """Turn semantic color on or off for the whole process."""
     # One terminal, so one process-wide switch.
     global _COLORS_ENABLED  # pylint: disable=global-statement
     _COLORS_ENABLED = bool(enabled)
 
 
 def colors_enabled() -> bool:
-    """True while semantic roles resolve to colour pairs rather than attributes."""
+    """True while semantic roles resolve to color pairs rather than attributes."""
     return _COLORS_ENABLED
 
 
@@ -83,8 +83,8 @@ def resolve_appearance(
     """Starting ``(theme, colors)`` from the switches, environment and memory.
 
     Precedence, highest first: ``--no-color``, an explicit ``--theme`` (a
-    statement of intent, so it is honoured even when ``NO_COLOR`` is set), the
-    ``NO_COLOR`` convention (any non-empty value disables colour, per
+    statement of intent, so it is honored even when ``NO_COLOR`` is set), the
+    ``NO_COLOR`` convention (any non-empty value disables color, per
     no-color.org), then the remembered choice.
 
     ``cli_theme``/``saved_theme`` are returned resolved to a known library
@@ -116,9 +116,9 @@ def resolve_appearance(
 
 
 def semantic_attr(pair_id: int) -> int:
-    """Attribute for a :class:`Theme` role, or plain when colour is off.
+    """Attribute for a :class:`Theme` role, or plain when color is off.
 
-    With colour off the role becomes an attribute from :data:`MONO_ROLES`.
+    With color off the role becomes an attribute from :data:`MONO_ROLES`.
     Otherwise both ``curses.has_colors()`` and ``curses.color_pair()`` can raise
     before ``initscr()`` (``color_pair()`` refuses to run until then), and a
     failed lookup must never abort a redraw, so any failure degrades to plain
@@ -133,5 +133,5 @@ def semantic_attr(pair_id: int) -> int:
             return 0
         return curses.color_pair(pair_id)
     except Exception:  # pylint: disable=broad-exception-caught
-        # The terminal is not initialised yet; never abort a redraw.
+        # The terminal is not initialized yet; never abort a redraw.
         return 0

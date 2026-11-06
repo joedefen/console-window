@@ -336,7 +336,7 @@ disappears.
 | --- | --- |
 | Transliteration mangles *content* (a pager showing UTF-8 text) | Only registered codepoints are rewritten; audit mode reports unseen decoration; documented as "register what you decorate with" |
 | Substitution changing widths breaks alignment | Substitution happens before `textwidth.truncate()` / `string_width()` in `_add()` and friends; emoji 2→1 cell is covered by a width test |
-| `TERM=dumb` apps suddenly change appearance | That is the point, but it is a behaviour change: call it out under "Changed" in the CHANGELOG and keep `CONSOLE_WINDOW_GLYPHS=unicode` as the escape hatch |
+| `TERM=dumb` apps suddenly change appearance | That is the point, but it is a behavior change: call it out under "Changed" in the CHANGELOG and keep `CONSOLE_WINDOW_GLYPHS=unicode` as the escape hatch |
 | `ACS_*` unavailable on a custom backend | Keep the current literal frame as the fallback branch when the backend has no ACS table |
 | Process-global mode leaking across pytest cases | `Glyphs.reset()` in the suite's autouse fixture (same pattern as grub-wiz's `isolated_user_config_dir`) |
 | Apps that never call `apply_policy()` get no font check line | Auto-detection runs at `ConsoleWindow.__init__` regardless; the *printed* check requires an explicit `announce=True` (grub-wiz prints it in its own `main()` before curses) |

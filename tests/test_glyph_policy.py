@@ -59,7 +59,7 @@ def test_an_explicit_request_wins_and_says_so():
     assert any('requested' in note for note in report.notes)
 
 
-def test_an_explicit_unicode_request_is_honoured_on_a_dumb_terminal():
+def test_an_explicit_unicode_request_is_honored_on_a_dumb_terminal():
     report = apply_policy(False, environ={'TERM': 'dumb'}, stream=UTF8)
     assert report.ascii_mode is False
     assert is_ascii() is False

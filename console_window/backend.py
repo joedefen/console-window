@@ -92,10 +92,10 @@ class RenderBackend(Protocol):
         ...
 
     def colors(self) -> int:
-        """Number of colours the terminal supports (0 when unknown/none)."""
+        """Number of colors the terminal supports (0 when unknown/none)."""
 
     def color_pairs(self) -> int:
-        """Size of the terminal's colour-pair table."""
+        """Size of the terminal's color-pair table."""
 
     def start_color(self) -> None:
         ...
@@ -115,12 +115,12 @@ class RenderBackend(Protocol):
 
 class CursesBackend:
     # Curses exposes COLORS/COLOR_PAIRS only after start_color(), so the values
-    # are captured there.  Before that, colours()/color_pairs() fall back to the
+    # are captured there.  Before that, colors()/color_pairs() fall back to the
     # module globals (valid once initscr() has run) and finally to a conservative
     # default so a caller never sees a bogus zero-capability terminal merely
     # because it constructed a second backend for an already-running curses
     # session.
-    _FALLBACK_COLOR_PAIRS = 64  # the ncurses floor for a colour terminal
+    _FALLBACK_COLOR_PAIRS = 64  # the ncurses floor for a color terminal
 
     def __init__(self) -> None:
         self._colors = 0
@@ -156,7 +156,7 @@ class CursesBackend:
     def has_colors(self) -> bool:
         try:
             return bool(curses.has_colors())
-        except curses.error:  # curses not initialised yet
+        except curses.error:  # curses not initialized yet
             return False
 
     def colors(self) -> int:
@@ -176,7 +176,7 @@ class CursesBackend:
             pairs = 0
         if pairs > 0:
             return pairs
-        # A colour-capable terminal always has at least the ncurses minimum;
+        # A color-capable terminal always has at least the ncurses minimum;
         # reporting 0 here would make a theme install silently do nothing.
         return self._FALLBACK_COLOR_PAIRS if self.colors() > 0 else 0
 
@@ -184,7 +184,7 @@ class CursesBackend:
         try:
             curses.start_color()
         except curses.error:
-            # No colour support after all: degrade to monochrome instead of
+            # No color support after all: degrade to monochrome instead of
             # letting the caller crash during startup.
             self._colors = 0
             self._color_pairs = 0
@@ -289,8 +289,8 @@ class HeadlessBackend:
         self.pads: list[_NoopSurface] = []
         self.stopped = False
         # ``colors`` used to be a bare bool.  It still accepts one (True means a
-        # 256-colour terminal, False means none) but now also accepts the exact
-        # count, so the low-colour degradation paths are unit-testable without a
+        # 256-color terminal, False means none) but now also accepts the exact
+        # count, so the low-color degradation paths are unit-testable without a
         # real terminal.
         if isinstance(colors, bool):
             self._colors = 256 if colors else 0

@@ -300,7 +300,7 @@ class BasicTextScreen(Screen):
     objects before the ConsoleWindow exists (BasicHelpScreen relies on the same
     rule).  ``lines`` items are ``str`` or ``(str, attr)``; ``head`` is a
     ``str``, a :class:`HeaderLine`, or an iterable of either.  Content is
-    normalised by :meth:`set_text`, so ``draw_screen()`` is a flat loop and
+    normalized by :meth:`set_text`, so ``draw_screen()`` is a flat loop and
     nothing is cached across draws.
 
     There is no pick mode, no action handling and no spinner.  ESC/back stays

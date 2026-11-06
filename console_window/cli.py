@@ -1,8 +1,8 @@
 """Argument-parser boilerplate for the display options.
 
 Every curses app ends up writing the same four switches: a way to force the
-plain-ASCII symbol set, a way to pick a colour theme, a way to turn semantic
-colour off, and a way to print what was detected.  This module supplies them,
+plain-ASCII symbol set, a way to pick a color theme, a way to turn semantic
+color off, and a way to print what was detected.  This module supplies them,
 so an app's ``main()`` gains two lines instead of sixty:
 
     parser = cli.add_display_arguments(parser)
@@ -15,7 +15,7 @@ optional boolean (``--ascii``, ``--ascii=no``) and ``--glyphs`` accepts a mode
 "absent" everywhere means *detect*, never "assume Unicode".
 
 ``--no-color`` is the appearance switch.  :func:`apply_display_arguments` acts on
-it, and an app that remembers a colour preference can settle the whole decision
+it, and an app that remembers a color preference can settle the whole decision
 with :func:`console_window.appearance.resolve_appearance`.
 """
 
@@ -101,7 +101,7 @@ def add_display_arguments(
         action='store_true',
         default=None,
         help=(
-            'draw the semantic roles with attributes instead of colour; wins '
+            'draw the semantic roles with attributes instead of color; wins '
             'over --theme, and NO_COLOR does the same when the switch is absent'
         ),
     )
@@ -139,17 +139,17 @@ def apply_display_arguments(
     environ: Mapping[str, str] | None = None,
     stream: TextIO | None = None,
 ) -> TerminalReport:
-    """Set the glyph mode, print the report's notes, seed the theme, honour colour.
+    """Set the glyph mode, print the report's notes, seed the theme, honor color.
 
     Call this once, *before* any window is created, so the mode is decided while
     nothing has been drawn.  Returns the :class:`~console_window.glyphs.
     TerminalReport` so a caller can react to ``ascii_required`` (for example by
     printing a warning of its own).
 
-    An explicit ``--no-color`` turns the process-wide colour switch off here; an
+    An explicit ``--no-color`` turns the process-wide color switch off here; an
     absent switch is left alone, so an app with a remembered preference is free
     to call ``set_colors_enabled()`` with its own decision.  The two halves of
-    that decision -- the theme to install and whether colour is on -- come from
+    that decision -- the theme to install and whether color is on -- come from
     :func:`console_window.appearance.resolve_appearance`.
 
     *printer* is a callable taking one string; pass ``sys.stderr.write`` style

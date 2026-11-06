@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from console_window import ConsoleWindow, ConsoleWindowOpts, Theme
+from console_window import ConsoleWindow, ConsoleWindowOpts, Theme, appearance
 from console_window.backend import HeadlessBackend
 
 
@@ -44,9 +44,15 @@ class _BrokenStore:
 
 
 @pytest.fixture(autouse=True)
-def _colour_pairs(monkeypatch):
-    # The swatches ask curses for a colour pair; no initscr() runs in tests.
+def _color_pairs(monkeypatch):
+    # The swatches ask curses for a color pair; no initscr() runs in tests.
     monkeypatch.setattr(curses, 'color_pair', lambda pair: 0)
+
+
+@pytest.fixture(autouse=True)
+def _color_switch(monkeypatch):
+    # The appearance switch is process state; never leak a test's choice.
+    monkeypatch.setattr(appearance, '_COLORS_ENABLED', True)
 
 
 @pytest.fixture(autouse=True)
@@ -161,5 +167,83 @@ def test_swatches_use_the_registered_glyph():
         picker = Theme.create_picker_screen(_BaseScreen)
         picker(app).draw_screen()
         assert any('\u2588' * 8 in row for row in win.body.texts)
+    finally:
+        win.stop_curses()
+
+
+_SWATCH_ROLES = (
+    ('DANGER', Theme.DANGER),
+    ('SUCCESS', Theme.SUCCESS),
+    ('OLD_SUCCESS', Theme.OLD_SUCCESS),
+    ('WARNING', Theme.WARNING),
+    ('INFO', Theme.INFO),
+    ('EMPHASIS', Theme.EMPHASIS),
+    ('ERROR', Theme.ERROR),
+    ('PROGRESS', Theme.PROGRESS),
+    ('HOTSWAP', Theme.HOTSWAP),
+)
+
+
+def _swatch_attrs(win):
+    """The first attribute run of each role row, keyed by its label."""
+    attrs = {}
+    for text, runs in zip(win.body.texts, win.body.text_attrs, strict=False):
+        if runs:
+            attrs[text.split()[0]] = runs[0][0]
+    return attrs
+
+
+def test_swatches_use_the_installed_pair_when_color_is_on(monkeypatch):
+    monkeypatch.setattr(curses, 'has_colors', lambda: True)
+    monkeypatch.setattr(curses, 'color_pair', lambda pair: 500 + pair)
+    win = _window()
+    try:
+        app = SimpleNamespace(win=win, opts=SimpleNamespace(theme='default'))
+        picker = Theme.create_picker_screen(_BaseScreen)
+        picker(app).draw_screen()
+        attrs = _swatch_attrs(win)
+        for label, role in _SWATCH_ROLES:
+            assert attrs[label] == 500 + role
+    finally:
+        win.stop_curses()
+
+
+def test_swatches_follow_the_color_switch_off(monkeypatch):
+    # A picker opened while color is off used to re-paint the previous theme's
+    # pairs.  It must use the same monochrome hierarchy as the rest of the UI
+    # and must not touch curses.color_pair() at all.
+    appearance.set_colors_enabled(False)
+    monkeypatch.setattr(curses, 'has_colors', lambda: True)
+
+    def _unexpected(pair):
+        raise AssertionError(f'color pair {pair} used while color is off')
+
+    monkeypatch.setattr(curses, 'color_pair', _unexpected)
+    win = _window()
+    try:
+        app = SimpleNamespace(win=win, opts=SimpleNamespace(theme='default'))
+        picker = Theme.create_picker_screen(_BaseScreen)
+        picker(app).draw_screen()
+        attrs = _swatch_attrs(win)
+        for label, role in _SWATCH_ROLES:
+            assert attrs[label] == appearance.MONO_ROLES[role]
+    finally:
+        win.stop_curses()
+
+
+def test_a_host_can_override_the_swatch_hook(monkeypatch):
+    monkeypatch.setattr(curses, 'has_colors', lambda: True)
+    win = _window()
+    try:
+        app = SimpleNamespace(win=win, opts=SimpleNamespace(theme='default'))
+        base = Theme.create_picker_screen(_BaseScreen)
+
+        class _PlainSwatches(base):
+            @staticmethod
+            def swatch_attr(color_id):
+                return curses.A_UNDERLINE
+
+        _PlainSwatches(app).draw_screen()
+        assert set(_swatch_attrs(win).values()) == {curses.A_UNDERLINE}
     finally:
         win.stop_curses()

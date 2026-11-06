@@ -76,7 +76,7 @@ class OptionSpinner:
         return getattr(ns.obj, ns.attr, None)
 
     def normalize(self, attr: str) -> object:
-        """Initialise a missing option to its first value (or '' for a prompt).
+        """Initialize a missing option to its first value (or '' for a prompt).
 
         This is the only path that writes while an option is being registered;
         ordinary reads (help rendering, key handling) use get_value() and stay
@@ -265,7 +265,7 @@ class OptionSpinner:
     @staticmethod
     def show_help_nav_keys(win: ConsoleWindow) -> None:
         # Render from the live window so its own opts.taken_nav_keys are
-        # honoured: keys the app owns are not advertised as navigation.
+        # honored: keys the app owns are not advertised as navigation.
         for line in win.nav_help_lines():
             win.add_header(line)
 

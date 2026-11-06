@@ -181,7 +181,7 @@ def render_nav_help(effective: Iterable[int],
 # dedented triple-quoted string: editing the indentation can no longer change
 # what the help screen renders.  ``ConsoleWindow.nav_keys`` remains the joined
 # string for callers that want the whole blurb at once; live windows render
-# through ``nav_help_lines()`` so their own ``taken_nav_keys`` are honoured.
+# through ``nav_help_lines()`` so their own ``taken_nav_keys`` are honored.
 NAV_KEY_LINES: tuple[str, ...] = render_nav_help(NAVIGATION_KEYS)
 
 # Editing keys that passthrough mode hands to the application unchanged, in
@@ -200,7 +200,7 @@ _PASSTHROUGH_EDITING_KEYS = frozenset({
 
 # Compact demo-mode names for the keys whose plain curses name would be
 # unwieldy or ambiguous in the header indicator.  Printable keys are handled
-# separately (centred with spaces), so this table only covers the rest.
+# separately (centered with spaces), so this table only covers the rest.
 _DEMO_KEY_LABELS: dict[int, str] = {
     27: 'ESC',
     ord('\t'): 'TAB',
@@ -659,11 +659,11 @@ class ConsoleWindow:
             glyphs.ensure_policy()
 
     def set_theme(self, theme_name: str) -> bool:
-        """Make *theme_name* this window's theme and install its colours.
+        """Make *theme_name* this window's theme and install its colors.
 
-        Returns False for an unknown theme, or when the backend has no colour
-        support (the choice is still recorded, so a later colour-capable start
-        uses it).  Colour pairs are per-terminal, so installing a palette
+        Returns False for an unknown theme, or when the backend has no color
+        support (the choice is still recorded, so a later color-capable start
+        uses it).  Color pairs are per-terminal, so installing a palette
         necessarily also affects any other window drawing on the same screen —
         that is a curses constraint, not a choice.  What is per-window is the
         selection: it is used at startup, when pads are reallocated, and
@@ -686,9 +686,9 @@ class ConsoleWindow:
         return True
 
     def _apply_pad_theme(self, pad: CursesSurface) -> None:
-        # A freshly created pad has no background, so re-apply the theme colour
+        # A freshly created pad has no background, so re-apply the theme color
         # after every reallocation; otherwise a resize leaves the new pad on the
-        # terminal default instead of the configured background.  The colour
+        # terminal default instead of the configured background.  The color
         # comes from *this window's* theme, not the process default.
         if not self._backend.has_colors():
             return
@@ -696,7 +696,7 @@ class ConsoleWindow:
         if ('default_fg' in theme and 'default_bg' in theme
                 and Theme.DEFAULT_BG < self._backend.color_pairs()):
             # Theme.install() has already installed this pair with either the
-            # literal values or the low-colour mapping, so bkgd() never sees a
+            # literal values or the low-color mapping, so bkgd() never sees a
             # stale/out-of-range pair.
             pad.bkgd(' ', self._backend.color_pair(Theme.DEFAULT_BG))
 
@@ -815,7 +815,7 @@ class ConsoleWindow:
         return True
 
     def _new_screen(self) -> CursesSurface:
-        """Create and initialise a brand-new screen for this window."""
+        """Create and initialize a brand-new screen for this window."""
         return self._init_screen(self._backend, self.theme)
 
     def _start_curses(self) -> CursesSurface:
@@ -972,11 +972,11 @@ class ConsoleWindow:
     @staticmethod
     def _install_theme(backend: RenderBackend, scr: CursesSurface,
                        theme_name: str | None) -> str:
-        """Install *theme_name*'s colours into the terminal's pair table.
+        """Install *theme_name*'s colors into the terminal's pair table.
 
-        Colour pairs are per-terminal (one table, not one per window), so both
+        Color pairs are per-terminal (one table, not one per window), so both
         startup and ``set_theme()`` call this; the caller decides *whose*
-        theme wins.  The actual installation (including low-colour mapping and
+        theme wins.  The actual installation (including low-color mapping and
         ``-1`` resolution) lives in :meth:`Theme.install`, which ``Theme.set()``
         uses too, so the two entry points cannot diverge.  Returns the resolved
         theme name.
@@ -984,7 +984,7 @@ class ConsoleWindow:
         name = Theme.install(backend, theme_name)
         theme = Theme.THEMES[name]
         # Can't change pair 0, so the screen background is set directly.  The
-        # pair has just been installed above (with mapped values on low-colour
+        # pair has just been installed above (with mapped values on low-color
         # terminals), so this never references a stale or out-of-range pair.
         if ('default_fg' in theme and 'default_bg' in theme
                 and Theme.DEFAULT_BG < backend.color_pairs()):
@@ -998,11 +998,11 @@ class ConsoleWindow:
         signals.setup_ctrl_c()
         scr = cast(CursesSurface, backend.start(ConsoleWindow.timeout_ms))
 
-        # Initialize color support with theme.  Every colour call goes through
-        # the backend, so a non-curses backend that reports colours can use it.
+        # Initialize color support with theme.  Every color call goes through
+        # the backend, so a non-curses backend that reports colors can use it.
         if backend.has_colors():
             # start_color() is where a curses backend captures COLORS and
-            # COLOR_PAIRS; Theme.install() then enables default colours (and
+            # COLOR_PAIRS; Theme.install() then enables default colors (and
             # remembers whether -1 is usable) before resolving each pair.
             backend.start_color()
             # The window's own theme (per-window since AUDIT.md §3.1) or the
@@ -2541,7 +2541,7 @@ class ConsoleWindow:
     def _alert_scroll_target(key: int, scroll_top: int, visible_rows: int,
                              max_scroll: int) -> int:
         # "vim"-style scroll commands, matching the navigation family prompt()
-        # honours.  Any other key is not a scroll command and leaves the view put.
+        # honors.  Any other key is not a scroll command and leaves the view put.
         if key in (ord('k'), curses.KEY_UP):
             target = scroll_top - 1
         elif key in (ord('j'), curses.KEY_DOWN):

@@ -11,8 +11,8 @@ from console_window.window import ConsoleWindow
 
 
 @pytest.fixture
-def colour_recorder(monkeypatch):
-    # curses colour calls raise until initscr() has succeeded; stand them in and
+def color_recorder(monkeypatch):
+    # curses color calls raise until initscr() has succeeded; stand them in and
     # record which pair ids init_pair() is called with.
     inited = []
     monkeypatch.setattr(curses, 'start_color', lambda: None)
@@ -26,8 +26,8 @@ def colour_recorder(monkeypatch):
 # --- the shared pair list ---------------------------------------------------
 
 def test_semantic_pairs_is_one_shared_list_including_old_success():
-    # Theme.set() and _init_screen() must reinitialise exactly this set; startup
-    # used to omit OLD_SUCCESS, leaving it on an uninitialised pair.
+    # Theme.set() and _init_screen() must reinitialize exactly this set; startup
+    # used to omit OLD_SUCCESS, leaving it on an uninitialized pair.
     assert Theme.OLD_SUCCESS in Theme.SEMANTIC_PAIRS
     assert set(Theme.SEMANTIC_PAIRS) == {
         Theme.DANGER, Theme.SUCCESS, Theme.OLD_SUCCESS, Theme.WARNING,
@@ -37,15 +37,15 @@ def test_semantic_pairs_is_one_shared_list_including_old_success():
 
 def test_default_bg_pair_keeps_its_historic_id():
     # Was the bare literal ``8`` in two places; the id must not drift, or the
-    # already-written colour_pair(8) references would point elsewhere.
+    # already-written color_pair(8) references would point elsewhere.
     assert Theme.DEFAULT_BG == 8
 
 
-# --- the two initialisation paths agree -------------------------------------
+# --- the two initialization paths agree -------------------------------------
 
-def test_startup_initialises_every_semantic_pair(monkeypatch):
-    # Startup must not touch curses directly: a backend that reports colours
-    # owns colour initialisation, so make any direct call a hard failure.
+def test_startup_initializes_every_semantic_pair(monkeypatch):
+    # Startup must not touch curses directly: a backend that reports colors
+    # owns color initialization, so make any direct call a hard failure.
     def off_limits(*args, **kwargs):
         raise AssertionError('startup called curses instead of the backend')
 
@@ -59,17 +59,17 @@ def test_startup_initialises_every_semantic_pair(monkeypatch):
     try:
         assert backend.start_color_calls == 1
         assert backend.use_default_colors_calls == 1
-        initialised = {pair for pair, _fg, _bg in backend.init_pair_calls}
-        assert set(Theme.SEMANTIC_PAIRS) <= initialised
-        assert Theme.DEFAULT_BG in initialised
+        initialized = {pair for pair, _fg, _bg in backend.init_pair_calls}
+        assert set(Theme.SEMANTIC_PAIRS) <= initialized
+        assert Theme.DEFAULT_BG in initialized
         assert Theme.DEFAULT_BG in backend.color_pair_calls
     finally:
         win.stop_curses()
 
 
-def test_theme_set_initialises_the_same_pair_set(monkeypatch):
+def test_theme_set_initializes_the_same_pair_set(monkeypatch):
     # Theme.set() must go through the live window's backend, not curses
-    # directly: the old direct path bypassed every low-colour guard.
+    # directly: the old direct path bypassed every low-color guard.
     monkeypatch.setattr(Theme, '_current', None)
     backend = HeadlessBackend(colors=True)
     win = ConsoleWindow(opts=ConsoleWindowOpts(body_rows=10, head_rows=3),
@@ -77,9 +77,9 @@ def test_theme_set_initialises_the_same_pair_set(monkeypatch):
     try:
         backend.init_pair_calls.clear()
         assert Theme.set('dark-mono') is True
-        initialised = {pair for pair, _fg, _bg in backend.init_pair_calls}
-        assert set(Theme.SEMANTIC_PAIRS) <= initialised
-        assert Theme.DEFAULT_BG in initialised
+        initialized = {pair for pair, _fg, _bg in backend.init_pair_calls}
+        assert set(Theme.SEMANTIC_PAIRS) <= initialized
+        assert Theme.DEFAULT_BG in initialized
         assert win.theme == 'dark-mono'
     finally:
         win.stop_curses()
@@ -94,7 +94,7 @@ def _picker_app(theme_name):
     return win, SimpleNamespace(win=win, opts=SimpleNamespace(theme=theme_name))
 
 
-def test_create_picker_screen_draws_swatches(colour_recorder, monkeypatch):
+def test_create_picker_screen_draws_swatches(color_recorder, monkeypatch):
     monkeypatch.setattr(Theme, '_current', 'dark-mono')
     win, app = _picker_app('dark-mono')
     screen = Theme.create_picker_screen(Screen)(app)
@@ -107,7 +107,7 @@ def test_create_picker_screen_draws_swatches(colour_recorder, monkeypatch):
         win.stop_curses()
 
 
-def test_create_picker_screen_honours_the_apps_selected_theme(colour_recorder, monkeypatch):
+def test_create_picker_screen_honors_the_apps_selected_theme(color_recorder, monkeypatch):
     # The sample app drives the picker with an ordinary cycle option, so the
     # factory must apply opts.theme before drawing the swatches.
     monkeypatch.setattr(Theme, '_current', 'dark-mono')
@@ -120,7 +120,7 @@ def test_create_picker_screen_honours_the_apps_selected_theme(colour_recorder, m
         win.stop_curses()
 
 
-def test_create_picker_screen_spin_action_cycles_and_updates_option(colour_recorder, monkeypatch):
+def test_create_picker_screen_spin_action_cycles_and_updates_option(color_recorder, monkeypatch):
     monkeypatch.setattr(Theme, '_current', 'dark-mono')
     win, app = _picker_app('dark-mono')
     screen = Theme.create_picker_screen(Screen)(app)
@@ -137,7 +137,7 @@ def test_create_picker_screen_spin_action_cycles_and_updates_option(colour_recor
 
 # --- per-window themes (AUDIT.md §3.1) -------------------------------------
 
-def _colour_window(theme_name):
+def _color_window(theme_name):
     backend = HeadlessBackend(colors=True)
     win = ConsoleWindow(
         opts=ConsoleWindowOpts(theme=theme_name),
@@ -147,8 +147,8 @@ def _colour_window(theme_name):
     return win, backend
 
 
-def test_opts_theme_seeds_the_windows_own_theme(colour_recorder):
-    win, backend = _colour_window('nord')
+def test_opts_theme_seeds_the_windows_own_theme(color_recorder):
+    win, backend = _color_window('nord')
     try:
         assert win.theme == 'nord'
         assert Theme.get_current() == 'nord'
@@ -159,9 +159,9 @@ def test_opts_theme_seeds_the_windows_own_theme(colour_recorder):
         win.stop_curses()
 
 
-def test_two_windows_keep_their_own_theme_and_palette(colour_recorder):
-    first, first_backend = _colour_window('nord')
-    second, second_backend = _colour_window('gruvbox')
+def test_two_windows_keep_their_own_theme_and_palette(color_recorder):
+    first, first_backend = _color_window('nord')
+    second, second_backend = _color_window('gruvbox')
     try:
         assert first.theme == 'nord'
         assert second.theme == 'gruvbox'
@@ -175,8 +175,8 @@ def test_two_windows_keep_their_own_theme_and_palette(colour_recorder):
         second.stop_curses()
 
 
-def test_set_theme_switches_one_window_and_rejects_unknown_names(colour_recorder):
-    win, backend = _colour_window('nord')
+def test_set_theme_switches_one_window_and_rejects_unknown_names(color_recorder):
+    win, backend = _color_window('nord')
     try:
         assert win.set_theme('does-not-exist') is False
         assert win.theme == 'nord'
@@ -191,10 +191,10 @@ def test_set_theme_switches_one_window_and_rejects_unknown_names(colour_recorder
         win.stop_curses()
 
 
-def test_set_theme_records_the_choice_without_colour_support(colour_recorder):
+def test_set_theme_records_the_choice_without_color_support(color_recorder):
     win = ConsoleWindow(
         opts=ConsoleWindowOpts(theme='nord'),
-        backend=HeadlessBackend(),  # no colour support
+        backend=HeadlessBackend(),  # no color support
         singleton=False,
     )
     try:
@@ -206,9 +206,9 @@ def test_set_theme_records_the_choice_without_colour_support(colour_recorder):
         win.stop_curses()
 
 
-def test_theme_set_is_a_process_wide_switch_and_relabels_live_windows(colour_recorder):
-    first, _ = _colour_window('nord')
-    second, _ = _colour_window('gruvbox')
+def test_theme_set_is_a_process_wide_switch_and_relabels_live_windows(color_recorder):
+    first, _ = _color_window('nord')
+    second, _ = _color_window('gruvbox')
     try:
         assert Theme.set('dark-mono') is True
         assert first.theme == 'dark-mono'

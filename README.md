@@ -52,7 +52,7 @@ The wrapper handles several advanced terminal interaction patterns automatically
   * **Viewport-Sized Pads:** Separate `head` and `body` pads give the static header band and the independently scrolling body, but the pads are blit buffers sized to the terminal rather than content stores. `add_body()`/`add_header()`/`draw()` write the model, and `render()` paints the visible page into pad row 0, so pad memory and per-frame `clear()` cost stay constant no matter how many rows an app adds. Row counts need no configuration at all: `opts.body_rows` / `opts.head_rows` are advisory hints only, and `opts.max_rows` (default `32767`, `None` for unlimited) is the single content ceiling.
   * **Loud Content Limits:** A row added past `opts.max_rows` is discarded, but no longer quietly: the first discarded row of each fill episode emits a `UserWarning` naming the namespace and the option to change, and every discarded row is counted in `ConsoleWindow.rows_dropped`. It stays non-fatal — run `python -W error::UserWarning` if you would rather it killed the app.
   * **Seamless Resizing:** Automatically detects terminal size changes (`KEY_RESIZE`) and recalculates layout dimensions, with robust error handling to prevent common `curses.error` crashes during resizing.
-  * **Graceful Colour Degradation:** Themes are written against the 256-colour xterm palette, but installation asks the backend how many colours the terminal actually exposes. A 256-colour terminal gets the theme's literal specs; 16-, 88- and 8-colour terminals get the nearest available palette entry, with a contrast guard so a pair never collapses to `fg == bg`; below 8 colours (or with no colour support) the theme falls back to attributes. `-1` is only emitted when `use_default_colors()` succeeds, and `COLOR_PAIRS` is respected. Stock tmux (`TERM=screen`, 8 colours) therefore works instead of raising `ValueError: Color number is greater than COLORS-1`.
+  * **Graceful Color Degradation:** Themes are written against the 256-color xterm palette, but installation asks the backend how many colors the terminal actually exposes. A 256-color terminal gets the theme's literal specs; 16-, 88- and 8-color terminals get the nearest available palette entry, with a contrast guard so a pair never collapses to `fg == bg`; below 8 colors (or with no color support) the theme falls back to attributes. `-1` is only emitted when `use_default_colors()` succeeds, and `COLOR_PAIRS` is respected. Stock tmux (`TERM=screen`, 8 colors) therefore works instead of raising `ValueError: Color number is greater than COLORS-1`.
   * **Scroll & Pick Synchronization:** The `Window` class manages **scroll position** and a separate **pick position** (highlighted row) simultaneously.
     * When using pick mode, scrolling automatically tracks the highlighted element to keep it visible in `.pick_pos`.
     * To use that value, you must separately be able to associate `.pick_pos` to its value by, say, keeping an array of values for every added line to the `body`. 
@@ -90,13 +90,13 @@ demonstrates:
   `handle_prompt_key()`, and `N` edits a note in the header band with the
   buffered text mode. Both use `PromptLine` underneath; completion callbacks
   run after passthrough is restored, so they can report with `status()`.
-* **Themes** — a `THEMES` screen of colour samples backed by
+* **Themes** — a `THEMES` screen of color samples backed by
   `Theme.list_all()` / `get_current()` / `set()`. The active theme is now
   per-window state: `ConsoleWindowOpts(theme=...)` seeds `window.theme`,
-  `window.set_theme()` switches it (and re-initialises the terminal's colour
+  `window.set_theme()` switches it (and re-initializes the terminal's color
   pairs, which curses keeps per terminal rather than per window), and
   `Theme.set()` remains the process-wide switch. Theme names are semantic:
-  asking for `nord` on an 8-colour terminal installs the closest supported
+  asking for `nord` on an 8-color terminal installs the closest supported
   representation rather than raising, and startup, `set_theme()` and
   `Theme.set()` all share `Theme.install()`.
 * **Dialogs** — `a` calls `answer()` for text input, `l` calls `alert()`, and `n`
@@ -269,7 +269,7 @@ loop. The window never learns which item the prompt belongs to.
 `BasicTextScreen` is the small `Screen` for preformatted, scrollable text. It
 resolves `app.win` at draw time, disables pick mode, adds each header before the
 body, and adds each line with `add_body()` and no `Context` (so normal
-navigation scrolls it). Content is normalised by `set_text()`, which is safe
+navigation scrolls it). Content is normalized by `set_text()`, which is safe
 before or after the first draw:
 
 ```python
@@ -314,7 +314,7 @@ vertical key is allowed (and logged as "reduced navigation"), since the
 application is then responsible for its own scrolling.
 
 `ScreenStack.perform_actions()` is the normal router: it walks the spinner
-options, honours their scopes, and calls the matching `<attr>_ACTION` method.
+options, honors their scopes, and calls the matching `<attr>_ACTION` method.
 For apps that dispatch an action themselves, `ScreenStack.act_in(action,
 screens=None)` is the low-level single-flag variant: it clears that flag from
 `stack.obj` and returns whether it was set and the current screen matched.
@@ -402,11 +402,11 @@ degrades by itself:
 
   `--ascii` forces the fallback (`--ascii=no` forces the full set) and
   `--glyphs {auto,ascii,unicode}` is its symmetric spelling; `--glyphs` wins if
-  both are given. `--theme` seeds the first window's colour theme and
+  both are given. `--theme` seeds the first window's color theme and
   `--no-color` draws the semantic roles with bold/reverse attributes instead of
-  colour. Apps without argparse can use
+  color. Apps without argparse can use
   `CONSOLE_WINDOW_GLYPHS=auto|ascii|unicode`, which outranks detection.
-* **The mode is process-wide**, like the colour-pair table, because there is one
+* **The mode is process-wide**, like the color-pair table, because there is one
   terminal. `ConsoleWindowOpts(ascii=...)` seeds it and `win.ascii_mode` reads
   it; a window constructed later never reverts an explicit choice.
 * **Help screens can explain it for you.** Return
@@ -419,13 +419,16 @@ Themes work the same way: `Theme.create_picker_screen(base, cycle_key=None,
 store=None, note=None)` discovers the key you bound to `spin_theme` for its hint
 line, remembers the choice through any object with `load()`/`save()`, and
 `Theme.initial(cli_theme, store)` returns the theme a new process should start
-on. The library never opens a file.
+on. The library never opens a file. Its swatches follow the shared color
+switch, so a picker opened while color is off previews the monochrome
+hierarchy rather than a previous theme's colors; override `swatch_attr()` on a
+subclass to style swatches differently.
 
 The appearance layer is shared too. `console_window.appearance.semantic_attr(role)`
-returns the installed colour pair for a semantic role, or the matching attribute
-from `MONO_ROLES` when colour is off; it degrades to plain text when the terminal
-has no colour or curses has not been initialised, so a redraw is never aborted by
-a colour. `set_colors_enabled()` / `colors_enabled()` hold the process-wide
+returns the installed color pair for a semantic role, or the matching attribute
+from `MONO_ROLES` when color is off; it degrades to plain text when the terminal
+has no color or curses has not been initialized, so a redraw is never aborted by
+a color. `set_colors_enabled()` / `colors_enabled()` hold the process-wide
 switch, and `resolve_appearance(cli_theme=None, no_color=False, saved_theme='',
 saved_colors=True, environ=None)` returns the `(theme, colors)` to start with:
 `--no-color` first, then an explicit `--theme`, then `NO_COLOR`, then the
@@ -434,7 +437,7 @@ the library gives them the policy, not the storage.
 
 ## Versioning and Deprecation
 
-`console-window` follows semantic versioning: patch releases fix behaviour
+`console-window` follows semantic versioning: patch releases fix behavior
 without changing the public API, minor releases add functionality, and major
 releases may make incompatible changes.
 

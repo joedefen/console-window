@@ -132,7 +132,7 @@ BUILTIN_GLYPHS: dict[str, Glyph] = {
     'nav_prev': Glyph('\u2190', '<-'),       # help legend, "left arrow"
     'nav_next': Glyph('\u2192', '->'),       # help legend, "right arrow"
     'bullet': Glyph('\u00b7', '.'),          # help-list bullet
-    'swatch': Glyph('\u2588', '#'),          # theme colour swatch
+    'swatch': Glyph('\u2588', '#'),          # theme color swatch
     # The message-box frame.  `curses.textpad.rectangle()` already draws with
     # ACS line art, but a message box painted by hand needs its own fallback;
     # registering the corners keeps the ASCII mode invariant ("every painted

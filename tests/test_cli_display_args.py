@@ -19,7 +19,7 @@ def _forget_the_process_theme(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _restore_the_colour_switch(monkeypatch):
+def _restore_the_color_switch(monkeypatch):
     monkeypatch.setattr(appearance, '_COLORS_ENABLED', True)
 
 
@@ -138,12 +138,12 @@ def test_resolve_no_color_tolerates_a_namespace_without_the_switch():
     assert cli.resolve_no_color(argparse.Namespace(no_color='yes')) is True
 
 
-def test_apply_honours_no_color(capsys):
+def test_apply_honors_no_color(capsys):
     _apply(['--no-color'], capsys)
     assert appearance.colors_enabled() is False
 
 
-def test_apply_leaves_a_remembered_colour_choice_alone(capsys):
+def test_apply_leaves_a_remembered_color_choice_alone(capsys):
     appearance.set_colors_enabled(False)
     _apply([], capsys)
     assert appearance.colors_enabled() is False

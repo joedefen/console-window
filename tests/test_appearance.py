@@ -8,7 +8,7 @@ from console_window import Theme, appearance
 
 
 @pytest.fixture(autouse=True)
-def _fresh_colour_switch(monkeypatch):
+def _fresh_color_switch(monkeypatch):
     monkeypatch.setattr(appearance, '_COLORS_ENABLED', True)
 
 
@@ -39,13 +39,13 @@ def test_the_switch_reports_what_was_set():
     assert appearance.colors_enabled() is True
 
 
-def test_colour_on_returns_the_installed_pair(monkeypatch):
+def test_color_on_returns_the_installed_pair(monkeypatch):
     monkeypatch.setattr(curses, 'has_colors', lambda: True)
     monkeypatch.setattr(curses, 'color_pair', lambda pair_id: 1000 + pair_id)
     assert appearance.semantic_attr(Theme.WARNING) == 1000 + Theme.WARNING
 
 
-def test_a_terminal_without_colour_falls_back_to_plain(monkeypatch):
+def test_a_terminal_without_color_falls_back_to_plain(monkeypatch):
     monkeypatch.setattr(curses, 'has_colors', lambda: False)
     assert appearance.semantic_attr(Theme.WARNING) == 0
 
@@ -68,13 +68,13 @@ def test_a_pair_lookup_can_fail_before_start_color(monkeypatch):
     assert appearance.semantic_attr(Theme.WARNING) == 0
 
 
-def test_colour_off_uses_the_mono_table():
+def test_color_off_uses_the_mono_table():
     appearance.set_colors_enabled(False)
     assert appearance.semantic_attr(Theme.DANGER) == appearance.MONO_ROLES[Theme.DANGER]
     assert appearance.semantic_attr(999) == curses.A_NORMAL
 
 
-def test_nothing_given_means_the_library_default_and_colour_on():
+def test_nothing_given_means_the_library_default_and_color_on():
     assert appearance.resolve_appearance(environ={}) == ('', True)
 
 
@@ -87,7 +87,7 @@ def test_no_color_flag_wins_over_everything():
     ) == ('nord', False)
 
 
-def test_an_explicit_theme_is_a_request_for_colour():
+def test_an_explicit_theme_is_a_request_for_color():
     assert appearance.resolve_appearance(
         cli_theme='nord', environ={'NO_COLOR': '1'}) == ('nord', True)
 
@@ -97,14 +97,14 @@ def test_the_no_color_convention_needs_a_non_empty_value():
     assert appearance.resolve_appearance(environ={'NO_COLOR': ''}) == ('', True)
 
 
-def test_a_saved_theme_and_its_colour_preference_are_honoured():
+def test_a_saved_theme_and_its_color_preference_are_honored():
     assert appearance.resolve_appearance(
         saved_theme='gruvbox', saved_colors=True, environ={}) == ('gruvbox', True)
     assert appearance.resolve_appearance(
         saved_theme='gruvbox', saved_colors=False, environ={}) == ('gruvbox', False)
 
 
-def test_no_color_keeps_the_saved_theme_but_not_its_colour():
+def test_no_color_keeps_the_saved_theme_but_not_its_color():
     assert appearance.resolve_appearance(
         no_color=True, saved_theme='gruvbox', environ={}) == ('gruvbox', False)
     assert appearance.resolve_appearance(

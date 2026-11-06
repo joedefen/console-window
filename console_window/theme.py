@@ -46,11 +46,11 @@ def _discover_cycle_key(screen: object, fallback: str = 't') -> str:
     return fallback
 
 # --- palette model -----------------------------------------------------------
-# Standard xterm palette model.  0..15 are the ANSI/base colours, 16..231 the
-# 6x6x6 colour cube with the levels below, and 232..255 the grayscale ramp
+# Standard xterm palette model.  0..15 are the ANSI/base colors, 16..231 the
+# 6x6x6 color cube with the levels below, and 232..255 the grayscale ramp
 # ``8 + 10 * n``.  The RGB values are the conventional xterm ones; exact
 # fidelity is not required because the result only picks the closest entry a
-# low-colour terminal can actually display.
+# low-color terminal can actually display.
 _ANSI_RGB: tuple[tuple[int, int, int], ...] = (
     (0, 0, 0),        # 0 black
     (128, 0, 0),      # 1 red
@@ -99,12 +99,12 @@ def _rgb_distance(left: tuple[int, int, int],
 
 
 def nearest_palette_index(index: int, colors: int) -> int:
-    """Map 256-colour *index* to the nearest entry a *colors*-terminal has.
+    """Map 256-color *index* to the nearest entry a *colors*-terminal has.
 
     Entries 0..15 are the base palette, so the search is restricted to
-    ``0 .. min(colors, 16) - 1``.  A 256-colour terminal gets *index* back
+    ``0 .. min(colors, 16) - 1``.  A 256-color terminal gets *index* back
     unchanged (exact theme specs, no visual regression).  Returns ``-1`` when
-    the terminal has no usable colours at all.
+    the terminal has no usable colors at all.
     """
     if colors >= 256:
         return index
@@ -148,10 +148,10 @@ def resolve_color_pair(fg: int, bg: int, colors: int,
 
     ``-1`` is passed through only when :meth:`RenderBackend.use_default_colors`
     succeeded; otherwise it is replaced with concrete defaults (fg 7, bg 0).
-    On terminals with fewer than 256 colours each index is mapped to the
+    On terminals with fewer than 256 colors each index is mapped to the
     nearest available palette entry.  If the mapping would collapse the pair to
     ``fg == bg`` the foreground is moved to the most contrasting entry.  Returns
-    ``None`` when no legible pair exists (e.g. a 1-colour terminal), in which
+    ``None`` when no legible pair exists (e.g. a 1-color terminal), in which
     case the caller falls back to attributes and installs nothing.
     """
     if colors <= 0:
@@ -166,7 +166,7 @@ def resolve_color_pair(fg: int, bg: int, colors: int,
         if bg != -1:
             bg = nearest_palette_index(bg, colors)
     # A pair of terminal defaults is left alone: the terminal guarantees a
-    # legible default combination, and preserving (-1, -1) keeps the 256-colour
+    # legible default combination, and preserving (-1, -1) keeps the 256-color
     # path byte-for-byte identical to the theme spec.
     if fg != -1 and bg != -1 and fg == bg:
         partner = _contrast_partner(bg, colors)
@@ -195,10 +195,10 @@ class Theme:
     # to be the bare literal ``8`` in two places.
     DEFAULT_BG = 8
 
-    # The semantic roles, in initialisation order.  Both startup
-    # (ConsoleWindow._init_screen) and Theme.set() reinitialise exactly this set,
+    # The semantic roles, in initialization order.  Both startup
+    # (ConsoleWindow._init_screen) and Theme.set() reinitialize exactly this set,
     # so the two paths cannot drift apart: startup used to omit OLD_SUCCESS,
-    # leaving it on an uninitialised pair until a theme change.
+    # leaving it on an uninitialized pair until a theme change.
     SEMANTIC_PAIRS: ClassVar[tuple[int, ...]] = (
         DANGER, SUCCESS, OLD_SUCCESS, WARNING, INFO, EMPHASIS, ERROR, PROGRESS, HOTSWAP,
     )
@@ -350,7 +350,7 @@ class Theme:
         ``DEFAULT_BG`` comes first (the screen and pad background), then the
         semantic roles in ``SEMANTIC_PAIRS`` order.  Startup
         (``ConsoleWindow._init_screen``), :meth:`set` and
-        ``ConsoleWindow.set_theme`` all install colours through :meth:`install`
+        ``ConsoleWindow.set_theme`` all install colors through :meth:`install`
         from this one list, so the paths cannot drift apart.
         """
         theme = cls.THEMES[cls.resolve(theme_name)]
@@ -370,13 +370,13 @@ class Theme:
     @classmethod
     def install(cls, backend: RenderBackend,
                 theme_name: str | None = None) -> str:
-        """Install *theme_name*'s colours through *backend*, degrading safely.
+        """Install *theme_name*'s colors through *backend*, degrading safely.
 
         This is the single installation path used by startup
         (``ConsoleWindow._init_screen``), ``ConsoleWindow.set_theme()`` and
-        :meth:`set`.  It consults the backend's colour capability instead of the
-        ``curses`` globals: on a 256-colour terminal the theme's literal specs
-        are used unchanged, while fewer colours are mapped to the nearest
+        :meth:`set`.  It consults the backend's color capability instead of the
+        ``curses`` globals: on a 256-color terminal the theme's literal specs
+        are used unchanged, while fewer colors are mapped to the nearest
         available palette entry and ``-1`` is only emitted when the terminal
         accepted ``use_default_colors()``.  Pair ids beyond ``COLOR_PAIRS`` and
         pairs with no legible mapping are skipped rather than raising.  Returns
@@ -404,10 +404,10 @@ class Theme:
         # Late import to avoid a circular import at module load time.
         from .window import ConsoleWindow
 
-        # Colour pairs are terminal-global, so a live window's backend is the
+        # Color pairs are terminal-global, so a live window's backend is the
         # authoritative seam.  Without one, fall back to curses itself, but go
         # through CursesBackend so this method never calls curses.init_pair()
-        # directly (that path used to bypass every low-colour guard).
+        # directly (that path used to bypass every low-color guard).
         win = ConsoleWindow.primary_window()
         backend = getattr(win, '_backend', None) if win is not None else None
         if backend is None:
@@ -472,7 +472,7 @@ class Theme:
                              note: str | None = None) -> type:
         """Build a theme-picker screen class on top of *base_class*.
 
-        The generated screen renders the current theme, a set of labelled colour
+        The generated screen renders the current theme, a set of labeled color
         swatches, and an action (``spin_theme_ACTION``) that cycles themes.  The
         host application is expected to expose ``win``, and may expose
         ``opts.theme``: when present, that option is treated as the selected
@@ -486,6 +486,12 @@ class Theme:
         ``store.save()`` after each cycle, and a failing store is logged rather
         than raised.  *note* is one extra dim line (for example "the choice is
         remembered for the next start").
+
+        Swatches are painted through the appearance layer rather than
+        ``curses.color_pair()``, so a picker opened while color is off shows the
+        monochrome role hierarchy instead of re-painting a previous theme's
+        colors.  A host that wants a different swatch style can subclass the
+        generated screen and override its ``swatch_attr()`` hook.
         """
         swatch = glyphs.get('swatch') * 8
 
@@ -532,10 +538,28 @@ class Theme:
                     # is a registered glyph, so a terminal that cannot draw U+2588
                     # shows '#' blocks instead of nine empty cells.
                     line = f'{label:12} {swatch}  {description}'
-                    attr = curses.color_pair(color_id)
-                    win.add_body(line, attr=attr)
+                    win.add_body(line, attr=self.swatch_attr(color_id))
                 if note:
                     win.add_body(note, attr=curses.A_DIM)
+
+            @staticmethod
+            def swatch_attr(color_id: int) -> int:
+                """Attribute for one role's swatch in the picker.
+
+                Delegates to :func:`console_window.appearance.semantic_attr`, so
+                the swatch obeys the same process-wide color switch as every
+                other semantic role.  With color off the role's monochrome
+                attribute carries the hierarchy (bold+reverse, bold, plain) and
+                the preview shows the real no-color appearance; with color on
+                it is the installed pair.
+
+                This is a hook: a host may subclass the generated screen and
+                override it to style swatches differently.
+                """
+                # Late import: appearance imports Theme at module load time.
+                from .appearance import semantic_attr
+
+                return semantic_attr(color_id)
 
             def spin_theme_ACTION(self) -> None:
                 win = self.app.win

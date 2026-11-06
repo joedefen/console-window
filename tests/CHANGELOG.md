@@ -3,11 +3,28 @@
 All notable changes to `console-window` are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [2.2.2]
+
+### Fixed
+- `Theme.create_picker_screen()`: the color swatches are painted through
+  `console_window.appearance.semantic_attr()` rather than `curses.color_pair()`,
+  so a picker open while color is off (`--no-color`, `NO_COLOR`, or
+  `set_colors_enabled(False)`) shows each role's monochrome attribute
+  (bold+reverse, bold, plain) instead of re-painting the previous theme's
+  colors. The generated screen exposes an overridable `swatch_attr()` hook for
+  hosts that want a different swatch style. Color output is unchanged.
+
+### Notes
+- Documentation, comments and test names now use American English spelling
+  (`color`, `behavior`, `initialize`, `honor`, `centered`, `normalize`,
+  `optimize`, `labeled`). There is no runtime or public-API change.
+  The module `tests/test_low_colour.py` is now `tests/test_low_color.py`.
+
 ## [2.2.1]
 
 ### Notes
 - No runtime change. This release only silences the warnings the strict pylint
-  job fails on: the deliberate broad catches and the process-wide colour switch
+  job fails on: the deliberate broad catches and the process-wide color switch
   in `console_window.appearance`, and `Theme`'s store seam, carry an inline
   `pylint: disable` with the reason; the public `probe` keyword parameters are
   marked as shadowing the module-level `probe()` helper rather than renamed.
@@ -18,12 +35,12 @@ This project follows [Semantic Versioning](https://semver.org/).
 ### Added
 - `console_window.appearance`: the appearance policy applications used to copy
   into their own modules. `MONO_ROLES` maps every semantic `Theme` role to the
-  attribute used when colour is off (destructive roles bold+reverse, warnings,
+  attribute used when color is off (destructive roles bold+reverse, warnings,
   successes and emphasis bold, informational roles plain), and
   `set_colors_enabled()` / `colors_enabled()` own the process-wide switch.
-  `semantic_attr(role)` returns the installed colour pair or the monochrome
-  attribute, and degrades to plain text when the terminal has no colour or
-  curses is not initialised yet, so a failed lookup never aborts a redraw.
+  `semantic_attr(role)` returns the installed color pair or the monochrome
+  attribute, and degrades to plain text when the terminal has no color or
+  curses is not initialized yet, so a failed lookup never aborts a redraw.
   `resolve_appearance(cli_theme=None, no_color=False, saved_theme='',
   saved_colors=True, environ=None)` returns the `(theme, colors)` a process
   should start with. Precedence is `--no-color`, an explicit `--theme`, the
@@ -34,13 +51,13 @@ This project follows [Semantic Versioning](https://semver.org/).
 - `console_window.cli`: `--no-color` in `add_display_arguments()` and
   `resolve_no_color(args)` beside `resolve_force_ascii(args)`.
   `apply_display_arguments()` acts on an explicit `--no-color` and otherwise
-  leaves the switch alone, so an application with a remembered colour
+  leaves the switch alone, so an application with a remembered color
   preference can still decide for itself.
 
 ### Notes
 - `MONO_ROLES`, `colors_enabled`, `resolve_appearance`, `semantic_attr` and
   `set_colors_enabled` are re-exported from the package root.
-- The colour-theme picker still lists only installed library themes; an
+- The color-theme picker still lists only installed library themes; an
   application's `mono` pseudo-theme remains that application's own entry.
 
 ## [2.1.3]
@@ -97,7 +114,7 @@ This project follows [Semantic Versioning](https://semver.org/).
   subclasses and call sites are unaffected.
 
 ### Notes
-- Behaviour change worth knowing: on a terminal that cannot encode UTF-8 (or
+- Behavior change worth knowing: on a terminal that cannot encode UTF-8 (or
   with `TERM=dumb`) a window now starts in ASCII mode by itself.  That is the
   point of the release; `CONSOLE_WINDOW_GLYPHS=unicode` and
   `ConsoleWindowOpts(ascii=False)` are the escape hatches.
@@ -190,7 +207,7 @@ This project follows [Semantic Versioning](https://semver.org/).
 - A taken key is withdrawn from *navigation dispatch* only. Text editing
   (`_DIALOG_SIMPLE_MOVES`, widget carets, dialogs) still uses
   LEFT/RIGHT/HOME/END normally.
-- Return behaviour follows the existing `handled_keys`/`relax_handled_keys`
+- Return behavior follows the existing `handled_keys`/`relax_handled_keys`
   rules: a taken key bound through the spinner is returned; with
   `relax_handled_keys=False` and no binding it may still be swallowed.
 - Invalid entries (non-integer key codes) raise `ValueError`; duplicate codes
@@ -212,7 +229,7 @@ This project follows [Semantic Versioning](https://semver.org/).
   `'["{mode}" or ESC] ⚠️'`, without escaping braces.
 - `add_prompt_header(align='center')`: pads the prompt row so it sits in the
   middle of the pad width.  The offset is measured in display cells from the
-  composed line, so wide glyphs and emoji presentation selectors stay centred.
+  composed line, so wide glyphs and emoji presentation selectors stay centered.
 - `ConsoleWindow.prompt_separator_attr`: an attribute applied to the separator
   rule only while an in-place prompt is live (`None`, the default, keeps the
   rule plain).  Lets the chrome recede behind the one line keys can reach.
@@ -231,11 +248,11 @@ This project follows [Semantic Versioning](https://semver.org/).
   `stop_curses()` as a one-way teardown and use suspend/resume explicitly.
 - Per-window themes. `ConsoleWindow.theme` records the theme a window is on,
   `ConsoleWindowOpts(theme=...)` seeds it, and `ConsoleWindow.set_theme()`
-  switches it: colours are reinstalled through the window's own backend (curses
+  switches it: colors are reinstalled through the window's own backend (curses
   keeps one pair table per terminal, so installing a palette still affects the
   shared screen) and that window's pads are repainted. `Theme.set()` remains the
   process-wide switch and now relabels every live window. Startup, `Theme.set()`
-  and `set_theme()` install colours from the single `Theme.pair_specs()` list,
+  and `set_theme()` install colors from the single `Theme.pair_specs()` list,
   so the three paths cannot drift apart (AUDIT.md §3.1).
 - `reset_ctrl_c()` (also exported from the package root) restores the SIGINT
   handler that was installed before the first window and clears the Ctrl-C
@@ -260,7 +277,7 @@ This project follows [Semantic Versioning](https://semver.org/).
   discard once that pad has reached `opts.body_rows` / `opts.head_rows`. The
   first discarded row of each fill episode also emits a `UserWarning` naming the
   pad and the option to raise. Overflow previously left no trace, so an
-  under-sized pad showed up only as missing content. The behaviour is
+  under-sized pad showed up only as missing content. The behavior is
   deliberately non-fatal: the excess is still discarded and the app keeps
   running, `-W error::UserWarning` turns it into a hard failure for anyone who
   wants that, and `clear()` re-arms the warning for the next fill.
@@ -291,12 +308,12 @@ This project follows [Semantic Versioning](https://semver.org/).
   and Home/End. This closes the gap that forced every `InlineConfirmation`
   caller to discover `win.handled_keys.add(27)` to receive the cancel key; the
   resize-abort path already treated `27` as an application key when bound, so
-  the behaviour is consistent rather than a silent widening.
+  the behavior is consistent rather than a silent widening.
 - Every `pylint` warning now states why it is deliberate (AUDIT.md §3.3), taking
   `pylint --disable=C,R` from 9.94/10 to **10.00/10**. Protected-access and
   protocol-signature findings carry scoped disables with an adjacent reason,
   `_paint_alert()`'s genuinely unused `row9` parameter was removed, and the
-  `getattr` + `callable()` call site uses `disable-next`. No runtime behaviour
+  `getattr` + `callable()` call site uses `disable-next`. No runtime behavior
   changed.
 - The example's application class is now `SampleApp` (was `DemoApp`), matching
   the module filename and the package name. The screen base class keeps its
@@ -308,7 +325,7 @@ This project follows [Semantic Versioning](https://semver.org/).
   is read on the class, so tuning it on one instance has no effect, and keys
   typed during the bounded recovery window are lost because curses offers no
   push-back API. Both points are stated on the attributes, on `answer()` and on
-  the recovery method; no behaviour changed.
+  the recovery method; no behavior changed.
 - The SIGINT policy captures the handler that was installed before the library
   first took the signal over instead of assuming `signal.default_int_handler`,
   and restores it when the last live window stops rather than on the first
@@ -318,7 +335,7 @@ This project follows [Semantic Versioning](https://semver.org/).
   swallowing Ctrl-C while a terminating one is live (AUDIT.md §3.1).
 - The sample app's `THEMES` screen is now generated by
   `Theme.create_picker_screen()` instead of duplicating the factory's header and
-  colour swatches. The generated screen applies the host's `opts.theme` before
+  color swatches. The generated screen applies the host's `opts.theme` before
   drawing (so an ordinary `OptionSpinner` cycle binding keeps working) and
   `spin_theme_ACTION()` starts from that option when present. The factory now has
   direct tests in `tests/test_theme.py` (AUDIT.md §3.3).
@@ -340,7 +357,7 @@ This project follows [Semantic Versioning](https://semver.org/).
   `console_window/__init__.py` (AUDIT.md §3.14). The stale manual-build recipe
   at the top of `pyproject.toml` is gone.
 - `OptionSpinner.get_value()` is now a pure read: its `coerce` parameter is
-  gone and initialisation moved to the explicit `OptionSpinner.normalize(attr)`,
+  gone and initialization moved to the explicit `OptionSpinner.normalize(attr)`,
   which `_register()` calls. Apps that read option values through
   `get_value()` are unaffected because `add_key()` already normalizes the value
   during registration; code that passed `coerce=True` directly should call
@@ -382,27 +399,27 @@ This project follows [Semantic Versioning](https://semver.org/).
   window sharing the screen), so the pads and the content model survive, and
   `clear()` while suspended resets the content model without dereferencing the
   missing screen.
-- Starting a window on a terminal with fewer than 256 colours (including tmux's
-  stock `TERM=screen`, whose terminfo entry has 8 colours) no longer crashes with
+- Starting a window on a terminal with fewer than 256 colors (including tmux's
+  stock `TERM=screen`, whose terminfo entry has 8 colors) no longer crashes with
   `ValueError: Color number is greater than COLORS-1`. Theme installation now
   asks the backend for its capabilities through the new
   `RenderBackend.colors()` / `color_pairs()` seam (captured after
   `start_color()`), so `theme.py` and `window.py` never read the `curses`
-  globals directly. On 256-colour terminals the theme's literal specs are used
-  unchanged; on 16/88/8-colour terminals each index is mapped to the nearest
-  entry of the standard xterm palette (base colours 0..15, the 6x6x6 cube and
+  globals directly. On 256-color terminals the theme's literal specs are used
+  unchanged; on 16/88/8-color terminals each index is mapped to the nearest
+  entry of the standard xterm palette (base colors 0..15, the 6x6x6 cube and
   the grayscale ramp are modelled), with a contrast guard that moves the
-  foreground if mapping would collapse a pair to `fg == bg`. Below 8 colours, or
-  when colours are unavailable, installation falls back to attributes instead
+  foreground if mapping would collapse a pair to `fg == bg`. Below 8 colors, or
+  when colors are unavailable, installation falls back to attributes instead
   of raising. `use_default_colors()` is now guarded by `except curses.error` and
   its result is remembered, so `-1` becomes a concrete default (fg 7, bg 0) on
   terminals that reject it; pair ids at or past `COLOR_PAIRS` are skipped.
   Startup, `ConsoleWindow.set_theme()` and `Theme.set()` all install through the
   new `Theme.install()`, and `Theme.set()` no longer calls `curses.init_pair()`
   directly, so the built-in theme picker gets the same degradation.
-  `HeadlessBackend(colors=...)` now accepts a colour count (plus optional
-  `color_pairs=` and `default_colors=`) so the low-colour paths are covered by
-  `tests/test_low_colour.py`.
+  `HeadlessBackend(colors=...)` now accepts a color count (plus optional
+  `color_pairs=` and `default_colors=`) so the low-color paths are covered by
+  `tests/test_low_color.py`.
 - `draw()` now routes rows at or past the `max_rows` content ceiling through the
   same `rows_dropped` counter and once-per-fill warning as `add_body()` /
   `add_header()`, with the warning attributed to the caller's line. Previously
@@ -497,7 +514,7 @@ This project follows [Semantic Versioning](https://semver.org/).
   content is now reachable with `j`/`k`, the arrow keys, PageUp/PageDown (and
   Ctrl-B/Ctrl-F/Space) and Home/End, and the box's left border shows `▲`/`▼`
   markers when content extends past the fold. The `_height`/`_width` parameters,
-  previously accepted and ignored, now cap the (centred) box; passing `None`
+  previously accepted and ignored, now cap the (centered) box; passing `None`
   keeps the previous full-box, 1-cell-margin geometry.
 - `alert()` no longer reaches around the backend seam: it builds its content pad
   through `RenderBackend.newpad()` and drives its own key loop rather than calling
@@ -513,9 +530,9 @@ This project follows [Semantic Versioning](https://semver.org/).
   `HeadlessBackend` (recording no-ops), so the dialogs are backend-driven end to
   end and the `curs_set`/`doupdate` monkeypatches are gone from `tests/test_dialogs.py`
   (AUDIT.md §3.3).
-- `ConsoleWindow` startup and `Theme.set()` now (re)initialise the same semantic
-  colour pairs from the single `Theme.SEMANTIC_PAIRS` constant. Startup previously
-  omitted `OLD_SUCCESS`, so it rendered on an uninitialised pair (effectively pair
+- `ConsoleWindow` startup and `Theme.set()` now (re)initialize the same semantic
+  color pairs from the single `Theme.SEMANTIC_PAIRS` constant. Startup previously
+  omitted `OLD_SUCCESS`, so it rendered on an uninitialized pair (effectively pair
   0) until the user changed theme. The magic pair id `8` is now the named
   `Theme.DEFAULT_BG`. `tests/test_theme.py` pins the shared list, the historic id
   and that both init paths agree (AUDIT.md §3.9).
@@ -523,7 +540,7 @@ This project follows [Semantic Versioning](https://semver.org/).
 ### Removed
 - `SampleApp.do_key()`, a dead method with no caller: `main_loop` dispatches
   through `handle_key()`, which already forwards spinner keys to
-  `spin.do_key()`. No behaviour changed (AUDIT.md §3.1).
+  `spin.do_key()`. No behavior changed (AUDIT.md §3.1).
 - `console_window/_selftest.py`, the TTY-only dev self-test. The old
   `python -m console_window._selftest` entry point is gone; the features it
   demonstrated — multi-row picking, a prompt-style option, forced
@@ -532,7 +549,7 @@ This project follows [Semantic Versioning](https://semver.org/).
   which is now covered by headless smoke tests (`tests/test_sample_app.py`).
 - All docstrings from the package, the test suite, the demo and the `runner`
   script (305 in total, across 29 files). Nothing consumed them via `__doc__`,
-  `inspect.getdoc()` or `help()` (verified by grep), so runtime behaviour and the
+  `inspect.getdoc()` or `help()` (verified by grep), so runtime behavior and the
   public API are unchanged; statement order, bodies and the blank-line layout
   around definitions were preserved.
 - The `DWIPE_THEME` environment variable. `Theme.set()` no longer exports it and
@@ -581,7 +598,7 @@ fully backward compatible (`from console_window import ...` and
   `IncrementalSearchBar` / `InlineConfirmation`, `OptionSpinner` scope
   subtraction, public-API compatibility, the `answer()`/`alert()` dialog fixes,
   `set_demo_mode()` toggle/state handling, `render()`'s retry cap, and the
-  non-destructive `flash()` behaviour (`tests/test_flash.py`).
+  non-destructive `flash()` behavior (`tests/test_flash.py`).
 - `ConsoleWindow.flash_repaint` (repaint the underlying screen when `flash()`
   ends) and `ConsoleWindow.flash_poll_ms` (flash key-poll interval).
 - `console_window.textwidth` — a stdlib-only (`unicodedata`-based) display-cell
