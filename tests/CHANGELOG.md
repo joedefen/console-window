@@ -3,6 +3,16 @@
 All notable changes to `console-window` are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [2.2.1]
+
+### Notes
+- No runtime change. This release only silences the warnings the strict pylint
+  job fails on: the deliberate broad catches and the process-wide colour switch
+  in `console_window.appearance`, and `Theme`'s store seam, carry an inline
+  `pylint: disable` with the reason; the public `probe` keyword parameters are
+  marked as shadowing the module-level `probe()` helper rather than renamed.
+  2.2.0 is functionally identical.
+
 ## [2.2.0]
 
 ### Added
