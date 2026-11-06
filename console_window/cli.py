@@ -1,18 +1,22 @@
 """Argument-parser boilerplate for the display options.
 
-Every curses app ends up writing the same three switches: a way to force the
-plain-ASCII symbol set, a way to pick a colour theme, and a way to print what
-was detected.  This module supplies them, so an app's ``main()`` gains two
-lines instead of sixty:
+Every curses app ends up writing the same four switches: a way to force the
+plain-ASCII symbol set, a way to pick a colour theme, a way to turn semantic
+colour off, and a way to print what was detected.  This module supplies them,
+so an app's ``main()`` gains two lines instead of sixty:
 
     parser = cli.add_display_arguments(parser)
     ...
     cli.apply_display_arguments(opts, prog='myapp')
 
-The two switches are deliberately symmetric.  ``--ascii`` accepts an optional
-boolean (``--ascii``, ``--ascii=no``) and ``--glyphs`` accepts a mode
+``--ascii`` and ``--glyphs`` are deliberately symmetric.  ``--ascii`` accepts an
+optional boolean (``--ascii``, ``--ascii=no``) and ``--glyphs`` accepts a mode
 (``auto``, ``ascii``, ``unicode``); ``--glyphs`` wins when both are given, and
 "absent" everywhere means *detect*, never "assume Unicode".
+
+``--no-color`` is the appearance switch.  :func:`apply_display_arguments` acts on
+it, and an app that remembers a colour preference can settle the whole decision
+with :func:`console_window.appearance.resolve_appearance`.
 """
 
 from __future__ import annotations
@@ -22,11 +26,16 @@ import sys
 from collections.abc import Callable, Mapping
 from typing import TextIO
 
-from . import glyphs
+from . import appearance, glyphs
 from .glyphs import TerminalReport
 from .theme import Theme, ThemeStore
 
-__all__ = ['add_display_arguments', 'apply_display_arguments', 'resolve_force_ascii']
+__all__ = [
+    'add_display_arguments',
+    'apply_display_arguments',
+    'resolve_force_ascii',
+    'resolve_no_color',
+]
 
 _TRUE_WORDS = frozenset({'1', 'true', 'yes', 'y', 'on'})
 _FALSE_WORDS = frozenset({'0', 'false', 'no', 'n', 'off'})
@@ -51,7 +60,7 @@ def add_display_arguments(
     theme_store: ThemeStore | None = None,
     prog: str | None = None,
 ) -> argparse.ArgumentParser:
-    """Add ``--ascii``, ``--glyphs`` and ``--theme`` to *parser*.
+    """Add ``--ascii``, ``--glyphs``, ``--theme`` and ``--no-color`` to *parser*.
 
     Returns *parser* so a call site can wrap its own construction.  *theme_store*
     is accepted for symmetry with :func:`apply_display_arguments` (an app that
@@ -87,6 +96,15 @@ def add_display_arguments(
         default=None,
         help=f'color theme{remembered}',
     )
+    parser.add_argument(
+        '--no-color',
+        action='store_true',
+        default=None,
+        help=(
+            'draw the semantic roles with attributes instead of colour; wins '
+            'over --theme, and NO_COLOR does the same when the switch is absent'
+        ),
+    )
     return parser
 
 
@@ -108,6 +126,11 @@ def resolve_force_ascii(args: argparse.Namespace) -> bool | None:
     )
 
 
+def resolve_no_color(args: argparse.Namespace) -> bool:
+    """Map a parsed namespace to the ``--no-color`` switch (absent means off)."""
+    return bool(getattr(args, 'no_color', False))
+
+
 def apply_display_arguments(
     args: argparse.Namespace,
     *,
@@ -116,12 +139,18 @@ def apply_display_arguments(
     environ: Mapping[str, str] | None = None,
     stream: TextIO | None = None,
 ) -> TerminalReport:
-    """Set the glyph mode, print the report's notes, seed the theme.
+    """Set the glyph mode, print the report's notes, seed the theme, honour colour.
 
     Call this once, *before* any window is created, so the mode is decided while
     nothing has been drawn.  Returns the :class:`~console_window.glyphs.
     TerminalReport` so a caller can react to ``ascii_required`` (for example by
     printing a warning of its own).
+
+    An explicit ``--no-color`` turns the process-wide colour switch off here; an
+    absent switch is left alone, so an app with a remembered preference is free
+    to call ``set_colors_enabled()`` with its own decision.  The two halves of
+    that decision -- the theme to install and whether colour is on -- come from
+    :func:`console_window.appearance.resolve_appearance`.
 
     *printer* is a callable taking one string; pass ``sys.stderr.write`` style
     wrappers through ``lambda line: print(line, file=...)`` if needed.
@@ -133,6 +162,10 @@ def apply_display_arguments(
     )
     for note in report.notes:
         printer(f'{prog}: {note}' if prog else note)
+
+    if resolve_no_color(args):
+        # Only the explicit flag is acted on; "absent" belongs to the caller.
+        appearance.set_colors_enabled(False)
 
     theme = getattr(args, 'theme', None)
     if theme:

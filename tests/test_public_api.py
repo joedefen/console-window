@@ -21,9 +21,14 @@ PUBLIC_NAMES = [
     'HeaderLine',
     'Span',
     'HOME_ST',
+    'MONO_ROLES',
     'NAVIGATION_KEYS',
     'TerminalTooSmallError',
+    'colors_enabled',
     'reset_ctrl_c',
+    'resolve_appearance',
+    'semantic_attr',
+    'set_colors_enabled',
 ]
 
 
@@ -53,12 +58,13 @@ def test_consolewindow_attribute_is_the_class_not_a_module():
     assert console_window.ConsoleWindow.__module__ == 'console_window.window'
     assert console_window.OptionSpinner.__module__ == 'console_window.spinner'
     assert console_window.Theme.__module__ == 'console_window.theme'
+    assert console_window.semantic_attr.__module__ == 'console_window.appearance'
 
 
 def test_new_submodules_exist():
     for mod in ('window', 'theme', 'context', 'opts', 'widgets', 'spinner',
                 'screens', 'keys', 'signals', 'geometry', 'backend',
-                'header', 'textwidth', 'glyphs', 'cli', 'help'):
+                'header', 'textwidth', 'glyphs', 'cli', 'help', 'appearance'):
         importlib.import_module(f'console_window.{mod}')
 
 

@@ -1,7 +1,14 @@
 # Single source of truth for the package version: pyproject.toml declares
 # ``dynamic = ["version"]``, so flit reads this value instead of duplicating it.
-__version__ = "2.1.3"
+__version__ = "2.2.0"
 
+from .appearance import (
+    MONO_ROLES,
+    colors_enabled,
+    resolve_appearance,
+    semantic_attr,
+    set_colors_enabled,
+)
 from .context import Context
 from .glyphs import Glyph, Glyphs
 from .header import HeaderLine, Span
@@ -22,6 +29,7 @@ from .window import ConsoleWindow, TerminalTooSmallError
 
 __all__ = [
     'HOME_ST',
+    'MONO_ROLES',
     'NAVIGATION_KEYS',
     'BasicHelpScreen',
     'BasicTextScreen',
@@ -41,5 +49,9 @@ __all__ = [
     'TerminalTooSmallError',
     'Theme',
     'ThemeStore',
+    'colors_enabled',
     'reset_ctrl_c',
+    'resolve_appearance',
+    'semantic_attr',
+    'set_colors_enabled',
 ]

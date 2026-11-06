@@ -3,6 +3,36 @@
 All notable changes to `console-window` are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [2.2.0]
+
+### Added
+- `console_window.appearance`: the appearance policy applications used to copy
+  into their own modules. `MONO_ROLES` maps every semantic `Theme` role to the
+  attribute used when colour is off (destructive roles bold+reverse, warnings,
+  successes and emphasis bold, informational roles plain), and
+  `set_colors_enabled()` / `colors_enabled()` own the process-wide switch.
+  `semantic_attr(role)` returns the installed colour pair or the monochrome
+  attribute, and degrades to plain text when the terminal has no colour or
+  curses is not initialised yet, so a failed lookup never aborts a redraw.
+  `resolve_appearance(cli_theme=None, no_color=False, saved_theme='',
+  saved_colors=True, environ=None)` returns the `(theme, colors)` a process
+  should start with. Precedence is `--no-color`, an explicit `--theme`, the
+  `NO_COLOR` convention (any non-empty value), then the remembered choice.
+  Preference files, application vocabulary and application pseudo-themes stay
+  with the application, so the resolver is storage-free and knows no `mono`
+  pseudo-theme of its own.
+- `console_window.cli`: `--no-color` in `add_display_arguments()` and
+  `resolve_no_color(args)` beside `resolve_force_ascii(args)`.
+  `apply_display_arguments()` acts on an explicit `--no-color` and otherwise
+  leaves the switch alone, so an application with a remembered colour
+  preference can still decide for itself.
+
+### Notes
+- `MONO_ROLES`, `colors_enabled`, `resolve_appearance`, `semantic_attr` and
+  `set_colors_enabled` are re-exported from the package root.
+- The colour-theme picker still lists only installed library themes; an
+  application's `mono` pseudo-theme remains that application's own entry.
+
 ## [2.1.3]
 
 ### Added

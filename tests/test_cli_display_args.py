@@ -1,10 +1,10 @@
-"""The argparse boilerplate: --ascii, --ascii=BOOL, --glyphs and --theme."""
+"""The argparse boilerplate: --ascii, --ascii=BOOL, --glyphs, --theme and --no-color."""
 
 import argparse
 
 import pytest
 
-from console_window import Theme, cli
+from console_window import Theme, appearance, cli
 from console_window.glyphs import is_ascii
 
 
@@ -16,6 +16,11 @@ class _Stream:
 @pytest.fixture(autouse=True)
 def _forget_the_process_theme(monkeypatch):
     monkeypatch.setattr(Theme, '_current', None)
+
+
+@pytest.fixture(autouse=True)
+def _restore_the_colour_switch(monkeypatch):
+    monkeypatch.setattr(appearance, '_COLORS_ENABLED', True)
 
 
 def _parser():
@@ -116,6 +121,32 @@ def test_apply_tolerates_a_namespace_without_display_attributes(capsys):
         argparse.Namespace(), environ={'TERM': 'xterm'}, stream=_Stream())
     assert report.ascii_mode is False
     assert 'font check' in capsys.readouterr().out
+
+
+def test_no_color_is_the_fourth_switch():
+    args = _parser().parse_args([])
+    assert args.no_color is None
+    assert cli.resolve_no_color(args) is False
+
+    args = _parser().parse_args(['--no-color'])
+    assert args.no_color is True
+    assert cli.resolve_no_color(args) is True
+
+
+def test_resolve_no_color_tolerates_a_namespace_without_the_switch():
+    assert cli.resolve_no_color(argparse.Namespace()) is False
+    assert cli.resolve_no_color(argparse.Namespace(no_color='yes')) is True
+
+
+def test_apply_honours_no_color(capsys):
+    _apply(['--no-color'], capsys)
+    assert appearance.colors_enabled() is False
+
+
+def test_apply_leaves_a_remembered_colour_choice_alone(capsys):
+    appearance.set_colors_enabled(False)
+    _apply([], capsys)
+    assert appearance.colors_enabled() is False
 
 
 def test_the_theme_store_note_only_promises_what_is_true():

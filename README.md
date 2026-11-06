@@ -392,7 +392,7 @@ degrades by itself:
   or pass it with the window: `ConsoleWindowOpts(glyphs={'tick': ('✓', 'OK')},
   glyphs_probe=('tick',))`. Once registered, the glyph both degrades with
   `Glyphs.get('tick')` and appears in the font check via `Glyphs.probe_text()`.
-* **Two switches, no argparse boilerplate.** The bundled helper adds them:
+* **The switches, with no argparse boilerplate.** The bundled helper adds them:
 
   ```python
   parser = cli.add_display_arguments(argparse.ArgumentParser())
@@ -402,9 +402,10 @@ degrades by itself:
 
   `--ascii` forces the fallback (`--ascii=no` forces the full set) and
   `--glyphs {auto,ascii,unicode}` is its symmetric spelling; `--glyphs` wins if
-  both are given. `--theme` seeds the first window's colour theme. Apps without
-  argparse can use `CONSOLE_WINDOW_GLYPHS=auto|ascii|unicode`, which outranks
-  detection.
+  both are given. `--theme` seeds the first window's colour theme and
+  `--no-color` draws the semantic roles with bold/reverse attributes instead of
+  colour. Apps without argparse can use
+  `CONSOLE_WINDOW_GLYPHS=auto|ascii|unicode`, which outranks detection.
 * **The mode is process-wide**, like the colour-pair table, because there is one
   terminal. `ConsoleWindowOpts(ascii=...)` seeds it and `win.ascii_mode` reads
   it; a window constructed later never reverts an explicit choice.
@@ -419,6 +420,17 @@ store=None, note=None)` discovers the key you bound to `spin_theme` for its hint
 line, remembers the choice through any object with `load()`/`save()`, and
 `Theme.initial(cli_theme, store)` returns the theme a new process should start
 on. The library never opens a file.
+
+The appearance layer is shared too. `console_window.appearance.semantic_attr(role)`
+returns the installed colour pair for a semantic role, or the matching attribute
+from `MONO_ROLES` when colour is off; it degrades to plain text when the terminal
+has no colour or curses has not been initialised, so a redraw is never aborted by
+a colour. `set_colors_enabled()` / `colors_enabled()` hold the process-wide
+switch, and `resolve_appearance(cli_theme=None, no_color=False, saved_theme='',
+saved_colors=True, environ=None)` returns the `(theme, colors)` to start with:
+`--no-color` first, then an explicit `--theme`, then `NO_COLOR`, then the
+remembered choice. Apps keep their preference file and their own pseudo-themes;
+the library gives them the policy, not the storage.
 
 ## Versioning and Deprecation
 
