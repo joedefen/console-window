@@ -34,11 +34,49 @@ classifiers = [
     "Topic :: Software Development :: User Interfaces",
 ]
 
+[project.optional-dependencies]
+# The minimum a contributor needs to run the suite, and the release toolchain.
+# `./bless` refuses to start unless `twine` and `packaging` meet its own floors
+# (`twine>=7`, `packaging>=26`), so the dev extra installs a toolchain the gate
+# accepts.  `tomli` is the 3.10 fallback for `bless` and for the tests' use of
+# `tomllib`; `requires-python` still allows 3.10.
+test = [
+    'pytest >= 7.0',
+    'pytest-cov >= 4.0',
+    'tomli >= 2.0; python_version < "3.11"',
+]
+dev = [
+    'pytest >= 7.0',
+    'pytest-cov >= 4.0',
+    'ruff >= 0.9',
+    'build >= 1.2',
+    'twine >= 7',
+    'packaging >= 26',
+    'tomli >= 2.0; python_version < "3.11"',
+]
+
 [project.urls]
 Homepage = "https://github.com/joedefen/console-window"
 Repository = "https://github.com/joedefen/console-window"
 Issues = "https://github.com/joedefen/console-window/issues"
 Changelog = "https://github.com/joedefen/console-window/blob/main/CHANGELOG.md"
+
+# ----------------------------------------------------------------------
+# RELEASE GATE CONFIGURATION
+[tool.bless]
+# The branch model `./bless` keeps.  `["main"]` releases from the trunk alone;
+# `["main", "dev"]` -- the default when this table says nothing -- requires a
+# `dev` branch both locally and on origin, and fast-forwards whichever of the
+# two lags onto the other before tagging.  This tree commits to the trunk, so a
+# release is `main` and the tag.
+branches = ["main"]
+
+# The rest is derived rather than written here: the distribution name comes
+# from `[project] name`, the package holding `__version__` from that name with
+# `-` and `.` turned into `_`, and the inspector from
+# `tests/inspect_dist.py`.  There is no `[project.scripts]` entry on purpose:
+# this is a library, so the smoke stage of `bless` imports the installed
+# package and prints `__version__` instead of running a console script.
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -47,6 +85,19 @@ testpaths = ["tests"]
 # excuse, so within this suite any UserWarning fails the run -- which is how the
 # sample app's too-small head pad and its truncated help screen were found.
 filterwarnings = ["error::UserWarning"]
+
+[tool.coverage.run]
+# Pin the measured package so the number the release gate prints is the same
+# whichever directory pytest is started from.
+source = ["console_window"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+# Measured at 90.69% when the shared release gate was adopted.  The floor is a
+# ratchet against new code arriving without a test, not a target to optimise;
+# raise it when the number rises, never lower it.
+fail_under = 90
+show_missing = true
 
 # ----------------------------------------------------------------------
 # RUFF LINT CONFIGURATION
