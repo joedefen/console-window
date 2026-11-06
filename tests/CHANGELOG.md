@@ -12,9 +12,18 @@ This project follows [Semantic Versioning](https://semver.org/).
   `set_colors_enabled(False)`) shows each role's monochrome attribute
   (bold+reverse, bold, plain) instead of re-painting the previous theme's
   colors. The generated screen exposes an overridable `swatch_attr()` hook for
-  hosts that want a different swatch style. Color output is unchanged.
+  hosts that want a different swatch style and a `theme_label()` hook so an app
+  with a pseudo-theme can name it in the header. Color output is unchanged.
 
 ### Notes
+- `SampleApp` demonstrates `--no-color` end to end: its own rows are painted
+  with `appearance.semantic_attr()` instead of `curses.color_pair()`, its theme
+  option offers the demo's `mono` pseudo-theme (a color mode, not a palette),
+  and `main()` settles both halves of the decision with `resolve_appearance()`,
+  so `NO_COLOR` works as well as the switch. The picker previews the
+  monochrome hierarchy when `mono` is chosen and names that choice in its
+  header (`COLOR THEME: mono`) instead of naming the palette left installed
+  underneath it.
 - Documentation, comments and test names now use American English spelling
   (`color`, `behavior`, `initialize`, `honor`, `centered`, `normalize`,
   `optimize`, `labeled`). There is no runtime or public-API change.

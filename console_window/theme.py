@@ -491,7 +491,10 @@ class Theme:
         ``curses.color_pair()``, so a picker opened while color is off shows the
         monochrome role hierarchy instead of re-painting a previous theme's
         colors.  A host that wants a different swatch style can subclass the
-        generated screen and override its ``swatch_attr()`` hook.
+        generated screen and override its ``swatch_attr()`` hook, and a host
+        with its own pseudo-theme (``mono``, say) can override
+        ``theme_label()`` so the header names the choice the user made rather
+        than the palette left installed underneath it.
         """
         swatch = glyphs.get('swatch') * 8
 
@@ -511,7 +514,7 @@ class Theme:
 
                 # Name the theme this window is on (default when unset).
                 current_theme = cls.theme_of(win)
-                display_theme = current_theme if current_theme else '(default)'
+                display_theme = self.theme_label(current_theme)
                 hint_key = cycle_key or _discover_cycle_key(self)
 
                 # Add header showing current theme
@@ -541,6 +544,18 @@ class Theme:
                     win.add_body(line, attr=self.swatch_attr(color_id))
                 if note:
                     win.add_body(note, attr=curses.A_DIM)
+
+            def theme_label(self, theme_name: str | None) -> str:
+                """Header label for the theme the window is on.
+
+                The picker names the palette it is previewing.  A host with its
+                own pseudo-theme can override this to name the mode actually in
+                effect -- for example ``mono`` while color is off -- so the
+                header and the swatches tell one story instead of two.
+
+                This is a hook, like :meth:`swatch_attr`.
+                """
+                return theme_name if theme_name else '(default)'
 
             @staticmethod
             def swatch_attr(color_id: int) -> int:

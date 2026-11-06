@@ -231,6 +231,35 @@ def test_swatches_follow_the_color_switch_off(monkeypatch):
         win.stop_curses()
 
 
+def test_the_header_names_the_theme_the_window_is_on():
+    win = _window(theme='nord')
+    try:
+        app = SimpleNamespace(win=win, opts=SimpleNamespace(theme='nord'))
+        Theme.create_picker_screen(_BaseScreen)(app).draw_screen()
+        assert 'nord' in win.head.texts[0]
+    finally:
+        win.stop_curses()
+
+
+def test_a_host_can_override_the_theme_label_hook():
+    # A host with a pseudo-theme (mono, say) names its own choice in the
+    # header, so the label and the swatches cannot disagree.
+    win = _window(theme='nord')
+    try:
+        app = SimpleNamespace(win=win, opts=SimpleNamespace(theme='nord'))
+        base = Theme.create_picker_screen(_BaseScreen)
+
+        class _MonoLabel(base):
+            def theme_label(self, theme_name):
+                return 'mono'
+
+        _MonoLabel(app).draw_screen()
+        assert 'mono' in win.head.texts[0]
+        assert 'nord' not in win.head.texts[0]
+    finally:
+        win.stop_curses()
+
+
 def test_a_host_can_override_the_swatch_hook(monkeypatch):
     monkeypatch.setattr(curses, 'has_colors', lambda: True)
     win = _window()

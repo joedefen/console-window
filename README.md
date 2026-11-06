@@ -45,6 +45,17 @@ no install or build step required:
 (`runner` executes `SampleApp` as `__main__`, so live edits are picked
 up immediately. The equivalent one-off is `python3 SampleApp.py`.)
 
+The sample takes the same display switches as any app built on the library:
+
+```bash
+./runner --no-color          # or NO_COLOR=1 ./runner
+./runner --theme nord
+```
+
+`--no-color` starts in the monochrome mode that the `THEMES` picker also offers
+as its `mono` choice, so `t` on the `THEMES` screen can turn color back on (or
+off again) without restarting.
+
 ## Core Features (The "Secret Sauce")
 
 The wrapper handles several advanced terminal interaction patterns automatically:
@@ -98,7 +109,12 @@ demonstrates:
   `Theme.set()` remains the process-wide switch. Theme names are semantic:
   asking for `nord` on an 8-color terminal installs the closest supported
   representation rather than raising, and startup, `set_theme()` and
-  `Theme.set()` all share `Theme.install()`.
+  `Theme.set()` all share `Theme.install()`. The demo's picker also offers a
+  `mono` choice that is not a palette: selecting it calls
+  `appearance.set_colors_enabled(False)` and the swatches switch from color
+  pairs to the bold/reverse attribute hierarchy — the same thing `--no-color`
+  does at startup. While color is off the header names `mono`, not the palette
+  still installed underneath, so one choice has one name.
 * **Dialogs** — `a` calls `answer()` for text input, `l` calls `alert()`, and `n`
   drives `answer()` from an `OptionSpinner` option (`add_key(..., prompt=...)`).
   `answer()` returns `None` only when the user aborts; if the terminal cannot
@@ -422,7 +438,8 @@ line, remembers the choice through any object with `load()`/`save()`, and
 on. The library never opens a file. Its swatches follow the shared color
 switch, so a picker opened while color is off previews the monochrome
 hierarchy rather than a previous theme's colors; override `swatch_attr()` on a
-subclass to style swatches differently.
+subclass to style swatches differently, and `theme_label()` to name an app
+pseudo-theme such as `mono` in the header.
 
 The appearance layer is shared too. `console_window.appearance.semantic_attr(role)`
 returns the installed color pair for a semantic role, or the matching attribute
@@ -433,7 +450,9 @@ switch, and `resolve_appearance(cli_theme=None, no_color=False, saved_theme='',
 saved_colors=True, environ=None)` returns the `(theme, colors)` to start with:
 `--no-color` first, then an explicit `--theme`, then `NO_COLOR`, then the
 remembered choice. Apps keep their preference file and their own pseudo-themes;
-the library gives them the policy, not the storage.
+the library gives them the policy, not the storage. `SampleApp`'s `mono` choice
+is the worked example of that split: it lives in the app, flips the switch, and
+leaves the installed palette untouched.
 
 ## Versioning and Deprecation
 

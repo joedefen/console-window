@@ -19,6 +19,7 @@ from console_window import (
     Screen,
     ScreenStack,
     Theme,
+    appearance,
 )
 from console_window import help as help_text
 
@@ -28,12 +29,38 @@ from console_window import help as help_text
 DEMO_GLYPHS = {'tick': ('\u2713', 'OK')}
 DEMO_PROBE = ('tick', 'cursor', 'choice', 'scroll_prev', 'scroll_next')
 
+#: The demo's own pseudo-theme.  ``mono`` is not a palette: choosing it turns
+#: semantic color off for the process, exactly like ``--no-color``.  The library
+#: leaves pseudo-themes to the application (``console_window.appearance`` names
+#: ``mono`` as its standing example), so the demo owns the name and the switch
+#: behind it.  Keeping it last in the choices makes ``t`` step from the final
+#: palette into mono and wrap back to the first palette.
+MONO_THEME = 'mono'
+THEME_CHOICES = (*Theme.list_all(), MONO_THEME)
+
 # Screen IDs
 MAIN_ST = 0
 HELP_ST = 1
 HISTORY_ST = 2
 THEME_ST = 3
 SCREEN_NAMES = ('MAIN', 'HELP', 'HISTORY', 'THEMES')
+
+
+def settle_appearance(cli_theme=None, no_color=False):
+    """Turn the parsed color switches into process state.
+
+    ``resolve_appearance()`` returns the two halves of the decision -- which
+    palette, and whether to use it -- from ``--no-color``, ``--theme``, the
+    ``NO_COLOR`` convention and, in an app that has one, the remembered choice.
+    The demo remembers nothing between runs, so only the switches and the
+    environment are passed.  Returns the ``(theme, colors)`` it applied.
+    """
+    theme, colors = appearance.resolve_appearance(
+        cli_theme=cli_theme, no_color=no_color)
+    appearance.set_colors_enabled(colors)
+    if theme:
+        Theme.set_active(theme)
+    return theme, colors
 
 
 class SampleApp:
@@ -93,7 +120,7 @@ class SampleApp:
 
         # Setup option spinner - it will inherit stack.obj (self.opts)
         spin = self.spin = OptionSpinner(stack=self.stack)
-        themes = Theme.list_all()
+        themes = list(THEME_CHOICES)
 
         # Add view mode and sort options
         # NOTE: settings shown on the HELP screen are scoped to HELP_ST as well,
@@ -142,6 +169,13 @@ class SampleApp:
         # Seed the prompt option so the answer() dialog opens with empty text.
         self.opts.name = ''
 
+        # Seed the theme option from the decision the process actually made, so
+        # the help list and the picker name what is on screen: --no-color (or
+        # NO_COLOR) starts on the demo's mono choice, otherwise the window
+        # already installed its palette and the option should agree with it.
+        self.opts.theme = (MONO_THEME if not appearance.colors_enabled()
+                           else Theme.resolve(Theme.get_current()))
+
         # Load sample data from /etc/passwd
         self._load_sample_data()
 
@@ -186,6 +220,23 @@ class SampleApp:
         self.filter_text = original_text.lower() if original_text else ''
         self.win.passthrough_mode = False
 
+    def apply_theme_choice(self, choice):
+        """Make a theme-picker *choice* live.
+
+        ``mono`` is the demo's pseudo-theme: a color mode rather than a palette,
+        so it flips the process-wide switch and leaves the installed theme where
+        it was (the same way ``--no-color`` keeps ``--theme``).  Choosing a real
+        palette is a request for color, so it lifts the switch again and installs
+        the palette.  This is the one place the choice becomes window state,
+        whichever screen the key was pressed on.
+        """
+        self.opts.theme = choice
+        if choice == MONO_THEME:
+            appearance.set_colors_enabled(False)
+            return
+        appearance.set_colors_enabled(True)
+        self.win.set_theme(choice)
+
     def handle_key(self, key):
         # A live in-place prompt owns every key.  This is the documented
         # contract: nothing underneath the prompt (filter, spinner actions)
@@ -207,7 +258,13 @@ class SampleApp:
 
         # Handle spinner keys LAST (normal priority)
         if key in self.spin.keys:
+            previous_theme = self.opts.theme
             self.spin.do_key(key, self.win)
+            # A cycle commits by assigning the option, so the appearance is
+            # applied from the committed value here -- the same seam for the
+            # HELP list and for the picker's own cycle key.
+            if self.opts.theme != previous_theme:
+                self.apply_theme_choice(self.opts.theme)
 
         return None
 
@@ -284,13 +341,14 @@ class MainScreen(DemoScreen):
             uid = item['uid']
             home = item['home']
 
-            # Determine status and color
+            # Determine status and color.  Semantic attributes, not pairs: the
+            # same rows must degrade to bold/reverse when color is off.
             if username in app.selected_items:
                 status = '✓ Processed'
-                attr = cs.color_pair(Theme.SUCCESS)
+                attr = appearance.semantic_attr(Theme.SUCCESS)
             else:
                 status = '  Ready'
-                attr = cs.color_pair(0)
+                attr = appearance.semantic_attr(Theme.DEFAULT)
 
             # Format line based on view mode
             if view_mode == 'full':
@@ -310,7 +368,7 @@ class MainScreen(DemoScreen):
             # rows TRANSIENT/non-pickable for us.
             if app.win.prompt_active and app.prompt_item == username:
                 app.win.add_prompt_lines(
-                    attr=cs.color_pair(Theme.WARNING) | cs.A_BOLD,
+                    attr=appearance.semantic_attr(Theme.WARNING) | cs.A_BOLD,
                     hint_attr=cs.A_DIM,
                 )
 
@@ -515,7 +573,12 @@ class HelpScreen(DemoScreen, BasicHelpScreen):
         super().__init__('HELP', app)
 
     def extra_help_paragraphs(self):
-        return (help_text.theme_paragraph(open_key='T', cycle_key='t'),)
+        return (
+            help_text.theme_paragraph(open_key='T', cycle_key='t'),
+            'The theme list ends with mono: it turns color off (the same mode '
+            '--no-color starts in) and leaves the palette selected, so the '
+            'picker shows how that theme degrades to bold/reverse attributes.',
+        )
 
 #   def draw_screen(self):
 #       app = self.app
@@ -548,7 +611,7 @@ class HistoryScreen(DemoScreen):
                 if item:
                     line = (f'  ✓ {username:<16} uid={item["uid"]:<8} '
                             f'{item["home"]}')
-                    lines.append((line, cs.color_pair(Theme.SUCCESS)))
+                    lines.append((line, appearance.semantic_attr(Theme.SUCCESS)))
         else:
             lines.extend([
                 'No items have been processed yet.',
@@ -562,10 +625,26 @@ class HistoryScreen(DemoScreen):
 
 
 class ThemeScreen(Theme.create_picker_screen(DemoScreen, cycle_key='t')):
-    """THEMES screen supplied by Theme.create_picker_screen()."""
+    """THEMES screen supplied by Theme.create_picker_screen().
+
+    The picker's swatches follow the shared color switch, so cycling to the
+    demo's ``mono`` choice previews exactly what ``--no-color`` looks like: the
+    same rows, painted with the role attributes instead of a palette.  ``t``
+    cycles the whole ``THEME_CHOICES`` list on this screen and on HELP.
+
+    The header names the choice, not the palette behind it: with color off it
+    says ``mono``, the entry that turned color off.  Turning color back on is
+    what selecting a palette does.
+    """
 
     def __init__(self, app):
         super().__init__('THEMES', app)
+
+    def theme_label(self, theme_name):
+        if not appearance.colors_enabled():
+            return MONO_THEME
+        return super().theme_label(theme_name)
+
 
 def main(backend=None, singleton=True):
     # The same two lines every console-window app needs for --ascii/--theme.
@@ -576,6 +655,14 @@ def main(backend=None, singleton=True):
     parser = cli.add_display_arguments(argparse.ArgumentParser(prog='SampleApp'))
     opts = parser.parse_args()
     cli.apply_display_arguments(opts, prog='SampleApp')
+
+    # Color is one decision with two parts: which palette, and whether to use it
+    # at all.  apply_display_arguments() already installed --theme; settling the
+    # whole decision here keeps NO_COLOR working and the two halves agreeing.
+    settle_appearance(
+        cli_theme=getattr(opts, 'theme', None),
+        no_color=cli.resolve_no_color(opts),
+    )
 
     try:
         app = SampleApp(backend=backend, singleton=singleton)

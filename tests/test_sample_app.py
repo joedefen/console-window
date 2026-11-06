@@ -10,6 +10,7 @@ import curses
 
 import pytest
 
+from console_window import Theme, appearance
 from console_window.backend import HeadlessBackend
 
 
@@ -19,6 +20,14 @@ def _headless_curses_stubs(monkeypatch):
     # succeeded, and the sample app's drawing code calls both, so stand them in.
     monkeypatch.setattr(curses, 'has_colors', lambda: False, raising=False)
     monkeypatch.setattr(curses, 'color_pair', lambda n=0: n << 8, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _appearance_state(monkeypatch):
+    # The color switch and the process theme are process state; the sample
+    # reads both when it seeds its theme option, so never leak a test's choice.
+    monkeypatch.setattr(appearance, '_COLORS_ENABLED', True)
+    monkeypatch.setattr(Theme, '_current', None)
 
 
 def _app(rows=40, cols=120):
@@ -198,6 +207,137 @@ def test_note_prompt_is_buffered_and_rendered_in_the_header():
         assert app.note_item is None
         assert app.notes[username] == 'hello'
         assert app.win.current_status[0] == f'✓ Note saved for {username}'
+    finally:
+        app.win.stop_curses()
+
+
+# --- the theme picker's mono choice and --no-color -------------------------
+
+def test_settle_appearance_puts_no_color_over_theme():
+    sample, app = _app()
+    try:
+        theme, colors = sample.settle_appearance(cli_theme='nord',
+                                                 no_color=True)
+        assert (theme, colors) == ('nord', False)
+        assert appearance.colors_enabled() is False
+        assert Theme.get_current() == 'nord'
+    finally:
+        app.win.stop_curses()
+
+
+def test_settle_appearance_honors_the_no_color_convention(monkeypatch):
+    sample, app = _app()
+    try:
+        monkeypatch.setenv('NO_COLOR', '1')
+        theme, colors = sample.settle_appearance()
+        assert (theme, colors) == ('', False)
+        assert appearance.colors_enabled() is False
+        assert Theme.get_current() is None
+    finally:
+        app.win.stop_curses()
+
+
+def test_the_theme_choices_include_the_demo_mono_pseudo_theme():
+    sample, app = _app()
+    try:
+        assert sample.MONO_THEME in sample.THEME_CHOICES
+        # Color is on, so the option starts on the palette the window got.
+        assert app.opts.theme == app.win.theme == 'default'
+        assert app.opts.theme in sample.THEME_CHOICES
+    finally:
+        app.win.stop_curses()
+
+
+def test_starting_with_color_off_starts_on_the_mono_choice():
+    appearance.set_colors_enabled(False)
+    sample, app = _app()
+    try:
+        assert app.opts.theme == sample.MONO_THEME
+        # The palette is still installed; mono is only the color switch.
+        assert app.win.theme == 'default'
+    finally:
+        app.win.stop_curses()
+
+
+def test_choosing_mono_turns_color_off_and_a_palette_turns_it_back_on():
+    sample, app = _app()
+    try:
+        app.apply_theme_choice('nord')
+        assert appearance.colors_enabled() is True
+        assert app.win.theme == 'nord'
+
+        app.apply_theme_choice(sample.MONO_THEME)
+        assert appearance.colors_enabled() is False
+        assert app.opts.theme == sample.MONO_THEME
+        # mono is a mode, not a palette: the installed theme is untouched.
+        assert app.win.theme == 'nord'
+    finally:
+        app.win.stop_curses()
+
+
+def test_the_theme_cycle_key_walks_from_the_last_palette_into_mono():
+    sample, app = _app()
+    try:
+        app.stack.push(sample.THEME_ST, 0)  # 't' cycles on THEMES/HELP
+        app.apply_theme_choice(Theme.list_all()[-1])
+        assert appearance.colors_enabled() is True
+
+        app.handle_key(ord('t'))
+        assert app.opts.theme == sample.MONO_THEME
+        assert appearance.colors_enabled() is False
+
+        app.handle_key(ord('t'))  # mono wraps to the first palette
+        assert app.opts.theme == Theme.list_all()[0]
+        assert appearance.colors_enabled() is True
+        assert app.win.theme == Theme.list_all()[0]
+    finally:
+        app.win.stop_curses()
+
+
+def test_the_picker_header_names_the_mono_choice_and_its_swatches_follow():
+    sample, app = _app()
+    try:
+        app.win.clear()
+        app.screens[sample.THEME_ST].draw_screen()
+        assert 'default' in app.win.head.texts[0]
+
+        app.apply_theme_choice(sample.MONO_THEME)
+        app.win.clear()
+        app.screens[sample.THEME_ST].draw_screen()
+
+        # One name for one choice: no second 'Color:' line beside the theme.
+        assert 'mono' in app.win.head.texts[0]
+        assert all('Color:' not in row for row in app.win.head.texts)
+
+        attrs = {}
+        for text, runs in zip(app.win.body.texts, app.win.body.text_attrs,
+                              strict=False):
+            if runs:
+                attrs[text.split()[0]] = runs[0][0]
+        assert attrs['SUCCESS'] == appearance.MONO_ROLES[Theme.SUCCESS]
+        assert attrs['DANGER'] == appearance.MONO_ROLES[Theme.DANGER]
+    finally:
+        app.win.stop_curses()
+
+
+def test_processed_rows_use_the_mono_attribute_without_asking_for_a_pair(monkeypatch):
+    sample, app = _app()
+    try:
+        username = app.get_filtered_items()[0]['username']
+        app.selected_items.add(username)
+        app.apply_theme_choice(sample.MONO_THEME)
+
+        def _unexpected(pair):
+            raise AssertionError(f'color pair {pair} used while color is off')
+
+        monkeypatch.setattr(curses, 'color_pair', _unexpected)
+        app.win.clear()
+        app.screens[sample.MAIN_ST].draw_screen()
+
+        row = next(index for index, text in enumerate(app.win.body.texts)
+                   if 'Processed' in text)
+        assert app.win.body.text_attrs[row][0][0] == (
+            appearance.MONO_ROLES[Theme.SUCCESS])
     finally:
         app.win.stop_curses()
 
