@@ -16,7 +16,7 @@ assume the repository root, which is where the gate has to be run.
 | [`bless`](../bless) | The release gate, emitted verbatim from [`../../blessd/bless`](../../blessd/bless) by that repo's `build.py`. It holds no copy of this project's identity, and it is never edited here. |
 | [`blessd/docs/release-strategy.md`](../../blessd/docs/release-strategy.md) | The release strategy every project shares: the branch model, the stages, the rehearsal, the credentials. This file documents only what is particular to `console-window`. |
 | [`tests/inspect_dist.py`](inspect_dist.py) | The distribution inspector. `bless` refuses to upload a wheel and sdist it has not inspected with this file. |
-| [`runner`](../runner), [`SampleApp.py`](../SampleApp.py) | Run the sample app from source (`./runner`) for debugging. Neither is part of the installed package. |
+| [`runner`](../runner), [`SampleApp.py`](../SampleApp.py) | The non-invasive way to run the sample app from the working tree (`./runner`, or `.venv/bin/python ./runner`): it executes `SampleApp` as `__main__` against the tree and does not touch `~/.local/bin`. Neither is part of the installed package. |
 | [`.gitignore`](../.gitignore) | Keeps gate artifacts (`build/`, `dist/`, `.coverage*`, caches, `*.whl`, `*.tar.gz`) out of `git status`, because the gate refuses a dirty tree. |
 
 The version lives in exactly one place. `pyproject.toml` declares
@@ -31,11 +31,13 @@ below. There is no `[project.scripts]` entry: this is a library, so the smoke
 stage imports the installed package and prints `__version__` instead of running
 a console script.
 
-## The test gate
+## The environment and the test gate
 
-Install what the gate needs -- this is the interpreter that must run `bless`,
-too. `bt penv` builds `.venv` with the standard release tools plus this
-project's `dev` extra, and deliberately never installs the package into it:
+`bt penv` rebuilds `.venv` around this tree. It installs the project
+**editably** (`-e '.[dev]'`, or `-e .` when a project has no `dev` extra)
+together with the release toolchain, so pytest, `./bless` and a debugger all
+run under one interpreter and breakpoints land in `console_window/` rather
+than in a copied install:
 
     bt penv
 
@@ -44,17 +46,32 @@ The equivalent by hand:
     python3 -m venv .venv
     .venv/bin/python -m pip install -e '.[dev]'
 
-`bless` runs every stage with `sys.executable`, so it has to be *that*
-interpreter -- the one holding ruff, pytest-cov, build, `twine>=7` and
-`packaging>=26`. Activate the virtualenv first, or start the gate by hand:
+Select `<project>/.venv/bin/python` as the VS Code interpreter. `bless` runs
+every stage with `sys.executable`, so the gate has to be started with that
+same interpreter -- the one holding ruff, pytest-cov, build, `twine>=7` and
+`packaging>=26`:
 
     .venv/bin/python ./bless
+
+This project declares no `[project.scripts]`, so `bt status` reports
+`Entry point: none`: there is no `~/.local/bin/<app>` link for `bt edit` to
+manage. Releases are still rehearsed and published through `./bless`; when a
+released artifact is installed with `bt test`/`bt prod`, pipx keeps it in its
+own per-app venv and `bt status` reports that record.
 
 Then the commands `bless` runs, in the same order, on the same interpreter:
 
     python -m ruff check .
     python -m compileall -q console_window tests
     python -m pytest -q --cov=console_window --cov-report=term-missing
+
+### Leaving the old `--user` model
+
+The previous `bt` installed the package into the system Python's user site
+(`pip install --user`), so `.venv` held only the tools. `bt status` reports any
+such leftover as `Legacy --user install`; a one-time `bt clean` removes it, and
+no current subcommand uses `pip install --user`. With that gone, `.venv` is
+the only editable copy and a debugger started under it steps through the tree.
 
 The coverage floor (90%) is enforced through `[tool.coverage.report]
 fail_under`. It was set just below the measured 90.69% when the release gate
@@ -212,6 +229,14 @@ and the shared half lives in
   already in one place (`dynamic = ["version"]` reading
   `console_window/__init__.py`). No console script was added: this is a library,
   and the smoke stage's fallback imports the package and prints `__version__`.
+* The environment was migrated to the per-project model in the postscript of
+  [`../../blessd/docs/adopting.md`](../../blessd/docs/adopting.md): `bt penv`
+  now installs the editable package and its `dev` extra into `.venv` (it no
+  longer removes the package), so the interpreter VS Code selects is the one
+  that debugs the tree. Because no `[project.scripts]` is declared, `bt status`
+  reports `Entry point: none` and no `~/.local/bin` link is created; the legacy
+  `pip install --user` copy was removed with `bt clean`, and `runner` remains the
+  non-invasive way to run the sample app without touching `~/.local/bin`.
 * The ruff rule set predates the gate and is unchanged; the whole tree was
   already clean under it. [`tests/test_bless.py`](test_bless.py) pins the
   identity this tree derives and the inspector it uploads behind; what the gate
