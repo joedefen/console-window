@@ -561,7 +561,7 @@ class Theme:
             def swatch_attr(color_id: int) -> int:
                 """Attribute for one role's swatch in the picker.
 
-                Delegates to :func:`console_window.appearance.semantic_attr`, so
+                Delegates to :meth:`console_window.Appearance.semantic_attr`, so
                 the swatch obeys the same process-wide color switch as every
                 other semantic role.  With color off the role's monochrome
                 attribute carries the hierarchy (bold+reverse, bold, plain) and
@@ -571,10 +571,10 @@ class Theme:
                 This is a hook: a host may subclass the generated screen and
                 override it to style swatches differently.
                 """
-                # Late import: appearance imports Theme at module load time.
-                from .appearance import semantic_attr
+                # Late import: _appearance imports Theme at module load time.
+                from ._appearance import Appearance
 
-                return semantic_attr(color_id)
+                return Appearance.semantic_attr(color_id)
 
             def spin_theme_ACTION(self) -> None:
                 win = self.app.win

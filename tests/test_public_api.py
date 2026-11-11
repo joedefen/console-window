@@ -3,6 +3,7 @@ import importlib.util
 import pytest
 
 PUBLIC_NAMES = [
+    'Appearance',
     'ConsoleWindow',
     'ConsoleWindowOpts',
     'OptionSpinner',
@@ -58,13 +59,15 @@ def test_consolewindow_attribute_is_the_class_not_a_module():
     assert console_window.ConsoleWindow.__module__ == 'console_window.window'
     assert console_window.OptionSpinner.__module__ == 'console_window.spinner'
     assert console_window.Theme.__module__ == 'console_window.theme'
-    assert console_window.semantic_attr.__module__ == 'console_window.appearance'
+    assert isinstance(console_window.Appearance, type)
+    assert console_window.Appearance.__module__ == 'console_window._appearance'
+    assert console_window.semantic_attr.__module__ == 'console_window._appearance'
 
 
 def test_new_submodules_exist():
     for mod in ('window', 'theme', 'context', 'opts', 'widgets', 'spinner',
                 'screens', 'keys', 'signals', 'geometry', 'backend',
-                'header', 'textwidth', 'glyphs', 'cli', 'help', 'appearance'):
+                'header', 'textwidth', 'glyphs', 'cli', 'help', '_appearance'):
         importlib.import_module(f'console_window.{mod}')
 
 

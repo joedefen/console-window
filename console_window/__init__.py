@@ -1,9 +1,10 @@
 # Single source of truth for the package version: pyproject.toml declares
 # ``dynamic = ["version"]``, so flit reads this value instead of duplicating it.
-__version__ = "2.2.3"
+__version__ = "3.0.0"
 
-from .appearance import (
+from ._appearance import (
     MONO_ROLES,
+    Appearance,
     colors_enabled,
     resolve_appearance,
     semantic_attr,
@@ -31,6 +32,7 @@ __all__ = [
     'HOME_ST',
     'MONO_ROLES',
     'NAVIGATION_KEYS',
+    'Appearance',
     'BasicHelpScreen',
     'BasicTextScreen',
     'ConsoleWindow',

@@ -4,16 +4,16 @@ import curses
 
 import pytest
 
-from console_window import Theme, appearance
+from console_window import Appearance, Theme
 
 
 @pytest.fixture(autouse=True)
 def _fresh_color_switch(monkeypatch):
-    monkeypatch.setattr(appearance, '_COLORS_ENABLED', True)
+    monkeypatch.setattr(Appearance, '_COLORS_ENABLED', True)
 
 
 def test_every_semantic_role_has_a_monochrome_attribute():
-    assert set(appearance.MONO_ROLES) == set(Theme.SEMANTIC_PAIRS)
+    assert set(Appearance.MONO_ROLES) == set(Theme.SEMANTIC_PAIRS)
 
 
 @pytest.mark.parametrize(('role', 'attribute'), [
@@ -28,26 +28,26 @@ def test_every_semantic_role_has_a_monochrome_attribute():
     (Theme.HOTSWAP, curses.A_NORMAL),
 ])
 def test_the_monochrome_table_keeps_the_hierarchy(role, attribute):
-    assert appearance.MONO_ROLES[role] == attribute
+    assert Appearance.MONO_ROLES[role] == attribute
 
 
 def test_the_switch_reports_what_was_set():
-    assert appearance.colors_enabled() is True
-    appearance.set_colors_enabled(False)
-    assert appearance.colors_enabled() is False
-    appearance.set_colors_enabled(True)
-    assert appearance.colors_enabled() is True
+    assert Appearance.colors_enabled() is True
+    Appearance.set_colors_enabled(False)
+    assert Appearance.colors_enabled() is False
+    Appearance.set_colors_enabled(True)
+    assert Appearance.colors_enabled() is True
 
 
 def test_color_on_returns_the_installed_pair(monkeypatch):
     monkeypatch.setattr(curses, 'has_colors', lambda: True)
     monkeypatch.setattr(curses, 'color_pair', lambda pair_id: 1000 + pair_id)
-    assert appearance.semantic_attr(Theme.WARNING) == 1000 + Theme.WARNING
+    assert Appearance.semantic_attr(Theme.WARNING) == 1000 + Theme.WARNING
 
 
 def test_a_terminal_without_color_falls_back_to_plain(monkeypatch):
     monkeypatch.setattr(curses, 'has_colors', lambda: False)
-    assert appearance.semantic_attr(Theme.WARNING) == 0
+    assert Appearance.semantic_attr(Theme.WARNING) == 0
 
 
 def test_a_lookup_before_initscr_never_aborts_a_redraw(monkeypatch):
@@ -55,7 +55,7 @@ def test_a_lookup_before_initscr_never_aborts_a_redraw(monkeypatch):
         raise curses.error('must call initscr() first')
 
     monkeypatch.setattr(curses, 'has_colors', broken)
-    assert appearance.semantic_attr(Theme.WARNING) == 0
+    assert Appearance.semantic_attr(Theme.WARNING) == 0
 
 
 def test_a_pair_lookup_can_fail_before_start_color(monkeypatch):
@@ -65,21 +65,21 @@ def test_a_pair_lookup_can_fail_before_start_color(monkeypatch):
         raise curses.error('must call start_color() first')
 
     monkeypatch.setattr(curses, 'color_pair', broken)
-    assert appearance.semantic_attr(Theme.WARNING) == 0
+    assert Appearance.semantic_attr(Theme.WARNING) == 0
 
 
 def test_color_off_uses_the_mono_table():
-    appearance.set_colors_enabled(False)
-    assert appearance.semantic_attr(Theme.DANGER) == appearance.MONO_ROLES[Theme.DANGER]
-    assert appearance.semantic_attr(999) == curses.A_NORMAL
+    Appearance.set_colors_enabled(False)
+    assert Appearance.semantic_attr(Theme.DANGER) == Appearance.MONO_ROLES[Theme.DANGER]
+    assert Appearance.semantic_attr(999) == curses.A_NORMAL
 
 
 def test_nothing_given_means_the_library_default_and_color_on():
-    assert appearance.resolve_appearance(environ={}) == ('', True)
+    assert Appearance.resolve_appearance(environ={}) == ('', True)
 
 
 def test_no_color_flag_wins_over_everything():
-    assert appearance.resolve_appearance(
+    assert Appearance.resolve_appearance(
         cli_theme='nord',
         no_color=True,
         saved_theme='gruvbox',
@@ -88,40 +88,40 @@ def test_no_color_flag_wins_over_everything():
 
 
 def test_an_explicit_theme_is_a_request_for_color():
-    assert appearance.resolve_appearance(
+    assert Appearance.resolve_appearance(
         cli_theme='nord', environ={'NO_COLOR': '1'}) == ('nord', True)
 
 
 def test_the_no_color_convention_needs_a_non_empty_value():
-    assert appearance.resolve_appearance(environ={'NO_COLOR': '1'}) == ('', False)
-    assert appearance.resolve_appearance(environ={'NO_COLOR': ''}) == ('', True)
+    assert Appearance.resolve_appearance(environ={'NO_COLOR': '1'}) == ('', False)
+    assert Appearance.resolve_appearance(environ={'NO_COLOR': ''}) == ('', True)
 
 
 def test_a_saved_theme_and_its_color_preference_are_honored():
-    assert appearance.resolve_appearance(
+    assert Appearance.resolve_appearance(
         saved_theme='gruvbox', saved_colors=True, environ={}) == ('gruvbox', True)
-    assert appearance.resolve_appearance(
+    assert Appearance.resolve_appearance(
         saved_theme='gruvbox', saved_colors=False, environ={}) == ('gruvbox', False)
 
 
 def test_no_color_keeps_the_saved_theme_but_not_its_color():
-    assert appearance.resolve_appearance(
+    assert Appearance.resolve_appearance(
         no_color=True, saved_theme='gruvbox', environ={}) == ('gruvbox', False)
-    assert appearance.resolve_appearance(
+    assert Appearance.resolve_appearance(
         saved_theme='gruvbox', environ={'NO_COLOR': '1'}) == ('gruvbox', False)
 
 
 def test_an_unknown_theme_resolves_to_the_library_default():
-    assert appearance.resolve_appearance(
+    assert Appearance.resolve_appearance(
         cli_theme='not-a-theme', environ={}) == ('default', True)
-    assert appearance.resolve_appearance(
+    assert Appearance.resolve_appearance(
         saved_theme='not-a-theme', environ={}) == ('default', True)
 
 
 def test_an_empty_remembered_theme_means_the_library_default():
-    assert appearance.resolve_appearance(saved_theme=None, environ={}) == ('', True)
+    assert Appearance.resolve_appearance(saved_theme=None, environ={}) == ('', True)
 
 
 def test_the_environment_defaults_to_os_environ(monkeypatch):
     monkeypatch.setenv('NO_COLOR', '1')
-    assert appearance.resolve_appearance() == ('', False)
+    assert Appearance.resolve_appearance() == ('', False)

@@ -3,6 +3,21 @@
 All notable changes to `console-window` are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [3.0.0]
+
+### Changed
+- **Breaking:** the appearance layer's public name is now `Appearance`
+  (`console_window.Appearance`), capitalized to match the other package-root
+  names (`Theme`, `Glyphs`, `Context`, ...). Its implementation module is now
+  private (`console_window._appearance`), so `from console_window import
+  appearance` and `console_window.appearance.*` no longer resolve. Import
+  `Appearance` and call `Appearance.semantic_attr()`, `Appearance.colors_enabled()`,
+  `Appearance.set_colors_enabled()` or `Appearance.resolve_appearance()` instead.
+  The individual names (`MONO_ROLES`, `colors_enabled`, `resolve_appearance`,
+  `semantic_attr`, `set_colors_enabled`) are unchanged and remain importable
+  from the package root. `3.0.0` opens the 3.x line, which is intended to remain
+  upward compatible from here.
+
 ## [2.2.2]
 
 ### Fixed

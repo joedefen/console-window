@@ -8,6 +8,7 @@ import traceback
 from types import SimpleNamespace
 
 from console_window import (
+    Appearance,
     BasicHelpScreen,
     BasicTextScreen,
     ConsoleWindow,
@@ -19,7 +20,6 @@ from console_window import (
     Screen,
     ScreenStack,
     Theme,
-    appearance,
 )
 from console_window import help as help_text
 
@@ -31,7 +31,7 @@ DEMO_PROBE = ('tick', 'cursor', 'choice', 'scroll_prev', 'scroll_next')
 
 #: The demo's own pseudo-theme.  ``mono`` is not a palette: choosing it turns
 #: semantic color off for the process, exactly like ``--no-color``.  The library
-#: leaves pseudo-themes to the application (``console_window.appearance`` names
+#: leaves pseudo-themes to the application (``console_window.Appearance`` names
 #: ``mono`` as its standing example), so the demo owns the name and the switch
 #: behind it.  Keeping it last in the choices makes ``t`` step from the final
 #: palette into mono and wrap back to the first palette.
@@ -55,9 +55,9 @@ def settle_appearance(cli_theme=None, no_color=False):
     The demo remembers nothing between runs, so only the switches and the
     environment are passed.  Returns the ``(theme, colors)`` it applied.
     """
-    theme, colors = appearance.resolve_appearance(
+    theme, colors = Appearance.resolve_appearance(
         cli_theme=cli_theme, no_color=no_color)
-    appearance.set_colors_enabled(colors)
+    Appearance.set_colors_enabled(colors)
     if theme:
         Theme.set_active(theme)
     return theme, colors
@@ -173,7 +173,7 @@ class SampleApp:
         # the help list and the picker name what is on screen: --no-color (or
         # NO_COLOR) starts on the demo's mono choice, otherwise the window
         # already installed its palette and the option should agree with it.
-        self.opts.theme = (MONO_THEME if not appearance.colors_enabled()
+        self.opts.theme = (MONO_THEME if not Appearance.colors_enabled()
                            else Theme.resolve(Theme.get_current()))
 
         # Load sample data from /etc/passwd
@@ -232,9 +232,9 @@ class SampleApp:
         """
         self.opts.theme = choice
         if choice == MONO_THEME:
-            appearance.set_colors_enabled(False)
+            Appearance.set_colors_enabled(False)
             return
-        appearance.set_colors_enabled(True)
+        Appearance.set_colors_enabled(True)
         self.win.set_theme(choice)
 
     def handle_key(self, key):
@@ -345,10 +345,10 @@ class MainScreen(DemoScreen):
             # same rows must degrade to bold/reverse when color is off.
             if username in app.selected_items:
                 status = '✓ Processed'
-                attr = appearance.semantic_attr(Theme.SUCCESS)
+                attr = Appearance.semantic_attr(Theme.SUCCESS)
             else:
                 status = '  Ready'
-                attr = appearance.semantic_attr(Theme.DEFAULT)
+                attr = Appearance.semantic_attr(Theme.DEFAULT)
 
             # Format line based on view mode
             if view_mode == 'full':
@@ -368,7 +368,7 @@ class MainScreen(DemoScreen):
             # rows TRANSIENT/non-pickable for us.
             if app.win.prompt_active and app.prompt_item == username:
                 app.win.add_prompt_lines(
-                    attr=appearance.semantic_attr(Theme.WARNING) | cs.A_BOLD,
+                    attr=Appearance.semantic_attr(Theme.WARNING) | cs.A_BOLD,
                     hint_attr=cs.A_DIM,
                 )
 
@@ -611,7 +611,7 @@ class HistoryScreen(DemoScreen):
                 if item:
                     line = (f'  ✓ {username:<16} uid={item["uid"]:<8} '
                             f'{item["home"]}')
-                    lines.append((line, appearance.semantic_attr(Theme.SUCCESS)))
+                    lines.append((line, Appearance.semantic_attr(Theme.SUCCESS)))
         else:
             lines.extend([
                 'No items have been processed yet.',
@@ -641,7 +641,7 @@ class ThemeScreen(Theme.create_picker_screen(DemoScreen, cycle_key='t')):
         super().__init__('THEMES', app)
 
     def theme_label(self, theme_name):
-        if not appearance.colors_enabled():
+        if not Appearance.colors_enabled():
             return MONO_THEME
         return super().theme_label(theme_name)
 

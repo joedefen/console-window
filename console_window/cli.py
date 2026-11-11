@@ -16,7 +16,7 @@ optional boolean (``--ascii``, ``--ascii=no``) and ``--glyphs`` accepts a mode
 
 ``--no-color`` is the appearance switch.  :func:`apply_display_arguments` acts on
 it, and an app that remembers a color preference can settle the whole decision
-with :func:`console_window.appearance.resolve_appearance`.
+with :meth:`console_window.Appearance.resolve_appearance`.
 """
 
 from __future__ import annotations
@@ -26,7 +26,8 @@ import sys
 from collections.abc import Callable, Mapping
 from typing import TextIO
 
-from . import appearance, glyphs
+from . import glyphs
+from ._appearance import Appearance
 from .glyphs import TerminalReport
 from .theme import Theme, ThemeStore
 
@@ -148,9 +149,9 @@ def apply_display_arguments(
 
     An explicit ``--no-color`` turns the process-wide color switch off here; an
     absent switch is left alone, so an app with a remembered preference is free
-    to call ``set_colors_enabled()`` with its own decision.  The two halves of
-    that decision -- the theme to install and whether color is on -- come from
-    :func:`console_window.appearance.resolve_appearance`.
+    to call ``Appearance.set_colors_enabled()`` with its own decision.  The two
+    halves of that decision -- the theme to install and whether color is on --
+    come from :meth:`console_window.Appearance.resolve_appearance`.
 
     *printer* is a callable taking one string; pass ``sys.stderr.write`` style
     wrappers through ``lambda line: print(line, file=...)`` if needed.
@@ -165,7 +166,7 @@ def apply_display_arguments(
 
     if resolve_no_color(args):
         # Only the explicit flag is acted on; "absent" belongs to the caller.
-        appearance.set_colors_enabled(False)
+        Appearance.set_colors_enabled(False)
 
     theme = getattr(args, 'theme', None)
     if theme:

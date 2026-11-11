@@ -5,7 +5,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from console_window import ConsoleWindow, ConsoleWindowOpts, Theme, appearance
+from console_window import (
+    Appearance,
+    ConsoleWindow,
+    ConsoleWindowOpts,
+    Theme,
+)
 from console_window.backend import HeadlessBackend
 
 
@@ -52,7 +57,7 @@ def _color_pairs(monkeypatch):
 @pytest.fixture(autouse=True)
 def _color_switch(monkeypatch):
     # The appearance switch is process state; never leak a test's choice.
-    monkeypatch.setattr(appearance, '_COLORS_ENABLED', True)
+    monkeypatch.setattr(Appearance, '_COLORS_ENABLED', True)
 
 
 @pytest.fixture(autouse=True)
@@ -212,7 +217,7 @@ def test_swatches_follow_the_color_switch_off(monkeypatch):
     # A picker opened while color is off used to re-paint the previous theme's
     # pairs.  It must use the same monochrome hierarchy as the rest of the UI
     # and must not touch curses.color_pair() at all.
-    appearance.set_colors_enabled(False)
+    Appearance.set_colors_enabled(False)
     monkeypatch.setattr(curses, 'has_colors', lambda: True)
 
     def _unexpected(pair):
@@ -226,7 +231,7 @@ def test_swatches_follow_the_color_switch_off(monkeypatch):
         picker(app).draw_screen()
         attrs = _swatch_attrs(win)
         for label, role in _SWATCH_ROLES:
-            assert attrs[label] == appearance.MONO_ROLES[role]
+            assert attrs[label] == Appearance.MONO_ROLES[role]
     finally:
         win.stop_curses()
 

@@ -4,7 +4,7 @@ import argparse
 
 import pytest
 
-from console_window import Theme, appearance, cli
+from console_window import Appearance, Theme, cli
 from console_window.glyphs import is_ascii
 
 
@@ -20,7 +20,7 @@ def _forget_the_process_theme(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _restore_the_color_switch(monkeypatch):
-    monkeypatch.setattr(appearance, '_COLORS_ENABLED', True)
+    monkeypatch.setattr(Appearance, '_COLORS_ENABLED', True)
 
 
 def _parser():
@@ -140,13 +140,13 @@ def test_resolve_no_color_tolerates_a_namespace_without_the_switch():
 
 def test_apply_honors_no_color(capsys):
     _apply(['--no-color'], capsys)
-    assert appearance.colors_enabled() is False
+    assert Appearance.colors_enabled() is False
 
 
 def test_apply_leaves_a_remembered_color_choice_alone(capsys):
-    appearance.set_colors_enabled(False)
+    Appearance.set_colors_enabled(False)
     _apply([], capsys)
-    assert appearance.colors_enabled() is False
+    assert Appearance.colors_enabled() is False
 
 
 def test_the_theme_store_note_only_promises_what_is_true():
