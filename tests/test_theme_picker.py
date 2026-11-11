@@ -213,22 +213,22 @@ def test_swatches_use_the_installed_pair_when_color_is_on(monkeypatch):
         win.stop_curses()
 
 
-def test_swatches_follow_the_color_switch_off(monkeypatch):
-    # A picker opened while color is off used to re-paint the previous theme's
-    # pairs.  It must use the same monochrome hierarchy as the rest of the UI
-    # and must not touch curses.color_pair() at all.
-    Appearance.set_colors_enabled(False)
+def test_swatches_follow_the_mono_theme(monkeypatch):
+    # A picker opened on mono used to re-paint the previous theme's pairs.  It
+    # must use the same monochrome hierarchy as the rest of the UI and must not
+    # touch curses.color_pair() at all.
     monkeypatch.setattr(curses, 'has_colors', lambda: True)
 
     def _unexpected(pair):
         raise AssertionError(f'color pair {pair} used while color is off')
 
     monkeypatch.setattr(curses, 'color_pair', _unexpected)
-    win = _window()
+    win = _window(theme='mono')
     try:
-        app = SimpleNamespace(win=win, opts=SimpleNamespace(theme='default'))
+        app = SimpleNamespace(win=win, opts=SimpleNamespace(theme='mono'))
         picker = Theme.create_picker_screen(_BaseScreen)
         picker(app).draw_screen()
+        assert Appearance.colors_enabled() is False
         attrs = _swatch_attrs(win)
         for label, role in _SWATCH_ROLES:
             assert attrs[label] == Appearance.MONO_ROLES[role]
@@ -281,3 +281,103 @@ def test_a_host_can_override_the_swatch_hook(monkeypatch):
         assert set(_swatch_attrs(win).values()) == {curses.A_UNDERLINE}
     finally:
         win.stop_curses()
+
+
+def test_custom_captions_replace_labels_and_usages():
+    win = _window()
+    try:
+        app = SimpleNamespace(win=win, opts=SimpleNamespace(theme='default'))
+        picker = Theme.create_picker_screen(
+            _BaseScreen,
+            captions={
+                'danger': ('FAILED', 'Boot or initramfs failed'),
+                'warning': ('DEGRADED', ''),
+            },
+        )
+        picker(app).draw_screen()
+        assert any('FAILED' in row and 'Boot or initramfs failed' in row
+                   for row in win.body.texts)
+        # An empty usage falls back to the library description.
+        assert any('DEGRADED' in row and 'Caution/stopped states' in row
+                   for row in win.body.texts)
+        # include_defaults keeps the roles the app did not mention.
+        assert any(row.startswith('SUCCESS') for row in win.body.texts)
+    finally:
+        win.stop_curses()
+
+
+def test_replace_mode_shows_only_the_apps_rows():
+    win = _window()
+    try:
+        app = SimpleNamespace(win=win, opts=SimpleNamespace(theme='default'))
+        picker = Theme.create_picker_screen(
+            _BaseScreen,
+            include_defaults=False,
+            captions={
+                'danger': ('FAILED', 'Boot failed'),
+                'success': ('OK', 'Healthy device'),
+            },
+        )
+        picker(app).draw_screen()
+        assert [row.split()[0] for row in win.body.texts] == ['FAILED', 'OK']
+    finally:
+        win.stop_curses()
+
+
+def test_a_long_caption_widens_the_label_column():
+    win = _window()
+    try:
+        app = SimpleNamespace(win=win, opts=SimpleNamespace(theme='default'))
+        picker = Theme.create_picker_screen(
+            _BaseScreen,
+            include_defaults=False,
+            captions={'danger': ('FAILED TO START', 'Boot failed')},
+        )
+        picker(app).draw_screen()
+        row = win.body.texts[0]
+        assert row.startswith('FAILED TO START')
+        assert '\u2588' * 8 in row
+    finally:
+        win.stop_curses()
+
+
+def test_a_very_long_caption_is_truncated_before_the_swatch():
+    win = _window()
+    try:
+        app = SimpleNamespace(win=win, opts=SimpleNamespace(theme='default'))
+        picker = Theme.create_picker_screen(
+            _BaseScreen,
+            include_defaults=False,
+            captions={'danger': ('X' * 200, 'Boot failed')},
+        )
+        picker(app).draw_screen()
+        row = win.body.texts[0]
+        assert '\u2588' * 8 in row
+        assert row.index('\u2588') < win.get_pad_width()
+    finally:
+        win.stop_curses()
+
+
+def test_a_host_can_override_the_swatch_rows_hook():
+    win = _window()
+    try:
+        app = SimpleNamespace(win=win, opts=SimpleNamespace(theme='default'))
+        base = Theme.create_picker_screen(_BaseScreen)
+
+        class _OnlyDanger(base):
+            def swatch_rows(self):
+                return [(Theme.DANGER, 'FAILED', 'Boot failed')]
+
+        _OnlyDanger(app).draw_screen()
+        assert len(win.body.texts) == 1
+        assert win.body.texts[0].startswith('FAILED')
+    finally:
+        win.stop_curses()
+
+
+def test_the_factory_validates_captions_eagerly():
+    with pytest.raises(ValueError, match='unknown color role'):
+        Theme.create_picker_screen(
+            _BaseScreen,
+            captions={'chartreuse': ('NOPE', None)},
+        )

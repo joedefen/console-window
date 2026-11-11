@@ -90,8 +90,16 @@ def test_theme_set_rejects_unknown_without_curses():
 def test_theme_lists_expected_themes():
     from console_window import Theme
     themes = Theme.list_all()
-    for expected in ('default', 'nord', 'gruvbox', 'dark-mono', 'light-mono'):
+    for expected in ('default', 'nord', 'gruvbox', 'dark', 'light', 'mono'):
         assert expected in themes
+
+
+def test_legacy_theme_names_are_aliases_not_listed_entries():
+    from console_window import Theme
+    assert Theme.canonical('dark-mono') == 'dark'
+    assert Theme.canonical('light-mono') == 'light'
+    assert 'dark-mono' not in Theme.list_all()
+    assert 'light-mono' not in Theme.list_all()
 
 
 def test_opts_validates_dialog_abort():

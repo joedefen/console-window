@@ -1,9 +1,9 @@
 """Argument-parser boilerplate for the display options.
 
-Every curses app ends up writing the same four switches: a way to force the
-plain-ASCII symbol set, a way to pick a color theme, a way to turn semantic
-color off, and a way to print what was detected.  This module supplies them,
-so an app's ``main()`` gains two lines instead of sixty:
+Every curses app ends up writing the same three switches: a way to force the
+plain-ASCII symbol set, a way to pick a color theme, and a way to print what was
+detected.  This module supplies them, so an app's ``main()`` gains two lines
+instead of sixty:
 
     parser = cli.add_display_arguments(parser)
     ...
@@ -14,9 +14,11 @@ optional boolean (``--ascii``, ``--ascii=no``) and ``--glyphs`` accepts a mode
 (``auto``, ``ascii``, ``unicode``); ``--glyphs`` wins when both are given, and
 "absent" everywhere means *detect*, never "assume Unicode".
 
-``--no-color`` is the appearance switch.  :func:`apply_display_arguments` acts on
-it, and an app that remembers a color preference can settle the whole decision
-with :meth:`console_window.Appearance.resolve_appearance`.
+``--theme mono`` is the appearance switch.  There is no separate ``--no-color``:
+``mono`` is a real theme, and the ``NO_COLOR`` environment convention selects it
+for a run.  :func:`apply_display_arguments` applies the decision returned by
+:meth:`console_window.Appearance.resolve_appearance`, so the two-line app honors
+both.
 """
 
 from __future__ import annotations
@@ -35,7 +37,6 @@ __all__ = [
     'add_display_arguments',
     'apply_display_arguments',
     'resolve_force_ascii',
-    'resolve_no_color',
 ]
 
 _TRUE_WORDS = frozenset({'1', 'true', 'yes', 'y', 'on'})
@@ -55,13 +56,24 @@ def _bool_argument(value: str) -> bool:
     )
 
 
+def _theme_argument(value: str) -> str:
+    """argparse ``type=`` for ``--theme``: canonicalize and reject unknowns."""
+    name = Theme.canonical(value)
+    if name is None:
+        raise argparse.ArgumentTypeError(
+            f'unknown theme {value!r}; choose from {", ".join(Theme.list_all())}'
+            f' (legacy aliases: {", ".join(sorted(Theme.ALIASES))})'
+        )
+    return name
+
+
 def add_display_arguments(
     parser: argparse.ArgumentParser,
     *,
     theme_store: ThemeStore | None = None,
     prog: str | None = None,
 ) -> argparse.ArgumentParser:
-    """Add ``--ascii``, ``--glyphs``, ``--theme`` and ``--no-color`` to *parser*.
+    """Add ``--ascii``, ``--glyphs`` and ``--theme`` to *parser*.
 
     Returns *parser* so a call site can wrap its own construction.  *theme_store*
     is accepted for symmetry with :func:`apply_display_arguments` (an app that
@@ -93,17 +105,13 @@ def add_display_arguments(
     )
     parser.add_argument(
         '--theme',
-        choices=Theme.list_all(),
+        type=_theme_argument,
         default=None,
-        help=f'color theme{remembered}',
-    )
-    parser.add_argument(
-        '--no-color',
-        action='store_true',
-        default=None,
+        metavar='THEME',
         help=(
-            'draw the semantic roles with attributes instead of color; wins '
-            'over --theme, and NO_COLOR does the same when the switch is absent'
+            f'color theme: {", ".join(Theme.list_all())}{remembered}. '
+            'mono uses the terminal colors and bold/reverse attributes; '
+            'NO_COLOR selects it when no theme is given'
         ),
     )
     return parser
@@ -127,11 +135,6 @@ def resolve_force_ascii(args: argparse.Namespace) -> bool | None:
     )
 
 
-def resolve_no_color(args: argparse.Namespace) -> bool:
-    """Map a parsed namespace to the ``--no-color`` switch (absent means off)."""
-    return bool(getattr(args, 'no_color', False))
-
-
 def apply_display_arguments(
     args: argparse.Namespace,
     *,
@@ -140,18 +143,18 @@ def apply_display_arguments(
     environ: Mapping[str, str] | None = None,
     stream: TextIO | None = None,
 ) -> TerminalReport:
-    """Set the glyph mode, print the report's notes, seed the theme, honor color.
+    """Set the glyph mode, print the report's notes and seed the theme.
 
     Call this once, *before* any window is created, so the mode is decided while
     nothing has been drawn.  Returns the :class:`~console_window.glyphs.
     TerminalReport` so a caller can react to ``ascii_required`` (for example by
     printing a warning of its own).
 
-    An explicit ``--no-color`` turns the process-wide color switch off here; an
-    absent switch is left alone, so an app with a remembered preference is free
-    to call ``Appearance.set_colors_enabled()`` with its own decision.  The two
-    halves of that decision -- the theme to install and whether color is on --
-    come from :meth:`console_window.Appearance.resolve_appearance`.
+    The starting theme comes from :meth:`console_window.Appearance.
+    resolve_appearance`: an explicit ``--theme`` wins, otherwise a non-empty
+    ``NO_COLOR`` selects ``mono``.  Applying it through ``Theme.set_active()``
+    also synchronizes the process-wide color switch, so there is no separate
+    color flag to handle here.
 
     *printer* is a callable taking one string; pass ``sys.stderr.write`` style
     wrappers through ``lambda line: print(line, file=...)`` if needed.
@@ -164,16 +167,17 @@ def apply_display_arguments(
     for note in report.notes:
         printer(f'{prog}: {note}' if prog else note)
 
-    if resolve_no_color(args):
-        # Only the explicit flag is acted on; "absent" belongs to the caller.
-        Appearance.set_colors_enabled(False)
+    raw_theme = getattr(args, 'theme', None)
+    if raw_theme and Theme.canonical(raw_theme) is None:
+        # A namespace built by hand may bypass the argparse type; keep the
+        # historical diagnostic instead of silently resolving to 'default'.
+        message = f'unknown theme {raw_theme!r}; keeping {Theme.resolve(None)!r}'
+        printer(f'{prog}: {message}' if prog else message)
+        raw_theme = None
 
-    theme = getattr(args, 'theme', None)
+    theme = Appearance.resolve_appearance(cli_theme=raw_theme, environ=environ)
     if theme:
-        if theme in Theme.list_all():
-            # No window exists yet, so record the choice for the first one.
-            Theme.set_active(theme)
-        else:
-            message = f'unknown theme {theme!r}; keeping {Theme.resolve(None)!r}'
-            printer(f'{prog}: {message}' if prog else message)
+        # No window exists yet, so record the choice for the first one.
+        # Theme.set_active() also turns semantic color off for mono.
+        Theme.set_active(theme)
     return report

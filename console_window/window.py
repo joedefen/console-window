@@ -661,23 +661,26 @@ class ConsoleWindow:
     def set_theme(self, theme_name: str) -> bool:
         """Make *theme_name* this window's theme and install its colors.
 
-        Returns False for an unknown theme, or when the backend has no color
-        support (the choice is still recorded, so a later color-capable start
-        uses it).  Color pairs are per-terminal, so installing a palette
-        necessarily also affects any other window drawing on the same screen —
-        that is a curses constraint, not a choice.  What is per-window is the
-        selection: it is used at startup, when pads are reallocated, and
-        reported by ``window.theme``.
+        Returns False for an unknown theme, or for a palette when the backend
+        has no color support (the choice is still recorded, so a later
+        color-capable start uses it).  ``mono`` is always applicable: it needs
+        no color pairs and is the attribute hierarchy itself.  Color pairs are
+        per-terminal, so installing a palette necessarily also affects any
+        other window drawing on the same screen — that is a curses constraint,
+        not a choice.  What is per-window is the selection: it is used at
+        startup, when pads are reallocated, and reported by ``window.theme``.
         """
-        if theme_name not in Theme.THEMES:
+        name = Theme.canonical(theme_name)
+        if name is None:
             return False
-        self.theme = theme_name
+        self.theme = name
         # The choice is real even when nothing can be painted, and new windows
-        # inherit the most recently applied theme.
-        Theme.set_active(theme_name)
-        if not self._backend.has_colors():
+        # inherit the most recently applied theme.  This also synchronizes the
+        # appearance switch (mono off, palettes on).
+        Theme.set_active(name)
+        if not self._backend.has_colors() and not Theme.is_mono(name):
             return False
-        self.theme = self._install_theme(self._backend, self.scr, theme_name)
+        self.theme = self._install_theme(self._backend, self.scr, name)
         for ns in (self.head, self.body):
             pad = getattr(ns, 'pad', None)
             if pad is not None:
@@ -1008,8 +1011,14 @@ class ConsoleWindow:
             # The window's own theme (per-window since AUDIT.md §3.1) or the
             # process default for a window that has not chosen one yet.
             name = ConsoleWindow._install_theme(backend, scr, theme_name)
-            # New windows inherit the most recently applied theme.
-            Theme.set_active(name)
+        else:
+            # No color support: a palette cannot be painted, but mono is still
+            # a real theme and must be recorded so the attribute hierarchy and
+            # the window label agree.
+            name = Theme.resolve(theme_name)
+        # New windows inherit the most recently applied theme.  set_active()
+        # also synchronizes the appearance switch.
+        Theme.set_active(name)
 
         return scr
 

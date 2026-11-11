@@ -80,7 +80,7 @@ def test_below_eight_colors_degrades_to_attributes_without_raising(colors,
 def test_theme_set_on_an_eight_color_window_does_not_raise(monkeypatch):
     monkeypatch.setattr(Theme, '_current', None)
     backend = HeadlessBackend(colors=8)
-    win = _window('dark-mono', backend)
+    win = _window('dark', backend)
     try:
         backend.init_pair_calls.clear()
         assert Theme.set('nord') is True

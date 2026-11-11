@@ -46,11 +46,12 @@ For development, run the bundled sample app directly against your working tree �
 The sample takes the same display switches as any app built on the library:
 
 ```bash
-./runner --no-color          # or NO_COLOR=1 ./runner
+NO_COLOR=1 ./runner          # same as ./runner --theme mono
+./runner --theme mono
 ./runner --theme nord
 ```
 
-`--no-color` starts in the monochrome mode that the `THEMES` picker also offers as its `mono` choice, so `t` on the `THEMES` screen can turn color back on (or off again) without restarting.
+`mono` is a real theme, not a separate color flag. It uses the terminal's own foreground and background plus a bold/reverse attribute hierarchy, so it follows a light or dark terminal automatically. `NO_COLOR` selects it for a run when no explicit `--theme` is given, and `t` on the `THEMES` screen can switch back to a palette without restarting.
 
 ## Core Features (The "Secret Sauce")
 
@@ -84,7 +85,8 @@ It is a read-only `/etc/passwd` browser, and it is deliberately more than a list
 * **Themes** — a `THEMES` screen of color samples backed by `Theme.list_all()` / `get_current()` / `set()`.
   * The active theme is now per-window state: `ConsoleWindowOpts(theme=...)` seeds `window.theme`, `window.set_theme()` switches it (and re-initializes the terminal's color pairs, which curses keeps per terminal rather than per window), and `Theme.set()` remains the process-wide switch.
   * Theme names are semantic: asking for `nord` on an 8-color terminal installs the closest supported representation rather than raising, and startup, `set_theme()` and `Theme.set()` all share `Theme.install()`.
-  * The demo's picker also offers a `mono` choice that is not a palette: selecting it calls `Appearance.set_colors_enabled(False)` and the swatches switch from color pairs to the bold/reverse attribute hierarchy — the same thing `--no-color` does at startup. While color is off the header names `mono`, not the palette still installed underneath, so one choice has one name.
+  * The theme list ends with `mono`: it is a real theme whose only installed pair is the terminal-default background. Selecting it turns semantic color off and the swatches switch from color pairs to the bold/reverse attribute hierarchy; selecting a palette turns color back on. The library synchronizes that switch in `Theme.set_active()`, so the picker needs no application override and the header, swatches and installed pairs always agree.
+  * `dark-mono` and `light-mono` were renamed to `dark` and `light`; the old names remain accepted as aliases for `--theme` and remembered preferences, but they are not listed in the picker.
 * **Dialogs** — `a` calls `answer()` for text input, `l` calls `alert()`, and `n` drives `answer()` from an `OptionSpinner` option (`add_key(..., prompt=...)`).  `answer()` returns `None` only when the user aborts; if the terminal cannot fit the dialog it raises `TerminalTooSmallError` with the required and actual sizes.
 * **`status()` and `flash()`** — `status()` is a non-modal one-line message on the separator row; `flash()` is a modal box that clears the screen. The demo uses `status()` for "Processed", "Cancelled" and note-saved feedback.
 * **`BasicTextScreen`** — the HISTORY screen is rebuilt each draw from a `BasicTextScreen` via `set_text()` (headers plus `(text, attr)` lines), and resolves its window at draw time because the screens are constructed before the `ConsoleWindow`.
@@ -262,13 +264,28 @@ The UI is built around a handful of non-ASCII symbols (`│`, `⮞`, `█`, `←
   cli.apply_display_arguments(opts, prog='myapp')
   ```
 
-  `--ascii` forces the fallback (`--ascii=no` forces the full set) and `--glyphs {auto,ascii,unicode}` is its symmetric spelling; `--glyphs` wins if both are given. `--theme` seeds the first window's color theme and `--no-color` draws the semantic roles with bold/reverse attributes instead of color. Apps without argparse can use `CONSOLE_WINDOW_GLYPHS=auto|ascii|unicode`, which outranks detection.
+  `--ascii` forces the fallback (`--ascii=no` forces the full set) and `--glyphs {auto,ascii,unicode}` is its symmetric spelling; `--glyphs` wins if both are given. `--theme` seeds the first window's color theme, and `--theme mono` draws the semantic roles with bold/reverse attributes instead of color. A non-empty `NO_COLOR` selects `mono` when no explicit theme is given. Apps without argparse can use `CONSOLE_WINDOW_GLYPHS=auto|ascii|unicode`, which outranks detection.
 * **The mode is process-wide**, like the color-pair table, because there is one terminal. `ConsoleWindowOpts(ascii=...)` seeds it and `win.ascii_mode` reads it; a window constructed later never reverts an explicit choice.
 * **Help screens can explain it for you.** Return `help.theme_paragraph()` from `Screen.extra_help_paragraphs()` and set `show_display_notes = True` on a `BasicHelpScreen` subclass to append the font check (Unicode mode) or the way back to the full set (ASCII mode). Both are off by default, so an upgrading app's help output is unchanged.
 
-Themes work the same way: `Theme.create_picker_screen(base, cycle_key=None, store=None, note=None)` discovers the key you bound to `spin_theme` for its hint line, remembers the choice through any object with `load()`/`save()`, and `Theme.initial(cli_theme, store)` returns the theme a new process should start on. The library never opens a file. Its swatches follow the shared color switch, so a picker opened while color is off previews the monochrome hierarchy rather than a previous theme's colors; override `swatch_attr()` on a subclass to style swatches differently, and `theme_label()` to name an app pseudo-theme such as `mono` in the header.
+Themes work the same way: `Theme.create_picker_screen(base, cycle_key=None, store=None, note=None, captions=None, include_defaults=True)` discovers the key you bound to `spin_theme` for its hint line, remembers the choice through any object with `load()`/`save()`, and `Theme.initial(cli_theme, store)` returns the theme a new process should start on. The library never opens a file. `Theme.list_all()` includes `mono`, so the picker cycles it like any other theme; its swatches follow the same switch, so a picker opened on `mono` previews the monochrome hierarchy rather than a previous theme's colors.
 
-The appearance layer is shared too. `Appearance.semantic_attr(role)` returns the installed color pair for a semantic role, or the matching attribute from `Appearance.MONO_ROLES` when color is off; it degrades to plain text when the terminal has no color or curses has not been initialized, so a redraw is never aborted by a color. `Appearance.set_colors_enabled()` / `Appearance.colors_enabled()` hold the process-wide switch, and `Appearance.resolve_appearance(cli_theme=None, no_color=False, saved_theme='', saved_colors=True, environ=None)` returns the `(theme, colors)` to start with: `--no-color` first, then an explicit `--theme`, then `NO_COLOR`, then the remembered choice. Apps keep their preference file and their own pseudo-themes; the library gives them the policy, not the storage. `SampleApp`'s `mono` choice is the worked example of that split: it lives in the app, flips the switch, and leaves the installed palette untouched.
+`captions` renames or re-describes the semantic roles the picker shows, which is useful when the application's vocabulary differs from the library's. The mapping is `role -> (label, usage)`, where a role can be a `Theme` constant or a stable name such as `'danger'`; `None` or `''` keeps the library text. With the default `include_defaults=True`, overrides replace captions in place and the library rows remain; with `include_defaults=False` the mapping is the whole list, in mapping order. Unknown or duplicate roles raise `ValueError` when the factory runs.
+
+```python
+ThemeScreen = Theme.create_picker_screen(
+    DemoScreen,
+    cycle_key='t',
+    captions={
+        'danger':  ('FAILED',   'Boot or initramfs failed'),
+        'warning': ('DEGRADED', ''),  # keep the library usage text
+    },
+)
+```
+
+Override `swatch_attr()` on a subclass to style swatches differently, `swatch_rows()` for dynamic captions (translation, for example), and `theme_label()` only if an application adds its own pseudo-theme.
+
+The appearance layer is shared too. `Appearance.semantic_attr(role)` returns the installed color pair for a semantic role, or the matching attribute from `Appearance.MONO_ROLES` when color is off or the terminal reports no color support; a lookup that fails before `initscr()` degrades to plain text, so a redraw is never aborted by a color. `Appearance.resolve_appearance(cli_theme=None, saved_theme='', environ=None)` returns the theme to start with: an explicit `--theme` first, then the `NO_COLOR` convention (`mono`), then the remembered choice. Pass the result to `Theme.set_active()`, which records it and synchronizes `Appearance.colors_enabled()` / `Appearance.set_colors_enabled()`; applications select `mono` rather than flipping the switch themselves. Apps keep their preference file and any additional pseudo-themes; the library gives them the policy, not the storage.
 
 ## Versioning and Deprecation
 
@@ -280,7 +297,11 @@ Deprecated APIs remain supported **indefinitely**. A deprecation is a request to
 
 `3.0.0` opens the 3.x line, and every later 3.x release is intended to remain upward compatible with it. The deliberate breaks from 2.x are collected here, each with its replacement:
 
-- **`appearance` is now `Appearance`.** The appearance layer's public name is capitalized to match the rest of the package root (`Theme`, `Glyphs`, `Context`, …), and its module is now private (`console_window._appearance`). Change `from console_window import appearance` to `from console_window import Appearance`, and spell calls as `Appearance.semantic_attr(...)`, `Appearance.colors_enabled()`, `Appearance.set_colors_enabled()` and `Appearance.resolve_appearance(...)`. The individual names (`semantic_attr`, `colors_enabled`, `set_colors_enabled`, `resolve_appearance`, `MONO_ROLES`) are unchanged and remain importable from the package root; only the lowercase module spelling is gone.
+- **`appearance` is now `Appearance`.** This matches the rest of the package root (`Theme`, `Glyphs`, `Context`, …).
+- **`--no-color` is gone.** Select the real `mono` theme instead (`--theme mono`), or rely on the `NO_COLOR` environment convention. `cli.resolve_no_color()` and the `no_color=` / `saved_colors=` parameters of `Appearance.resolve_appearance()` were removed with it.
+- **`Appearance.resolve_appearance()` returns one theme name**, not `(theme, colors)`. Apply it with `Theme.set_active()`; `mono` is the color-off state.
+- **`dark-mono` / `light-mono` are now `dark` / `light`.** The old names are still accepted as aliases by `--theme`, remembered preferences and `Theme.resolve()`, but `Theme.list_all()` lists only the canonical names.
+- **`mono` is a theme.** It installs only the terminal-default background and uses `Appearance.MONO_ROLES` for the semantic roles. It is terminal-global like any other theme install, because curses owns one color-pair table per terminal.
 
 ## License
 MIT

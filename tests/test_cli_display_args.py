@@ -1,4 +1,4 @@
-"""The argparse boilerplate: --ascii, --ascii=BOOL, --glyphs, --theme and --no-color."""
+"""The argparse boilerplate: --ascii, --ascii=BOOL, --glyphs and --theme."""
 
 import argparse
 
@@ -123,30 +123,39 @@ def test_apply_tolerates_a_namespace_without_display_attributes(capsys):
     assert 'font check' in capsys.readouterr().out
 
 
-def test_no_color_is_the_fourth_switch():
+def test_there_is_no_separate_no_color_switch():
     args = _parser().parse_args([])
-    assert args.no_color is None
-    assert cli.resolve_no_color(args) is False
-
-    args = _parser().parse_args(['--no-color'])
-    assert args.no_color is True
-    assert cli.resolve_no_color(args) is True
+    assert not hasattr(args, 'no_color')
 
 
-def test_resolve_no_color_tolerates_a_namespace_without_the_switch():
-    assert cli.resolve_no_color(argparse.Namespace()) is False
-    assert cli.resolve_no_color(argparse.Namespace(no_color='yes')) is True
-
-
-def test_apply_honors_no_color(capsys):
-    _apply(['--no-color'], capsys)
+def test_no_color_selects_mono(capsys):
+    _apply([], capsys, environ={'TERM': 'xterm-256color', 'NO_COLOR': '1'})
+    assert Theme.get_current() == 'mono'
     assert Appearance.colors_enabled() is False
 
 
-def test_apply_leaves_a_remembered_color_choice_alone(capsys):
-    Appearance.set_colors_enabled(False)
+def test_theme_mono_is_the_explicit_way_to_turn_color_off(capsys):
+    _apply(['--theme=mono'], capsys)
+    assert Theme.get_current() == 'mono'
+    assert Appearance.colors_enabled() is False
+
+
+def test_an_explicit_theme_wins_over_no_color(capsys):
+    _apply(['--theme=nord'], capsys,
+           environ={'TERM': 'xterm-256color', 'NO_COLOR': '1'})
+    assert Theme.get_current() == 'nord'
+    assert Appearance.colors_enabled() is True
+
+
+def test_a_legacy_theme_alias_is_canonicalized(capsys):
+    args, _report, _out = _apply(['--theme=dark-mono'], capsys)
+    assert args.theme == 'dark'
+    assert Theme.get_current() == 'dark'
+
+
+def test_apply_leaves_the_process_theme_alone_when_nothing_is_chosen(capsys):
     _apply([], capsys)
-    assert Appearance.colors_enabled() is False
+    assert Theme.get_current() is None
 
 
 def test_the_theme_store_note_only_promises_what_is_true():

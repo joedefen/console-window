@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from console_window import Appearance
 from console_window.backend import HeadlessBackend
 from console_window.opts import ConsoleWindowOpts
 from console_window.screens import Screen
@@ -51,7 +52,7 @@ def test_startup_initializes_every_semantic_pair(monkeypatch):
 
     for name in ('start_color', 'use_default_colors', 'color_pair', 'init_pair'):
         monkeypatch.setattr(curses, name, off_limits)
-    monkeypatch.setattr(Theme, '_current', 'dark-mono')
+    monkeypatch.setattr(Theme, '_current', 'dark')
 
     backend = HeadlessBackend(colors=True)
     win = ConsoleWindow(opts=ConsoleWindowOpts(body_rows=10, head_rows=3),
@@ -76,11 +77,11 @@ def test_theme_set_initializes_the_same_pair_set(monkeypatch):
                         backend=backend, singleton=False)
     try:
         backend.init_pair_calls.clear()
-        assert Theme.set('dark-mono') is True
+        assert Theme.set('dark') is True
         initialized = {pair for pair, _fg, _bg in backend.init_pair_calls}
         assert set(Theme.SEMANTIC_PAIRS) <= initialized
         assert Theme.DEFAULT_BG in initialized
-        assert win.theme == 'dark-mono'
+        assert win.theme == 'dark'
     finally:
         win.stop_curses()
 
@@ -95,8 +96,8 @@ def _picker_app(theme_name):
 
 
 def test_create_picker_screen_draws_swatches(color_recorder, monkeypatch):
-    monkeypatch.setattr(Theme, '_current', 'dark-mono')
-    win, app = _picker_app('dark-mono')
+    monkeypatch.setattr(Theme, '_current', 'dark')
+    win, app = _picker_app('dark')
     screen = Theme.create_picker_screen(Screen)(app)
     try:
         screen.draw_screen()
@@ -110,7 +111,7 @@ def test_create_picker_screen_draws_swatches(color_recorder, monkeypatch):
 def test_create_picker_screen_honors_the_apps_selected_theme(color_recorder, monkeypatch):
     # The sample app drives the picker with an ordinary cycle option, so the
     # factory must apply opts.theme before drawing the swatches.
-    monkeypatch.setattr(Theme, '_current', 'dark-mono')
+    monkeypatch.setattr(Theme, '_current', 'dark')
     win, app = _picker_app('nord')
     screen = Theme.create_picker_screen(Screen)(app)
     try:
@@ -121,11 +122,11 @@ def test_create_picker_screen_honors_the_apps_selected_theme(color_recorder, mon
 
 
 def test_create_picker_screen_spin_action_cycles_and_updates_option(color_recorder, monkeypatch):
-    monkeypatch.setattr(Theme, '_current', 'dark-mono')
-    win, app = _picker_app('dark-mono')
+    monkeypatch.setattr(Theme, '_current', 'dark')
+    win, app = _picker_app('dark')
     screen = Theme.create_picker_screen(Screen)(app)
     themes = Theme.list_all()
-    expected = themes[(themes.index('dark-mono') + 1) % len(themes)]
+    expected = themes[(themes.index('dark') + 1) % len(themes)]
     try:
         screen.spin_theme_ACTION()
         assert win.theme == expected
@@ -210,9 +211,134 @@ def test_theme_set_is_a_process_wide_switch_and_relabels_live_windows(color_reco
     first, _ = _color_window('nord')
     second, _ = _color_window('gruvbox')
     try:
-        assert Theme.set('dark-mono') is True
-        assert first.theme == 'dark-mono'
-        assert second.theme == 'dark-mono'
+        assert Theme.set('dark') is True
+        assert first.theme == 'dark'
+        assert second.theme == 'dark'
     finally:
         first.stop_curses()
         second.stop_curses()
+
+
+# --- mono, aliases and the switch -----------------------------------------
+
+def test_mono_is_last_and_defines_only_the_default_background():
+    assert Theme.list_all()[-1] == Theme.MONO
+    assert Theme.pair_specs('mono') == [(Theme.DEFAULT_BG, -1, -1)]
+    assert Theme.is_mono('mono') is True
+    assert Theme.is_mono('dark') is False
+
+
+def test_legacy_theme_aliases_canonicalize():
+    assert Theme.canonical('dark-mono') == 'dark'
+    assert Theme.canonical('light-mono') == 'light'
+    assert Theme.canonical('nonsense') is None
+    assert Theme.resolve('dark-mono') == 'dark'
+    assert Theme.resolve('nonsense') == 'default'
+
+
+def test_mono_is_usable_without_color_support_and_palettes_are_not():
+    win = ConsoleWindow(
+        opts=ConsoleWindowOpts(theme='dark'),
+        backend=HeadlessBackend(),  # no color support
+        singleton=False,
+    )
+    try:
+        assert win.set_theme('mono') is True
+        assert win.theme == 'mono'
+        assert Theme.get_current() == 'mono'
+        assert Appearance.colors_enabled() is False
+
+        # A palette is recorded but cannot be painted on this terminal; the
+        # request for color still lifts the switch.
+        assert win.set_theme('nord') is False
+        assert win.theme == 'nord'
+        assert Appearance.colors_enabled() is True
+    finally:
+        win.stop_curses()
+
+
+def test_theme_set_selects_mono_and_turns_color_off():
+    backend = HeadlessBackend(colors=True)
+    win = ConsoleWindow(opts=ConsoleWindowOpts(), backend=backend, singleton=False)
+    try:
+        assert Theme.set('mono') is True
+        assert win.theme == 'mono'
+        assert Theme.get_current() == 'mono'
+        assert Appearance.colors_enabled() is False
+        # Only the terminal-default background pair is installed.
+        assert backend.init_pair_calls[-1] == (Theme.DEFAULT_BG, -1, -1)
+    finally:
+        win.stop_curses()
+
+
+# --- role names and picker captions ---------------------------------------
+
+def test_every_semantic_role_has_a_name_and_a_default_caption():
+    # The name/caption tables are the picker's vocabulary; keep them from
+    # drifting away from the roles the library actually installs.
+    assert set(Theme.ROLES.values()) == set(Theme.SEMANTIC_PAIRS)
+    assert set(Theme.ROLE_CAPTIONS) == set(Theme.SEMANTIC_PAIRS)
+
+
+def test_role_id_accepts_constants_and_names():
+    assert Theme.role_id(Theme.DANGER) == Theme.DANGER
+    assert Theme.role_id('danger') == Theme.DANGER
+    assert Theme.role_id('DANGER') == Theme.DANGER
+    assert Theme.role_id('old-success') == Theme.OLD_SUCCESS
+    assert Theme.role_id('Old Success') == Theme.OLD_SUCCESS
+
+
+def test_role_id_rejects_unknown_and_non_displayable_roles():
+    with pytest.raises(ValueError, match='unknown color role'):
+        Theme.role_id('chartreuse')
+    with pytest.raises(ValueError, match='not a displayable color role'):
+        Theme.role_id(Theme.DEFAULT)
+    with pytest.raises(ValueError, match='unknown color role'):
+        Theme.role_id(True)
+
+
+def test_role_captions_default_to_the_library_rows():
+    rows = Theme.role_captions()
+    assert [role for role, _label, _usage in rows] == list(Theme.ROLE_CAPTIONS)
+    assert rows[0] == (Theme.DANGER, 'DANGER', 'Destructive operations')
+    assert Theme.role_captions(None, include_defaults=False) == []
+
+
+def test_role_captions_override_in_place_and_keep_the_library_order():
+    rows = Theme.role_captions({
+        'danger': ('FAILED', 'Boot failed'),
+        Theme.SUCCESS: (None, ''),
+    })
+    by_role = {role: (label, usage) for role, label, usage in rows}
+    assert by_role[Theme.DANGER] == ('FAILED', 'Boot failed')
+    # Empty fields inherit the library text rather than blanking the column.
+    assert by_role[Theme.SUCCESS] == ('SUCCESS', 'Completed operations')
+    assert [role for role, _label, _usage in rows] == list(Theme.ROLE_CAPTIONS)
+
+
+def test_role_captions_replace_mode_uses_only_the_mapping_in_order():
+    rows = Theme.role_captions({
+        Theme.INFO: ('SCAN', 'Discovery in progress'),
+        'danger': ('FAILED', None),
+    }, include_defaults=False)
+    assert [role for role, _label, _usage in rows] == [Theme.INFO, Theme.DANGER]
+    assert rows[0] == (Theme.INFO, 'SCAN', 'Discovery in progress')
+    # A missing usage still inherits the library description.
+    assert rows[1] == (Theme.DANGER, 'FAILED', 'Destructive operations')
+
+
+def test_role_captions_reject_duplicate_roles_after_normalization():
+    with pytest.raises(ValueError, match='duplicate caption'):
+        Theme.role_captions({
+            Theme.DANGER: ('FAILED', None),
+            'danger': ('BROKE', None),
+        })
+
+
+def test_role_captions_reject_unknown_roles_and_malformed_text():
+    with pytest.raises(ValueError, match='unknown color role'):
+        Theme.role_captions({'chartreuse': ('NOPE', None)})
+    with pytest.raises(ValueError, match=r'\(label, usage\) pair'):
+        Theme.role_captions({Theme.DANGER: 'FAILED'})
+    with pytest.raises(ValueError, match='string or None'):
+        Theme.role_captions({Theme.DANGER: (1, None)})

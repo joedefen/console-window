@@ -29,14 +29,8 @@ from console_window import help as help_text
 DEMO_GLYPHS = {'tick': ('\u2713', 'OK')}
 DEMO_PROBE = ('tick', 'cursor', 'choice', 'scroll_prev', 'scroll_next')
 
-#: The demo's own pseudo-theme.  ``mono`` is not a palette: choosing it turns
-#: semantic color off for the process, exactly like ``--no-color``.  The library
-#: leaves pseudo-themes to the application (``console_window.Appearance`` names
-#: ``mono`` as its standing example), so the demo owns the name and the switch
-#: behind it.  Keeping it last in the choices makes ``t`` step from the final
-#: palette into mono and wrap back to the first palette.
-MONO_THEME = 'mono'
-THEME_CHOICES = (*Theme.list_all(), MONO_THEME)
+#: ``mono`` is a real library theme now, not a demo pseudo-theme: the theme
+#: list ends with it, and selecting it is what turns semantic color off.
 
 # Screen IDs
 MAIN_ST = 0
@@ -46,21 +40,20 @@ THEME_ST = 3
 SCREEN_NAMES = ('MAIN', 'HELP', 'HISTORY', 'THEMES')
 
 
-def settle_appearance(cli_theme=None, no_color=False):
+def settle_appearance(cli_theme=None):
     """Turn the parsed color switches into process state.
 
-    ``resolve_appearance()`` returns the two halves of the decision -- which
-    palette, and whether to use it -- from ``--no-color``, ``--theme``, the
-    ``NO_COLOR`` convention and, in an app that has one, the remembered choice.
-    The demo remembers nothing between runs, so only the switches and the
-    environment are passed.  Returns the ``(theme, colors)`` it applied.
+    ``resolve_appearance()`` returns the theme to start on from ``--theme``,
+    the ``NO_COLOR`` convention and, in an app that has one, the remembered
+    choice.  The demo remembers nothing between runs, so only the switch and
+    the environment are passed.  Applying the theme through
+    ``Theme.set_active()`` also synchronizes the color switch, because ``mono``
+    is a real theme.  Returns the applied theme name.
     """
-    theme, colors = Appearance.resolve_appearance(
-        cli_theme=cli_theme, no_color=no_color)
-    Appearance.set_colors_enabled(colors)
+    theme = Appearance.resolve_appearance(cli_theme=cli_theme)
     if theme:
         Theme.set_active(theme)
-    return theme, colors
+    return theme
 
 
 class SampleApp:
@@ -120,7 +113,7 @@ class SampleApp:
 
         # Setup option spinner - it will inherit stack.obj (self.opts)
         spin = self.spin = OptionSpinner(stack=self.stack)
-        themes = list(THEME_CHOICES)
+        themes = list(Theme.list_all())
 
         # Add view mode and sort options
         # NOTE: settings shown on the HELP screen are scoped to HELP_ST as well,
@@ -170,11 +163,9 @@ class SampleApp:
         self.opts.name = ''
 
         # Seed the theme option from the decision the process actually made, so
-        # the help list and the picker name what is on screen: --no-color (or
-        # NO_COLOR) starts on the demo's mono choice, otherwise the window
-        # already installed its palette and the option should agree with it.
-        self.opts.theme = (MONO_THEME if not Appearance.colors_enabled()
-                           else Theme.resolve(Theme.get_current()))
+        # the help list and the picker name what is on screen.  settle_appearance
+        # has already applied --theme or NO_COLOR ('mono').
+        self.opts.theme = Theme.resolve(Theme.get_current())
 
         # Load sample data from /etc/passwd
         self._load_sample_data()
@@ -223,19 +214,14 @@ class SampleApp:
     def apply_theme_choice(self, choice):
         """Make a theme-picker *choice* live.
 
-        ``mono`` is the demo's pseudo-theme: a color mode rather than a palette,
-        so it flips the process-wide switch and leaves the installed theme where
-        it was (the same way ``--no-color`` keeps ``--theme``).  Choosing a real
-        palette is a request for color, so it lifts the switch again and installs
-        the palette.  This is the one place the choice becomes window state,
-        whichever screen the key was pressed on.
+        ``mono`` is an ordinary theme now: ``set_theme`` records it, installs
+        only the terminal-default background, and turns the semantic color
+        switch off.  Choosing a palette does the reverse.  This is the one place
+        the choice becomes window state, whichever screen the key was pressed
+        on.
         """
-        self.opts.theme = choice
-        if choice == MONO_THEME:
-            Appearance.set_colors_enabled(False)
-            return
-        Appearance.set_colors_enabled(True)
-        self.win.set_theme(choice)
+        self.opts.theme = Theme.resolve(choice)
+        self.win.set_theme(self.opts.theme)
 
     def handle_key(self, key):
         # A live in-place prompt owns every key.  This is the documented
@@ -575,9 +561,8 @@ class HelpScreen(DemoScreen, BasicHelpScreen):
     def extra_help_paragraphs(self):
         return (
             help_text.theme_paragraph(open_key='T', cycle_key='t'),
-            'The theme list ends with mono: it turns color off (the same mode '
-            '--no-color starts in) and leaves the palette selected, so the '
-            'picker shows how that theme degrades to bold/reverse attributes.',
+            "The theme list ends with mono: it uses the terminal's own colors "
+            'and the bold/reverse attribute hierarchy, and NO_COLOR starts there.',
         )
 
 #   def draw_screen(self):
@@ -627,23 +612,13 @@ class HistoryScreen(DemoScreen):
 class ThemeScreen(Theme.create_picker_screen(DemoScreen, cycle_key='t')):
     """THEMES screen supplied by Theme.create_picker_screen().
 
-    The picker's swatches follow the shared color switch, so cycling to the
-    demo's ``mono`` choice previews exactly what ``--no-color`` looks like: the
-    same rows, painted with the role attributes instead of a palette.  ``t``
-    cycles the whole ``THEME_CHOICES`` list on this screen and on HELP.
-
-    The header names the choice, not the palette behind it: with color off it
-    says ``mono``, the entry that turned color off.  Turning color back on is
-    what selecting a palette does.
+    ``mono`` is a real theme, so the factory needs no application override: the
+    header names it and the swatches follow the shared appearance switch.  ``t``
+    cycles the whole ``Theme.list_all()`` list on this screen and on HELP.
     """
 
     def __init__(self, app):
         super().__init__('THEMES', app)
-
-    def theme_label(self, theme_name):
-        if not Appearance.colors_enabled():
-            return MONO_THEME
-        return super().theme_label(theme_name)
 
 
 def main(backend=None, singleton=True):
@@ -656,13 +631,10 @@ def main(backend=None, singleton=True):
     opts = parser.parse_args()
     cli.apply_display_arguments(opts, prog='SampleApp')
 
-    # Color is one decision with two parts: which palette, and whether to use it
-    # at all.  apply_display_arguments() already installed --theme; settling the
-    # whole decision here keeps NO_COLOR working and the two halves agreeing.
-    settle_appearance(
-        cli_theme=getattr(opts, 'theme', None),
-        no_color=cli.resolve_no_color(opts),
-    )
+    # apply_display_arguments() already applied --theme; settling the whole
+    # decision here also keeps NO_COLOR working.  'mono' is a real theme, so
+    # there is no second color switch to reconcile.
+    settle_appearance(cli_theme=getattr(opts, 'theme', None))
 
     try:
         app = SampleApp(backend=backend, singleton=singleton)

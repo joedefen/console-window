@@ -2,12 +2,20 @@ from __future__ import annotations
 
 import curses
 import logging
+from collections.abc import Callable, Mapping
 from typing import ClassVar, Protocol
 
-from . import glyphs
+from . import glyphs, textwidth
 from .backend import CursesBackend, RenderBackend
 
 logger = logging.getLogger(__name__)
+
+
+class _SwatchWindow(Protocol):
+    """The part of a host window the swatch renderer needs."""
+
+    def add_body(self, text: str, attr: int | None = None) -> None:
+        ...
 
 
 class ThemeStore(Protocol):
@@ -44,6 +52,42 @@ def _discover_cycle_key(screen: object, fallback: str = 't') -> str:
             if isinstance(key, int) and not isinstance(key, bool) and 32 <= key < 127:
                 return chr(key)
     return fallback
+
+
+def _swatch_label_width(rows: list[tuple[int, str, str]], swatch: str,
+                        win: object) -> int:
+    """Width of the picker's label column for *rows* on *win*.
+
+    The historical picker used a fixed twelve-cell column.  That still fits
+    every library label, but an application caption can be longer, so measure
+    the rows and cap the column to leave room for the swatch and usage text.
+    """
+    label = max(
+        (textwidth.string_width(text) for _, text, _ in rows),
+        default=0,
+    )
+    getter = getattr(win, 'get_pad_width', None)
+    total = getter() if callable(getter) else 80
+    available = max(1, total - textwidth.string_width(swatch) - 2)
+    return min(max(12, label), available)
+
+
+def _draw_swatch_rows(win: _SwatchWindow, rows: list[tuple[int, str, str]],
+                      swatch: str, attr_for: Callable[[int], int],
+                      note: str | None = None) -> None:
+    """Paint one tinted line per semantic role.
+
+    The block is a registered glyph, so a terminal that cannot draw U+2588
+    shows '#' blocks instead of nine empty cells.  The label column widens for
+    application captions and is capped to leave room for the swatch.
+    """
+    label_width = _swatch_label_width(rows, swatch, win)
+    add_body = win.add_body
+    for color_id, label, usage in rows:
+        line = f'{textwidth.ljust(label, label_width)} {swatch}  {usage}'
+        add_body(line, attr=attr_for(color_id))
+    if note:
+        add_body(note, attr=curses.A_DIM)
 
 # --- palette model -----------------------------------------------------------
 # Standard xterm palette model.  0..15 are the ANSI/base colors, 16..231 the
@@ -203,6 +247,36 @@ class Theme:
         DANGER, SUCCESS, OLD_SUCCESS, WARNING, INFO, EMPHASIS, ERROR, PROGRESS, HOTSWAP,
     )
 
+    #: Stable string names for the semantic roles.  They make caption mappings
+    #: and configuration files readable; :meth:`role_id` normalizes case and
+    #: accepts a hyphen or space wherever a name contains an underscore.
+    ROLES: ClassVar[dict[str, int]] = {
+        'danger': DANGER,
+        'success': SUCCESS,
+        'old_success': OLD_SUCCESS,
+        'warning': WARNING,
+        'info': INFO,
+        'emphasis': EMPHASIS,
+        'error': ERROR,
+        'progress': PROGRESS,
+        'hotswap': HOTSWAP,
+    }
+
+    #: The picker's default vocabulary: ``role -> (label, usage)``.  The order
+    #: here is the row order.  An application may rename or re-describe any
+    #: role through ``Theme.create_picker_screen(captions=...)``.
+    ROLE_CAPTIONS: ClassVar[dict[int, tuple[str, str]]] = {
+        DANGER: ('DANGER', 'Destructive operations'),
+        SUCCESS: ('SUCCESS', 'Completed operations'),
+        OLD_SUCCESS: ('OLD_SUCCESS', 'Older completed operations'),
+        WARNING: ('WARNING', 'Caution/stopped states'),
+        INFO: ('INFO', 'Informational states'),
+        EMPHASIS: ('EMPHASIS', 'Emphasized text'),
+        ERROR: ('ERROR', 'Errors'),
+        PROGRESS: ('PROGRESS', 'Progress indicators'),
+        HOTSWAP: ('HOTSWAP', 'Recently added items'),
+    }
+
     # Process default theme name.  It seeds a new window's own ``theme``
     # (ConsoleWindow.theme) and receives the most recently applied theme, so
     # windows created later inherit it.  The authoritative choice for a running
@@ -211,10 +285,23 @@ class Theme:
     # have to disagree about which theme they are on (AUDIT.md §3.1).
     _current: ClassVar[str | None] = None
 
+    #: Theme name for "no semantic color": the terminal's own foreground and
+    #: background plus the attribute hierarchy in ``Appearance.MONO_ROLES``.
+    #: It is a real theme, not a mode layered on top of a palette.
+    MONO: ClassVar[str] = 'mono'
+
+    #: Legacy names accepted (and normalized) for compatibility.  They are not
+    #: listed by :meth:`list_all`, so the picker never shows a duplicate; they
+    #: are still accepted by ``--theme`` and by remembered preferences.
+    ALIASES: ClassVar[dict[str, str]] = {
+        'dark-mono': 'dark',
+        'light-mono': 'light',
+    }
+
     # Available themes
     THEMES: ClassVar[dict] = {
-        'dark-mono': {
-            'name': 'Dark Mono',
+        'dark': {
+            'name': 'Dark',
             'default_fg': 253,
             'default_bg': 232,
             1: (196, 232),  # DANGER
@@ -227,8 +314,8 @@ class Theme:
             7: (39, 232),   # PROGRESS
             9: (208, 232),  # HOTSWAP
         },
-        'light-mono': {
-            'name': 'Light Mono',
+        'light': {
+            'name': 'Light',
             'default_fg': 233,
             'default_bg': 253,
             1: (196, 253),  # DANGER
@@ -311,14 +398,136 @@ class Theme:
             7: (136, 236),  # PROGRESS
             9: (208, 236),  # HOTSWAP
         },
+        # Not a palette: mono uses the terminal's own foreground/background and
+        # the attribute hierarchy in Appearance.MONO_ROLES.  Keeping it in
+        # THEMES (rather than as an application pseudo-theme) means --theme
+        # mono, the picker cycle, persistence and startup all treat it like any
+        # other theme.  It defines only a default background, so pair_specs()
+        # installs nothing but the terminal-default pair.
+        'mono': {
+            'name': 'Mono',
+            'default_fg': -1,
+            'default_bg': -1,
+        },
     }
 
     @classmethod
+    def canonical(cls, theme_name: str | None) -> str | None:
+        """Return the canonical theme name for *theme_name*, or ``None``.
+
+        Aliases are normalized first, so a remembered or command-line
+        ``dark-mono`` becomes ``dark``.  ``None``/``''`` and unknown names are
+        not themes; :meth:`resolve` supplies the ``'default'`` fallback for
+        those.
+        """
+        if not theme_name:
+            return None
+        name = cls.ALIASES.get(theme_name, theme_name)
+        return name if name in cls.THEMES else None
+
+    @classmethod
+    def is_mono(cls, theme_name: str | None) -> bool:
+        """True when *theme_name* is the monochrome (no semantic color) theme."""
+        return cls.canonical(theme_name) == cls.MONO
+
+    @classmethod
+    def role_id(cls, role: int | str) -> int:
+        """Normalize a semantic role id or name to its integer id.
+
+        Accepts a :class:`Theme` constant (``Theme.DANGER``) or a
+        case-insensitive name (``'danger'``, ``'DANGER'``, ``'old-success'``).
+        Unknown names, and ids that have no picker caption, raise
+        ``ValueError``: a typo in an application's caption mapping should fail
+        at start-up rather than leave a silently missing swatch.
+        """
+        if isinstance(role, bool) or not isinstance(role, (int, str)):
+            raise ValueError(f'unknown color role {role!r}')
+        if isinstance(role, str):
+            key = role.strip().lower().replace('-', '_').replace(' ', '_')
+            resolved = cls.ROLES.get(key)
+            if resolved is None:
+                raise ValueError(
+                    f'unknown color role {role!r}; choose from '
+                    f'{", ".join(cls.ROLES)}'
+                )
+            role = resolved
+        if role not in cls.ROLE_CAPTIONS:
+            raise ValueError(
+                f'{role!r} is not a displayable color role; choose from '
+                f'{", ".join(cls.ROLES)}'
+            )
+        return role
+
+    @classmethod
+    def role_captions(
+        cls,
+        captions: Mapping[int | str, tuple[str | None, str | None]] | None = None,
+        include_defaults: bool = True,
+    ) -> list[tuple[int, str, str]]:
+        """Resolve an application's caption mapping to picker rows.
+
+        Each mapping entry is ``role -> (label, usage)``.  A ``None`` or empty
+        string keeps the library's default text for that field.  With
+        *include_defaults* true the overrides replace captions in place and the
+        library row order is kept; with it false the mapping *is* the row list,
+        in mapping order.  Keys may be :class:`Theme` constants or stable names
+        such as ``'danger'``.
+
+        Duplicate roles are rejected after normalization, so
+        ``{Theme.DANGER: ..., 'danger': ...}`` cannot produce an ambiguous
+        list.  Unknown roles raise rather than drawing a silently missing
+        swatch.
+        """
+        resolved: dict[int, tuple[str | None, str | None]] = {}
+        for role, caption in (captions or {}).items():
+            role_id = cls.role_id(role)
+            if role_id in resolved:
+                raise ValueError(f'duplicate caption for color role {role_id!r}')
+            if isinstance(caption, str):
+                raise ValueError(
+                    f'caption for color role {role!r} must be a '
+                    '(label, usage) pair'
+                )
+            try:
+                label, usage = caption
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f'caption for color role {role!r} must be a '
+                    '(label, usage) pair'
+                ) from exc
+            for field in (label, usage):
+                if field is not None and not isinstance(field, str):
+                    raise ValueError(
+                        f'caption text for color role {role!r} must be a '
+                        'string or None'
+                    )
+            resolved[role_id] = (label, usage)
+
+        if include_defaults:
+            rows: list[tuple[int, str, str]] = []
+            for role, (label, usage) in cls.ROLE_CAPTIONS.items():
+                override_label, override_usage = resolved.get(role, (None, None))
+                rows.append((
+                    role,
+                    override_label or label,
+                    override_usage or usage,
+                ))
+            return rows
+
+        rows = []
+        for role, (label, usage) in resolved.items():
+            default_label, default_usage = cls.ROLE_CAPTIONS[role]
+            rows.append((
+                role,
+                label or default_label,
+                usage or default_usage,
+            ))
+        return rows
+
+    @classmethod
     def resolve(cls, theme_name: str | None) -> str:
-        """Return *theme_name* if it names a theme, else ``'default'``."""
-        if theme_name and theme_name in cls.THEMES:
-            return theme_name
-        return 'default'
+        """Return canonical *theme_name* if it names a theme, else ``'default'``."""
+        return cls.canonical(theme_name) or 'default'
 
     @classmethod
     def get_current(cls) -> str | None:
@@ -398,7 +607,8 @@ class Theme:
 
     @classmethod
     def set(cls, theme_name: str) -> bool:
-        if theme_name not in cls.THEMES:
+        name = cls.canonical(theme_name)
+        if name is None:
             return False
 
         # Late import to avoid a circular import at module load time.
@@ -413,11 +623,13 @@ class Theme:
         if backend is None:
             backend = CursesBackend()
             backend.start_color()
-        if not backend.has_colors():
+        # mono is meaningful without color support: it is the attribute
+        # hierarchy, and recording it turns the appearance switch off.
+        if not backend.has_colors() and not cls.is_mono(name):
             return False
 
-        cls._current = theme_name
-        name = cls.install(backend, theme_name)
+        cls._current = name
+        name = cls.install(backend, name)
         cls._current = name
         theme = cls.THEMES[name]
 
@@ -437,12 +649,29 @@ class Theme:
         for win in ConsoleWindow.active_windows():
             win.theme = name
 
+        # Keep the appearance switch in step with the process theme (mono off,
+        # palettes on).  Theme.set() is a public entry point, so it must not
+        # leave the two axes disagreeing.
+        cls.set_active(name)
+
         return True
 
     @classmethod
-    def set_active(cls, theme_name: str) -> str:
-        cls._current = theme_name
-        return theme_name
+    def set_active(cls, theme_name: str | None) -> str | None:
+        """Record *theme_name* as the process theme and synchronize color.
+
+        This is the one place the appearance switch follows the theme: a
+        palette enables semantic color, ``mono`` disables it.  Applications
+        therefore select ``mono`` instead of calling
+        :meth:`Appearance.set_colors_enabled` themselves.
+        """
+        name = cls.canonical(theme_name) or theme_name
+        cls._current = name
+        # Late import: _appearance imports Theme at module load time.
+        from ._appearance import Appearance
+        if name in cls.THEMES:
+            Appearance.set_colors_enabled(not cls.is_mono(name))
+        return name
 
     @classmethod
     def theme_of(cls, win: object) -> str | None:
@@ -466,10 +695,16 @@ class Theme:
         return cls.set(theme_name)
 
     @classmethod
-    def create_picker_screen(cls, base_class: type, *,
-                             cycle_key: str | None = None,
-                             store: ThemeStore | None = None,
-                             note: str | None = None) -> type:
+    def create_picker_screen(
+        cls,
+        base_class: type,
+        *,
+        cycle_key: str | None = None,
+        store: ThemeStore | None = None,
+        note: str | None = None,
+        captions: Mapping[int | str, tuple[str | None, str | None]] | None = None,
+        include_defaults: bool = True,
+    ) -> type:
         """Build a theme-picker screen class on top of *base_class*.
 
         The generated screen renders the current theme, a set of labeled color
@@ -487,16 +722,26 @@ class Theme:
         than raised.  *note* is one extra dim line (for example "the choice is
         remembered for the next start").
 
+        *captions* renames or re-describes the semantic roles the picker shows:
+        a mapping of ``role -> (label, usage)``.  Role keys may be
+        :class:`Theme` constants or stable names such as ``'danger'``; ``None``
+        or ``''`` keeps the library text.  With *include_defaults* true (the
+        default) overrides replace captions in place and the library row order
+        is kept; with it false the mapping is the whole row list, in mapping
+        order.  Unknown or duplicate roles raise ``ValueError`` when the
+        factory runs.
+
         Swatches are painted through the appearance layer rather than
-        ``curses.color_pair()``, so a picker opened while color is off shows the
+        ``curses.color_pair()``, so a picker opened on ``mono`` shows the
         monochrome role hierarchy instead of re-painting a previous theme's
-        colors.  A host that wants a different swatch style can subclass the
-        generated screen and override its ``swatch_attr()`` hook, and a host
-        with its own pseudo-theme (``mono``, say) can override
-        ``theme_label()`` so the header names the choice the user made rather
-        than the palette left installed underneath it.
+        colors.  ``mono`` is a real theme, so no application override is needed
+        for it.  A host that wants a different swatch style can subclass the
+        generated screen and override its ``swatch_attr()`` hook; a host that
+        wants dynamic rows can override ``swatch_rows()``; a host that adds a
+        pseudo-theme of its own can override ``theme_label()``.
         """
         swatch = glyphs.get('swatch') * 8
+        default_rows = cls.role_captions(captions, include_defaults)
 
         class ThemePickerScreen(base_class):
             def draw_screen(self) -> None:
@@ -507,10 +752,15 @@ class Theme:
 
                 # Apply a theme selected through the host's option (for example
                 # an OptionSpinner cycle binding) before drawing the swatches.
+                # Canonicalize aliases so an old remembered name does not cause
+                # a re-apply on every frame.
                 opts = getattr(app, 'opts', None)
                 selected = getattr(opts, 'theme', None) if opts is not None else None
-                if selected and selected != cls.theme_of(win):
-                    cls.apply_to(win, selected)
+                canonical = cls.canonical(selected) if selected else None
+                if canonical and canonical != cls.theme_of(win):
+                    cls.apply_to(win, canonical)
+                if canonical and opts is not None:
+                    opts.theme = canonical
 
                 # Name the theme this window is on (default when unset).
                 current_theme = cls.theme_of(win)
@@ -522,40 +772,36 @@ class Theme:
                 win.add_header(f'   Press [{hint_key}] to cycle themes, ESC to return',
                                resume=True)
 
-                # Color purpose labels
-                color_labels = [
-                    (cls.DANGER, 'DANGER', 'Destructive operations'),
-                    (cls.SUCCESS, 'SUCCESS', 'Completed operations'),
-                    (cls.OLD_SUCCESS, 'OLD_SUCCESS', 'Older completed operations'),
-                    (cls.WARNING, 'WARNING', 'Caution/stopped states'),
-                    (cls.INFO, 'INFO', 'Informational states'),
-                    (cls.EMPHASIS, 'EMPHASIS', 'Emphasized text'),
-                    (cls.ERROR, 'ERROR', 'Errors'),
-                    (cls.PROGRESS, 'PROGRESS', 'Progress indicators'),
-                    (cls.HOTSWAP, 'HOTSWAP', 'Recently added items'),
-                ]
-
-                # Show color examples for this theme
-                for color_id, label, description in color_labels:
-                    # Create line with colored block and description.  The block
-                    # is a registered glyph, so a terminal that cannot draw U+2588
-                    # shows '#' blocks instead of nine empty cells.
-                    line = f'{label:12} {swatch}  {description}'
-                    win.add_body(line, attr=self.swatch_attr(color_id))
-                if note:
-                    win.add_body(note, attr=curses.A_DIM)
+                _draw_swatch_rows(
+                    win,
+                    self.swatch_rows(),
+                    swatch,
+                    self.swatch_attr,
+                    note,
+                )
 
             def theme_label(self, theme_name: str | None) -> str:
                 """Header label for the theme the window is on.
 
-                The picker names the palette it is previewing.  A host with its
-                own pseudo-theme can override this to name the mode actually in
-                effect -- for example ``mono`` while color is off -- so the
-                header and the swatches tell one story instead of two.
+                The picker names the theme it is previewing, including ``mono``.
+                A host that adds a pseudo-theme of its own can override this to
+                name the choice actually in effect.
 
-                This is a hook, like :meth:`swatch_attr`.
+                This is a hook, like :meth:`swatch_rows` and
+                :meth:`swatch_attr`.
                 """
                 return theme_name if theme_name else '(default)'
+
+            def swatch_rows(self) -> list[tuple[int, str, str]]:
+                """Rows the picker draws, as ``(role, label, usage)``.
+
+                Seeded from the factory's ``captions`` mapping.  Override this
+                hook to compute captions per draw (for translation, for
+                example) without reimplementing the header, layout or cycling
+                logic.  Return a list, not a one-shot iterator: the rows are
+                measured and then drawn.
+                """
+                return default_rows
 
             @staticmethod
             def swatch_attr(color_id: int) -> int:

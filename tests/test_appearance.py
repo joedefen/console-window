@@ -45,9 +45,10 @@ def test_color_on_returns_the_installed_pair(monkeypatch):
     assert Appearance.semantic_attr(Theme.WARNING) == 1000 + Theme.WARNING
 
 
-def test_a_terminal_without_color_falls_back_to_plain(monkeypatch):
+def test_a_terminal_without_color_uses_the_mono_table(monkeypatch):
     monkeypatch.setattr(curses, 'has_colors', lambda: False)
-    assert Appearance.semantic_attr(Theme.WARNING) == 0
+    assert (Appearance.semantic_attr(Theme.WARNING)
+            == Appearance.MONO_ROLES[Theme.WARNING])
 
 
 def test_a_lookup_before_initscr_never_aborts_a_redraw(monkeypatch):
@@ -74,54 +75,58 @@ def test_color_off_uses_the_mono_table():
     assert Appearance.semantic_attr(999) == curses.A_NORMAL
 
 
-def test_nothing_given_means_the_library_default_and_color_on():
-    assert Appearance.resolve_appearance(environ={}) == ('', True)
+def test_nothing_given_means_the_library_default():
+    assert Appearance.resolve_appearance(environ={}) == ''
 
 
-def test_no_color_flag_wins_over_everything():
+def test_an_explicit_theme_wins_over_everything():
     assert Appearance.resolve_appearance(
         cli_theme='nord',
-        no_color=True,
         saved_theme='gruvbox',
         environ={'NO_COLOR': '1'},
-    ) == ('nord', False)
+    ) == 'nord'
 
 
-def test_an_explicit_theme_is_a_request_for_color():
+def test_the_no_color_convention_selects_mono():
+    assert Appearance.resolve_appearance(environ={'NO_COLOR': '1'}) == 'mono'
+    assert Appearance.resolve_appearance(environ={'NO_COLOR': ''}) == ''
+
+
+def test_a_saved_theme_is_honored_and_canonicalized():
     assert Appearance.resolve_appearance(
-        cli_theme='nord', environ={'NO_COLOR': '1'}) == ('nord', True)
-
-
-def test_the_no_color_convention_needs_a_non_empty_value():
-    assert Appearance.resolve_appearance(environ={'NO_COLOR': '1'}) == ('', False)
-    assert Appearance.resolve_appearance(environ={'NO_COLOR': ''}) == ('', True)
-
-
-def test_a_saved_theme_and_its_color_preference_are_honored():
+        saved_theme='gruvbox', environ={}) == 'gruvbox'
     assert Appearance.resolve_appearance(
-        saved_theme='gruvbox', saved_colors=True, environ={}) == ('gruvbox', True)
-    assert Appearance.resolve_appearance(
-        saved_theme='gruvbox', saved_colors=False, environ={}) == ('gruvbox', False)
+        saved_theme='dark-mono', environ={}) == 'dark'
 
 
-def test_no_color_keeps_the_saved_theme_but_not_its_color():
+def test_no_color_overrides_a_saved_theme():
     assert Appearance.resolve_appearance(
-        no_color=True, saved_theme='gruvbox', environ={}) == ('gruvbox', False)
+        saved_theme='gruvbox', environ={'NO_COLOR': '1'}) == 'mono'
+
+
+def test_an_explicit_mono_theme_selects_mono():
     assert Appearance.resolve_appearance(
-        saved_theme='gruvbox', environ={'NO_COLOR': '1'}) == ('gruvbox', False)
+        cli_theme='mono', environ={}) == 'mono'
 
 
 def test_an_unknown_theme_resolves_to_the_library_default():
     assert Appearance.resolve_appearance(
-        cli_theme='not-a-theme', environ={}) == ('default', True)
+        cli_theme='not-a-theme', environ={}) == 'default'
     assert Appearance.resolve_appearance(
-        saved_theme='not-a-theme', environ={}) == ('default', True)
+        saved_theme='not-a-theme', environ={}) == 'default'
 
 
-def test_an_empty_remembered_theme_means_the_library_default():
-    assert Appearance.resolve_appearance(saved_theme=None, environ={}) == ('', True)
+def test_an_empty_remembered_theme_keeps_the_library_default():
+    assert Appearance.resolve_appearance(saved_theme=None, environ={}) == ''
 
 
 def test_the_environment_defaults_to_os_environ(monkeypatch):
     monkeypatch.setenv('NO_COLOR', '1')
-    assert Appearance.resolve_appearance() == ('', False)
+    assert Appearance.resolve_appearance() == 'mono'
+
+
+def test_selecting_mono_turns_color_off_and_a_palette_turns_it_on():
+    Theme.set_active('mono')
+    assert Appearance.colors_enabled() is False
+    Theme.set_active('nord')
+    assert Appearance.colors_enabled() is True
