@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import curses
-from collections.abc import Iterable
+import re
+from collections.abc import Callable, Iterable
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
@@ -63,6 +64,7 @@ class OptionSpinner:
             attr='',
             vals=None,
             prompt=None,
+            check_ans=None,  # compiled regex or callable; prompt genre only
             comments=[],
             genre=None,
             scope=None,  # None = all screens, or set of screen numbers
@@ -176,7 +178,9 @@ class OptionSpinner:
                 keys: int | str | list | tuple | set | None = None,
                 comments: str | list[str] | tuple[str, ...] | None = None,
                 genre: str | None = None,
-                scope: int | list | set | None = None) -> None:
+                scope: int | list | set | None = None,
+                check_ans: str | re.Pattern[str]
+                | Callable[[str], str | None] | None = None) -> None:
         """Register one option: a setting to cycle, a prompt, or an action.
 
         This is the only registration path; the pre-2.0 ``add()`` shim has been
@@ -216,6 +220,18 @@ class OptionSpinner:
             reply.  An aborted dialog returns ``None`` and leaves the previous
             value untouched.
 
+        ``check_ans``
+            Validation for a ``prompt`` option; ``None`` (the default) accepts
+            any reply.  A string is a regular expression the whole reply must
+            match (``re.fullmatch``); a compiled pattern is accepted too.  A
+            callable is handed the reply and returns ``None`` to accept it, or
+            a string describing the expectation.  A rejected reply re-opens the
+            dialog with the rejected text as the seed and the description on
+            the dialog's footer, so it can be edited; ESC still aborts and
+            leaves the value untouched.  ``check_ans`` is only meaningful for
+            a prompt option: passing it with ``vals`` or for an action raises
+            ``ValueError``.
+
         ``keys``
             Key code, character, or iterable of either (a string is expanded
             per character), that drives the option.  Defaults to
@@ -243,8 +259,9 @@ class OptionSpinner:
             ``ValueError``.
 
         Raises ``ValueError`` for a duplicate ``attr``, a navigation key, a
-        genre that contradicts the arguments, or a key already bound on one of
-        the requested screens.
+        genre that contradicts the arguments, ``check_ans`` on a non-prompt
+        option, a ``check_ans`` string that is not a valid regular expression,
+        or a key already bound on one of the requested screens.
 
         ``effective_scope`` is computed once at registration and recorded per
         screen in ``key_scopes``; that table is what ``do_key()`` and
@@ -263,9 +280,44 @@ class OptionSpinner:
             ns.vals = vals
         elif prompt:
             ns.prompt = prompt
+        if check_ans is not None:
+            if ns.genre != 'prompt':
+                raise ValueError(
+                    f"check_ans is only meaningful for a prompt option, but "
+                    f"'{attr}' is a {ns.genre} option."
+                )
+            ns.check_ans = self._compile_check_ans(attr, check_ans)
 
         ns.scope = self._parse_scope(scope)
         self._register(ns)
+
+    @staticmethod
+    def _compile_check_ans(
+            attr: str,
+            check_ans: str | re.Pattern[str] | Callable[[str], str | None],
+    ) -> re.Pattern[str] | Callable[[str], str | None]:
+        """Compile a pattern string; pass a compiled pattern or callable through."""
+        if isinstance(check_ans, str):
+            try:
+                return re.compile(check_ans)
+            except re.error as exc:
+                raise ValueError(
+                    f"check_ans for '{attr}' is not a valid regular expression: {exc}"
+                ) from None
+        return check_ans
+
+    @staticmethod
+    def _check_answer(
+            check_ans: re.Pattern[str] | Callable[[str], str | None],
+            answer: str,
+    ) -> str | None:
+        """Return None when *answer* is acceptable, else what was expected."""
+        if isinstance(check_ans, re.Pattern):
+            if check_ans.fullmatch(answer):
+                return None
+            return f'must match {check_ans.pattern!r}'
+        problem = check_ans(answer)
+        return None if problem is None else str(problem)
 
     @staticmethod
     def _parse_keys(keys: int | str | list | tuple | set | None, descr: str) -> list[int]:
@@ -377,6 +429,29 @@ class OptionSpinner:
             return "ON" if choice else "off"
         return f'{choice}'
 
+    def _prompt_value(self, ns: SimpleNamespace, win: ConsoleWindow,
+                      value: object) -> object | None:
+        """Run the prompt dialog until its answer passes ``check_ans``.
+
+        Returns the accepted text, or ``None`` when the user aborts.  A
+        rejected answer re-opens the dialog seeded with that text and the
+        expectation on the footer, so a typo is an edit rather than a restart.
+        """
+        hint = ''
+        while True:
+            # Only pass ``hint`` when there is one: a window-like object with
+            # the pre-hint answer() signature keeps working for the plain path.
+            if hint:
+                answer = win.answer(prompt=ns.prompt, seed=str(value), hint=hint)
+            else:
+                answer = win.answer(prompt=ns.prompt, seed=str(value))
+            if answer is None or ns.check_ans is None:
+                return answer
+            problem = self._check_answer(ns.check_ans, answer)
+            if problem is None:
+                return answer
+            value, hint = answer, problem
+
     def do_key(self, key: int, win: ConsoleWindow) -> object | None:
         # Try scoped lookup first (if stack is available)
         ns = None
@@ -395,7 +470,7 @@ class OptionSpinner:
             idx = ns.vals.index(value) if value in ns.vals else -1
             value = ns.vals[(idx+1) % len(ns.vals)] # choose next
         elif ns.genre == 'prompt':
-            value = win.answer(prompt=ns.prompt, seed=str(value))
+            value = self._prompt_value(ns, win, value)
             if value is None:
                 return None  # aborted dialog: leave the previous value untouched
         elif ns.genre == 'action':

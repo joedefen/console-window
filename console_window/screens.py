@@ -186,7 +186,39 @@ class ScreenStack:
         # Push home screen (HOME_ST=0) as the initial screen
         self.push(HOME_ST, 0)
 
-    def push(self, screen: int, prev_pos: int | None = None, force: bool = False) -> int | None:
+    @classmethod
+    def from_screens(cls, win: ConsoleWindow, spins_obj: object,
+                     screens: Iterable[Screen]) -> ScreenStack:
+        """Build a stack from Screen objects, numbered in order.
+
+        The first object is ``HOME_ST`` (0) and becomes active immediately.
+        Names come from each object's ``name`` attribute, or its class name
+        when it has none, so ``is_curr('ONE')`` works without also maintaining
+        a parallel names tuple.  This is the short form of the original
+        ``ScreenStack(win, obj, names, {num: screen})`` construction.
+        """
+        objects = list(screens)
+        names = tuple(getattr(obj, 'name', None) or type(obj).__name__
+                      for obj in objects)
+        return cls(win, spins_obj, names, dict(enumerate(objects)))
+
+    def _screen_index(self, screen: int | str | Screen) -> int:
+        """Resolve a number, a screen name, or a Screen object to its number."""
+        if isinstance(screen, int):
+            return screen
+        if isinstance(screen, str):
+            try:
+                return self.screens.index(screen)
+            except ValueError:
+                raise ValueError(f'no screen named {screen!r}') from None
+        for num, obj in self.screen_objects.items():
+            if obj is screen:
+                return num
+        raise ValueError(f'screen {screen!r} is not registered with this stack')
+
+    def push(self, screen: int | str | Screen, prev_pos: int | None = None,
+             force: bool = False) -> int | None:
+        screen = self._screen_index(screen)
         if prev_pos is None:
             prev_pos = self.win.pick_pos
 

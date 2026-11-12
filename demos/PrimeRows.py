@@ -1,25 +1,30 @@
 """
 Pure-stdlib reproducible test table: primes with derived, human-interesting fields.
 No third-party dependencies. Deterministic output (no RNG needed).
+
+The spelled column can be restyled for a live demo; that mapping is also
+deterministic, driven by an MD5 hash of ``(cycle, rank)``.
 """
 
 from __future__ import annotations
-from typing import Iterator
+
+import hashlib
+from typing import ClassVar, Iterator
 
 
 class PrimeRows:
     """Class to generate interesting, deterministic data for table presentation """
-    primes = []
-    ones = [
+    primes: ClassVar[list[int]] = []
+    ones: ClassVar[list[str]] = [
         "zero", "one", "two", "three", "four", "five", "six", "seven", "eight",
         "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen",
         "sixteen", "seventeen", "eighteen", "nineteen",
     ]
-    tens = [
+    tens: ClassVar[list[str]] = [
         "", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy",
         "eighty", "ninety",
     ]
-    scales = [
+    scales: ClassVar[list[tuple[int, str]]] = [
         (10**12, "trillion"),
         (10**9, "billion"),
         (10**6, "million"),
@@ -83,6 +88,60 @@ class PrimeRows:
         """ Return whether palindrome"""
         s = str(n)
         return s == s[::-1]
+
+
+    # ---------------------------------------------------------------------------
+    # 3b. Deterministic style churn for the basic pager demo.
+    # ---------------------------------------------------------------------------
+    QUOTE_STYLES = ("", "'", '"')
+    CASE_STYLES = ("lower", "title", "upper")
+    STYLE_COUNT = len(QUOTE_STYLES) * len(CASE_STYLES)
+
+    @staticmethod
+    def pseudo_random_map(value: int, bound: int = 9) -> int:
+        """Map any integer to a well-mixed value in ``range(bound)`` (MD5)."""
+        if value == 0:
+            byte_data = b"\x00"
+        else:
+            # Round up with one spare bit for the two's-complement sign, so
+            # positive values whose bit_length is a multiple of 8 (128, 256,
+            # ...) do not overflow a signed field.
+            byte_length = (value.bit_length() + 8) // 8
+            byte_data = value.to_bytes(byte_length, "big", signed=True)
+        digest = hashlib.md5(byte_data).digest()
+        return int.from_bytes(digest, "big") % bound
+
+    @classmethod
+    def apply_style(cls, text: str, state: int) -> str:
+        """Apply one of the nine quote x case styles to *text*."""
+        quote = cls.QUOTE_STYLES[state // len(cls.CASE_STYLES)]
+        case = cls.CASE_STYLES[state % len(cls.CASE_STYLES)]
+        if case == "title":
+            text = text.title()
+        elif case == "upper":
+            text = text.upper()
+        return quote + text + quote
+
+    @classmethod
+    def altered_spelled(cls, spelled: str, rank: int, iteration: int,
+                        interval: int) -> str:
+        """Return *spelled* with the style this row has in *iteration*'s cycle.
+
+        A row is reassigned once per ``interval`` passes, at phase
+        ``rank % interval``.  The style is hashed from ``(cycle, rank)``, so it
+        persists until the row's next reassignment instead of flickering for a
+        single pass.  Before the row's first reassignment the base text comes
+        back unchanged.
+        """
+        if interval <= 0:
+            raise ValueError("interval must be positive")
+        cycle, phase = divmod(iteration, interval)
+        if phase < rank % interval:
+            cycle -= 1
+        if cycle < 0:
+            return spelled
+        state = cls.pseudo_random_map((cycle << 32) + rank, cls.STYLE_COUNT)
+        return cls.apply_style(spelled, state)
 
 
     # ---------------------------------------------------------------------------

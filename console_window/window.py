@@ -2113,12 +2113,18 @@ class ConsoleWindow:
 
 
     def answer(self, prompt: str = 'Type string [then Enter]', seed: str = '', width: int = 80,
-               height: int = 5, esc_abort: bool | None = None, prompt_attr: int | None = None) -> str | None:
+               height: int = 5, esc_abort: bool | None = None, prompt_attr: int | None = None,
+               hint: str = '') -> str | None:
         """Blocking single-line text dialog.
 
         Returns the submitted string, or ``None`` when the user aborts.  Raises
         ``TerminalTooSmallError`` when no dialog of the requested size can be
         shown; that is an environment failure, never a user cancel.
+
+        ``hint`` is an optional one-line message drawn on the bottom border,
+        left of the submit/abort text.  A validator that re-opens the dialog
+        after a rejected answer uses it to say what the answer should look
+        like; ``OptionSpinner``'s ``check_ans`` does exactly that.
 
         Transient ``curses.error`` and too-small redraws retry within the shared
         class-level ``render_retry_seconds`` budget (see the attribute comment);
@@ -2193,7 +2199,8 @@ class ConsoleWindow:
                         wrapped_ranges, len(wrapped_ranges), wrapped_line_idx,
                         cursor_cell, cursor_pos, v_scroll_top)
 
-                    self._draw_dialog_footer(row9, col0, text_win_width, dialog_abort)
+                    self._draw_dialog_footer(row9, col0, text_win_width, dialog_abort,
+                                             hint)
                     self.scr.noutrefresh()
                     self._backend.doupdate()
                     self._backend.curs_set(0)  # Hide hardware cursor; reverse video shows position
@@ -2366,7 +2373,7 @@ class ConsoleWindow:
         self.scr.move(row0 + 1 + r, col0 + 1 + cursor_cell)
 
     def _draw_dialog_footer(self, row9: int, col0: int, text_win_width: int,
-                            dialog_abort: str | None) -> None:
+                            dialog_abort: str | None, hint: str = '') -> None:
         submit_key = self.opts.dialog_return
         abort = ''
         if dialog_abort == 'ESC':
@@ -2374,7 +2381,13 @@ class ConsoleWindow:
         elif dialog_abort == 'ESC-ESC':
             abort = ' or ESC-ESC to abort'
         ending = textwidth.truncate(f'{submit_key} to submit{abort}', text_win_width)
-        self.scr.addstr(row9, col0 + 1 + text_win_width - textwidth.string_width(ending), ending)
+        ending_col = col0 + 1 + text_win_width - textwidth.string_width(ending)
+        if hint:
+            # The hint takes the room left of the submit/abort text, so the
+            # escape hatch stays readable however long the expectation is.
+            self.scr.addstr(row9, col0 + 1,
+                            textwidth.truncate(hint, ending_col - (col0 + 1)))
+        self.scr.addstr(row9, ending_col, ending)
 
     #: Simple single-keystroke cursor moves: key -> f(cursor_pos, text_len).
     _DIALOG_SIMPLE_MOVES: ClassVar[dict] = {

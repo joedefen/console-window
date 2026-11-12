@@ -1,3 +1,4 @@
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -169,15 +170,19 @@ def test_genre_cycle_without_vals_raises():
 
 
 class FakeAnswerWindow:
-    """Minimal stand-in for ConsoleWindow.answer()."""
+    """Minimal stand-in for ConsoleWindow.answer().
 
-    def __init__(self, reply):
-        self.reply = reply
+    Each call pops the next queued reply, so a test can script a rejected
+    answer followed by an accepted one.
+    """
+
+    def __init__(self, *replies):
+        self.replies = list(replies)
         self.calls = []
 
-    def answer(self, prompt=None, seed=''):
-        self.calls.append((prompt, seed))
-        return self.reply
+    def answer(self, prompt=None, seed='', hint=''):
+        self.calls.append((prompt, seed, hint))
+        return self.replies.pop(0) if self.replies else None
 
 
 def test_prompt_genre_accepts_new_value():
@@ -188,7 +193,8 @@ def test_prompt_genre_accepts_new_value():
     win = FakeAnswerWindow('new')
     assert spin.do_key(ord('n'), win=win) == 'new'
     assert obj.name == 'new'
-    assert win.calls == [('name?', 'old')]  # current value seeds the dialog
+    # The current value seeds the dialog and no hint is shown.
+    assert win.calls == [('name?', 'old', '')]
 
 
 def test_prompt_genre_abort_keeps_previous_value():
@@ -200,6 +206,80 @@ def test_prompt_genre_abort_keeps_previous_value():
     win = FakeAnswerWindow(None)
     assert spin.do_key(ord('n'), win=win) is None
     assert obj.name == 'kept'
+
+
+def test_prompt_check_ans_regex_reopens_with_the_rejected_text():
+    spin = OptionSpinner()
+    spin.add_key('port', 'p - port', genre='prompt', prompt='port?',
+                 keys=[ord('p')], check_ans='[0-9]+')
+    obj = spin.default_obj
+    obj.port = '80'
+    win = FakeAnswerWindow('nope', '8080')
+    assert spin.do_key(ord('p'), win=win) == '8080'
+    assert obj.port == '8080'
+    assert win.calls == [
+        ('port?', '80', ''),
+        ('port?', 'nope', "must match '[0-9]+'"),
+    ]
+
+
+def test_prompt_check_ans_accepts_a_compiled_pattern():
+    spin = OptionSpinner()
+    spin.add_key('port', 'p - port', genre='prompt', prompt='port?',
+                 keys=[ord('p')], check_ans=re.compile('[0-9]+'))
+    obj = spin.default_obj
+    obj.port = ''
+    win = FakeAnswerWindow('8080')
+    assert spin.do_key(ord('p'), win=win) == '8080'
+    assert obj.port == '8080'
+
+
+def test_prompt_check_ans_callable_reopens_with_its_description():
+    seen = []
+
+    def even(answer):
+        seen.append(answer)
+        ok = answer.isdigit() and int(answer) % 2 == 0
+        return None if ok else 'want an even number'
+
+    spin = OptionSpinner()
+    spin.add_key('n', 'e - even', genre='prompt', prompt='even?',
+                 keys=[ord('e')], check_ans=even)
+    obj = spin.default_obj
+    obj.n = '2'
+    win = FakeAnswerWindow('3', '4')
+    assert spin.do_key(ord('e'), win=win) == '4'
+    assert obj.n == '4'
+    assert seen == ['3', '4']
+    assert win.calls == [
+        ('even?', '2', ''),
+        ('even?', '3', 'want an even number'),
+    ]
+
+
+def test_prompt_check_ans_abort_during_retry_keeps_previous_value():
+    spin = OptionSpinner()
+    spin.add_key('n', 'n - n', genre='prompt', prompt='n?',
+                 keys=[ord('n')], check_ans='[0-9]+')
+    obj = spin.default_obj
+    obj.n = '7'
+    win = FakeAnswerWindow('bad', None)
+    assert spin.do_key(ord('n'), win=win) is None
+    assert obj.n == '7'
+
+
+def test_check_ans_requires_a_prompt_option():
+    spin = OptionSpinner()
+    with pytest.raises(ValueError, match='only meaningful for a prompt'):
+        spin.add_key('mode', 'm - mode', vals=['a', 'b'], keys=[ord('m')],
+                     check_ans='a|b')
+
+
+def test_check_ans_rejects_an_invalid_regex():
+    spin = OptionSpinner()
+    with pytest.raises(ValueError, match='not a valid regular expression'):
+        spin.add_key('n', 'n - n', genre='prompt', prompt='n?',
+                     keys=[ord('n')], check_ans='[unclosed')
 
 
 def test_genre_prompt_without_prompt_raises():

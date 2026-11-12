@@ -34,6 +34,7 @@ class FakeScreen:
         self._cols = cols
         self._keys = list(keys)
         self.timeouts = []
+        self.writes = []
 
     def getmaxyx(self):
         return (self._rows, self._cols)
@@ -48,7 +49,7 @@ class FakeScreen:
     def clear(self): pass
     def border(self, *args, **kwargs): pass
     def addch(self, *args, **kwargs): pass
-    def addstr(self, *args, **kwargs): pass
+    def addstr(self, *args, **kwargs): self.writes.append(args)
     def insstr(self, *args, **kwargs): pass
     def move(self, *args, **kwargs): pass
     def noutrefresh(self): pass
@@ -161,6 +162,27 @@ def test_answer_raises_when_resize_never_fits(monkeypatch):
 
     assert (excinfo.value.actual_cols, excinfo.value.actual_rows) == (10, 5)
     assert scr.timeouts == [5000, 444]
+
+
+def test_answer_hint_is_drawn_on_the_footer():
+    scr = FakeScreen(rows=24, cols=80, keys=[10])  # ENTER submits
+    win = make_window(scr)
+
+    assert win.answer(hint='want MIN-MAX') == ''
+
+    # The hint shares the bottom border with the submit/abort text.
+    hints = [call[2] for call in scr.writes if len(call) >= 3]
+    assert 'want MIN-MAX' in hints
+
+
+def test_answer_without_a_hint_keeps_the_plain_footer():
+    scr = FakeScreen(rows=24, cols=80, keys=[10])
+    win = make_window(scr)
+
+    assert win.answer() == ''
+
+    hints = [call[2] for call in scr.writes if len(call) >= 3]
+    assert not any('want' in text for text in hints)
 
 # --- alert() dimension refresh ---------------------------------------------
 

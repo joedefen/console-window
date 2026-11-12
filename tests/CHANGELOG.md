@@ -264,6 +264,15 @@ This project follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- `check_ans` on `OptionSpinner.add_key()`: validation for a ``prompt`` option.
+  A string (or compiled pattern) must match the whole reply; a callable returns
+  `None` to accept or a description of what was expected.  A rejected reply
+  re-opens the dialog seeded with that text and the description on the footer,
+  so a typo is an edit rather than a restart; ESC still aborts.  Validation
+  lives in the spinner, so the screen only ever sees an acceptable value.
+- `hint` on `ConsoleWindow.answer()`: one optional line drawn on the bottom
+  border, left of the submit/abort text.  It is the channel `check_ans` uses to
+  say what a rejected answer should look like.
 - `line_attr` on `add_fancy_header()`/`add_header_line()`: an attribute OR'd
   into every span of the header (including plain spans and the raw line emitted
   for `mode='Off'`), so a caller can dim a whole fancy header while keeping the

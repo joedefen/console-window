@@ -1,6 +1,8 @@
 import curses
 from types import SimpleNamespace
 
+import pytest
+
 from console_window import (
     BasicHelpScreen,
     BasicTextScreen,
@@ -43,6 +45,57 @@ def test_act_in_consumes_one_flag_and_tolerates_missing_flags():
         assert stack.is_curr('MAIN') is True
         assert stack.is_curr(('MAIN', 'OTHER')) is True
         assert stack.is_curr('OTHER') is False
+    finally:
+        win.stop_curses()
+
+
+def test_from_screens_names_objects_and_accepts_object_or_name_push():
+    win = _make_window()
+    try:
+        app = SimpleNamespace(win=win)
+        one = BasicTextScreen(app, lines=['one'])
+        one.name = 'ONE'
+        two = BasicTextScreen(app, lines=['two'])
+        two.name = 'TWO'
+
+        stack = ScreenStack.from_screens(win, SimpleNamespace(), [one, two])
+
+        assert stack.screens == ('ONE', 'TWO')
+        assert stack.is_curr('ONE')
+        assert stack.get_curr_obj() is one
+
+        # push() accepts the Screen object and its name, not just its number.
+        assert stack.push(two, 0) == 0
+        assert stack.is_curr('TWO')
+        assert stack.get_curr_obj() is two
+        assert stack.pop() == 0
+        assert stack.is_curr('ONE')
+
+        assert stack.push('TWO', 0) == 0
+        assert stack.is_curr('TWO')
+    finally:
+        win.stop_curses()
+
+
+def test_from_screens_falls_back_to_the_class_name():
+    win = _make_window()
+    try:
+        screen = BasicTextScreen(SimpleNamespace(win=win))
+        stack = ScreenStack.from_screens(win, SimpleNamespace(), [screen])
+        assert stack.screens == ('BasicTextScreen',)
+    finally:
+        win.stop_curses()
+
+
+def test_push_rejects_an_unknown_name_or_object():
+    win = _make_window()
+    try:
+        screen = BasicTextScreen(SimpleNamespace(win=win))
+        stack = ScreenStack.from_screens(win, SimpleNamespace(), [screen])
+        with pytest.raises(ValueError, match='no screen named'):
+            stack.push('NOPE')
+        with pytest.raises(ValueError, match='not registered'):
+            stack.push(BasicTextScreen(SimpleNamespace(win=win)))
     finally:
         win.stop_curses()
 

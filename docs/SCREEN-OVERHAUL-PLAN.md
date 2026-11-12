@@ -220,8 +220,10 @@ so the stack is built after the window, as today.
 
 | App | Work |
 | --- | --- |
-| `demos/demo-screen-pager.py`, `demo-spinner-pager.py`, `demo-buffet.py` | mechanical: drop `win.` prefixes, `win` onto `self` |
-| `demos/demo-basic-pager.py` | two hand-written functions become Screen subclasses; `help_mode` becomes a screen or a draw branch |
+| `demos/demo-screen-pager.py` | two `PrimeTableScreen` pages (ONE/TWO) on a `ScreenStack`; keys are handled by hand; live spelled churn |
+| `demos/demo-spinner-pager.py` | one table plus an `OptionSpinner` range prompt and order cycle, with `BasicHelpScreen`; the range prompt carries `check_ans`, so bad text is rejected inside the dialog; live spelled churn |
+| `demos/demo-buffet.py` | mechanical: drop `win.` prefixes, `win` onto `self` |
+| `demos/demo-basic-pager.py` | one `PagerScreen(Screen)` drawing the table; its hand-written help page was dropped in the demo rework, leaving a pure Model A sample |
 | nanny (`/tmp/nanny.py`, outside this repo) | delete the `_draw_separator_and_indicator` monkey-patch (D10 ships first); `draw(y, x, ...)` lines become composed `add_body()` segments; `_set_body_context()` dies (`context=` exists); `body.drawn[row] = []` resets die; `_draw_kill_confirm()` becomes an ordinary row in the loop; state file read on mtime change, not per frame; `max_rows` left at the default so a rebuild cannot warn every frame |
 | psistat (outside this repo) | already `add_body`-shaped; wrap in one Screen (`self.add_body`, `self.clear()` at the top of the pass); help-as-mode stays or becomes a second screen |
 
@@ -294,9 +296,10 @@ Yes, this goes first, and it moves that document rather than competing with it:
   second time. It stays open, and it stays additive.
 - **O3, O4, O5, O9 remain open and unsolved by this plan.** O5 (incremental search) is
   untouched; O3/O4/O9 are help/spinner concerns whose signatures this plan changes.
-- **New doc inconsistency to resolve in the help plan, not here:** decision 11 says a
-  Model A app has no help, but `demo-basic-pager.py` is Model A with hand-written help.
-  Either Model A gains hand-written help or that demo promotes to Model B.
+- **Doc inconsistency, resolved by the demo rework:** decision 11 says a Model A app has
+  no help, but `demo-basic-pager.py` originally was Model A with a hand-written help page.
+  That page has been removed, so the samples now match the plan: basic pager is Model A,
+  while the screen/spinner pagers are Model B.
 
 ## Verification to add to the gate
 
@@ -348,3 +351,7 @@ Deviations from the text above, all deliberate:
   `draw(y, x, ...)` with composed `add_body()` segments (column padding via
   `textwidth`), drop `_set_body_context()` in favour of `add_body(..., context=ctx)`,
   drop the `body.drawn[row] = []` resets, and start each pass with `screen.clear()`.
+- **`ScreenStack.from_screens()` is the short stack construction.** It numbers the
+  given Screen objects in order, takes their names from a `name` attribute (falling back
+  to the class name), and `push()` accepts a Screen object or a screen name as well as a
+  number. The older `ScreenStack(win, obj, names, {num: screen})` form still works.
