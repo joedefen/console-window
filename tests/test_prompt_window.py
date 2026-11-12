@@ -2,6 +2,8 @@
 
 import curses
 
+from support import screen_of
+
 import console_window.window as window_mod
 from console_window import textwidth
 from console_window.backend import HeadlessBackend
@@ -93,7 +95,7 @@ def test_add_prompt_header_is_a_noop_when_inactive():
     win = _window()
     try:
         before = win.head.row_cnt
-        assert win.add_prompt_header() is False
+        assert screen_of(win).add_prompt_header() is False
         assert win.head.row_cnt == before
     finally:
         win.stop_curses()
@@ -104,7 +106,7 @@ def test_add_prompt_lines_draws_prompt_then_dim_hint():
     try:
         win.begin_prompt('Confirm?', hint='Press Y', mode='text', seed='5')
 
-        assert win.add_prompt_lines() is True
+        assert screen_of(win).add_prompt_lines() is True
 
         assert win.body.texts == ['Confirm?: 5│', 'Press Y']
         assert win.body.text_attrs[0] == [(curses.A_BOLD, len('Confirm?: 5│'))]
@@ -121,7 +123,7 @@ def test_add_prompt_header_draws_the_prompt_as_a_bold_header():
     try:
         win.begin_prompt('Proceed?', mode='y')
 
-        assert win.add_prompt_header() is True
+        assert screen_of(win).add_prompt_header() is True
         assert win.head.texts == ['Proceed?  [Press "y" or ESC]']
         assert win.head.text_attrs[0] == [
             (curses.A_BOLD, len('Proceed?  [Press "y" or ESC]'))]
@@ -134,7 +136,7 @@ def test_add_prompt_lines_truncates_the_hint():
     try:
         win.begin_prompt('X', hint='h' * 100, mode='text')
 
-        win.add_prompt_lines()
+        screen_of(win).add_prompt_lines()
 
         hint_text = win.body.texts[1]
         assert len(hint_text) == max(10, win.cols - 2)
@@ -208,7 +210,7 @@ def test_add_prompt_header_centers_within_the_pad_width():
     try:
         win.begin_prompt('Proceed?', mode='y')
 
-        assert win.add_prompt_header(align='center') is True
+        assert screen_of(win).add_prompt_header(align='center') is True
 
         display = 'Proceed?  [Press "y" or ESC]'
         lead = (win.get_pad_width() - textwidth.string_width(display)) // 2
@@ -229,7 +231,7 @@ def test_centering_measures_emoji_presentation_width():
         display = win.prompt_line.get_display_string()
         assert textwidth.string_width(display) == len(display)
 
-        win.add_prompt_header(align='center')
+        screen_of(win).add_prompt_header(align='center')
 
         lead = (win.get_pad_width() - textwidth.string_width(display)) // 2
         assert win.head.texts == [' ' * lead + display]
@@ -244,7 +246,7 @@ def test_add_prompt_header_align_never_adds_padding_when_too_wide():
     try:
         win.begin_prompt('Proceed?', mode='y')
 
-        win.add_prompt_header(align='center')
+        screen_of(win).add_prompt_header(align='center')
 
         assert win.head.texts[0] == 'Proceed'
     finally:

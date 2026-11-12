@@ -9,6 +9,7 @@ from console_window import (
     Appearance,
     ConsoleWindow,
     ConsoleWindowOpts,
+    Screen,
     Theme,
 )
 from console_window.backend import HeadlessBackend
@@ -29,15 +30,20 @@ class _Store:
         self.saved.append(name)
 
 
-class _BaseScreen:
+class _BaseScreen(Screen):
     """Minimal host screen: the factory only needs app.win and app.opts."""
 
     def __init__(self, app, spinner=None):
-        self.app = app
+        super().__init__(app)
         self._spinner = spinner
 
     def get_spinner(self):
         return self._spinner
+
+    def clear_and_draw(self):
+        """The documented loop, for tests that assert on the window's view."""
+        self.clear()
+        self.draw_screen()
 
 
 class _BrokenStore:
@@ -125,7 +131,7 @@ def test_the_hint_advertises_the_bound_cycle_key():
     try:
         app = SimpleNamespace(win=win, opts=SimpleNamespace(theme='default'))
         picker = Theme.create_picker_screen(_BaseScreen)
-        picker(app, _spinner_with(ord('n'))).draw_screen()
+        picker(app, _spinner_with(ord('n'))).clear_and_draw()
         assert any('Press [n] to cycle themes' in row for row in win.head.texts)
     finally:
         win.stop_curses()
@@ -136,7 +142,7 @@ def test_an_explicit_cycle_key_wins_over_discovery():
     try:
         app = SimpleNamespace(win=win, opts=SimpleNamespace(theme='default'))
         picker = Theme.create_picker_screen(_BaseScreen, cycle_key='c')
-        picker(app, _spinner_with(ord('n'))).draw_screen()
+        picker(app, _spinner_with(ord('n'))).clear_and_draw()
         assert any('Press [c] to cycle themes' in row for row in win.head.texts)
     finally:
         win.stop_curses()
@@ -147,7 +153,7 @@ def test_the_hint_falls_back_to_t_without_a_binding():
     try:
         app = SimpleNamespace(win=win, opts=SimpleNamespace(theme='default'))
         picker = Theme.create_picker_screen(_BaseScreen)
-        picker(app).draw_screen()
+        picker(app).clear_and_draw()
         assert any('Press [t] to cycle themes' in row for row in win.head.texts)
     finally:
         win.stop_curses()
@@ -159,7 +165,7 @@ def test_the_note_is_drawn_when_given():
     try:
         app = SimpleNamespace(win=win, opts=SimpleNamespace(theme='default'))
         picker = Theme.create_picker_screen(_BaseScreen, note=note)
-        picker(app).draw_screen()
+        picker(app).clear_and_draw()
         assert note in win.body.texts
     finally:
         win.stop_curses()
@@ -170,7 +176,7 @@ def test_swatches_use_the_registered_glyph():
     try:
         app = SimpleNamespace(win=win, opts=SimpleNamespace(theme='default'))
         picker = Theme.create_picker_screen(_BaseScreen)
-        picker(app).draw_screen()
+        picker(app).clear_and_draw()
         assert any('\u2588' * 8 in row for row in win.body.texts)
     finally:
         win.stop_curses()
@@ -205,7 +211,7 @@ def test_swatches_use_the_installed_pair_when_color_is_on(monkeypatch):
     try:
         app = SimpleNamespace(win=win, opts=SimpleNamespace(theme='default'))
         picker = Theme.create_picker_screen(_BaseScreen)
-        picker(app).draw_screen()
+        picker(app).clear_and_draw()
         attrs = _swatch_attrs(win)
         for label, role in _SWATCH_ROLES:
             assert attrs[label] == 500 + role
@@ -227,7 +233,7 @@ def test_swatches_follow_the_mono_theme(monkeypatch):
     try:
         app = SimpleNamespace(win=win, opts=SimpleNamespace(theme='mono'))
         picker = Theme.create_picker_screen(_BaseScreen)
-        picker(app).draw_screen()
+        picker(app).clear_and_draw()
         assert Appearance.colors_enabled() is False
         attrs = _swatch_attrs(win)
         for label, role in _SWATCH_ROLES:
@@ -240,7 +246,7 @@ def test_the_header_names_the_theme_the_window_is_on():
     win = _window(theme='nord')
     try:
         app = SimpleNamespace(win=win, opts=SimpleNamespace(theme='nord'))
-        Theme.create_picker_screen(_BaseScreen)(app).draw_screen()
+        Theme.create_picker_screen(_BaseScreen)(app).clear_and_draw()
         assert 'nord' in win.head.texts[0]
     finally:
         win.stop_curses()
@@ -258,7 +264,7 @@ def test_a_host_can_override_the_theme_label_hook():
             def theme_label(self, theme_name):
                 return 'mono'
 
-        _MonoLabel(app).draw_screen()
+        _MonoLabel(app).clear_and_draw()
         assert 'mono' in win.head.texts[0]
         assert 'nord' not in win.head.texts[0]
     finally:
@@ -277,7 +283,7 @@ def test_a_host_can_override_the_swatch_hook(monkeypatch):
             def swatch_attr(color_id):
                 return curses.A_UNDERLINE
 
-        _PlainSwatches(app).draw_screen()
+        _PlainSwatches(app).clear_and_draw()
         assert set(_swatch_attrs(win).values()) == {curses.A_UNDERLINE}
     finally:
         win.stop_curses()
@@ -294,7 +300,7 @@ def test_custom_captions_replace_labels_and_usages():
                 'warning': ('DEGRADED', ''),
             },
         )
-        picker(app).draw_screen()
+        picker(app).clear_and_draw()
         assert any('FAILED' in row and 'Boot or initramfs failed' in row
                    for row in win.body.texts)
         # An empty usage falls back to the library description.
@@ -318,7 +324,7 @@ def test_replace_mode_shows_only_the_apps_rows():
                 'success': ('OK', 'Healthy device'),
             },
         )
-        picker(app).draw_screen()
+        picker(app).clear_and_draw()
         assert [row.split()[0] for row in win.body.texts] == ['FAILED', 'OK']
     finally:
         win.stop_curses()
@@ -333,7 +339,7 @@ def test_a_long_caption_widens_the_label_column():
             include_defaults=False,
             captions={'danger': ('FAILED TO START', 'Boot failed')},
         )
-        picker(app).draw_screen()
+        picker(app).clear_and_draw()
         row = win.body.texts[0]
         assert row.startswith('FAILED TO START')
         assert '\u2588' * 8 in row
@@ -350,7 +356,7 @@ def test_a_very_long_caption_is_truncated_before_the_swatch():
             include_defaults=False,
             captions={'danger': ('X' * 200, 'Boot failed')},
         )
-        picker(app).draw_screen()
+        picker(app).clear_and_draw()
         row = win.body.texts[0]
         assert '\u2588' * 8 in row
         assert row.index('\u2588') < win.get_pad_width()
@@ -368,7 +374,7 @@ def test_a_host_can_override_the_swatch_rows_hook():
             def swatch_rows(self):
                 return [(Theme.DANGER, 'FAILED', 'Boot failed')]
 
-        _OnlyDanger(app).draw_screen()
+        _OnlyDanger(app).clear_and_draw()
         assert len(win.body.texts) == 1
         assert win.body.texts[0].startswith('FAILED')
     finally:

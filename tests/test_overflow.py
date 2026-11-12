@@ -1,5 +1,7 @@
 import warnings
 
+from support import screen_of
+
 from console_window.backend import HeadlessBackend
 from console_window.opts import ConsoleWindowOpts
 from console_window.window import ConsoleWindow
@@ -28,7 +30,7 @@ def _record(fn):
 def test_add_body_within_capacity_is_silent():
     win = _make(max_rows=5)
     try:
-        caught = _record(lambda: [win.add_body(f'row {i}') for i in range(5)])
+        caught = _record(lambda: [screen_of(win).add_body(f'row {i}') for i in range(5)])
         assert [str(w.message) for w in caught] == []
         assert win.rows_dropped == 0
         assert win.body.row_cnt == 5
@@ -45,7 +47,7 @@ def test_body_rows_is_a_hint_not_a_limit():
         singleton=False,
     )
     try:
-        caught = _record(lambda: [win.add_body(f'row {i}') for i in range(12)])
+        caught = _record(lambda: [screen_of(win).add_body(f'row {i}') for i in range(12)])
         assert [str(w.message) for w in caught] == []
         assert win.rows_dropped == 0
         assert win.body.row_cnt == 12
@@ -67,7 +69,7 @@ def test_max_rows_is_the_only_ceiling_and_can_be_removed():
 def test_overflowing_the_body_pad_counts_rows_and_warns_once():
     win = _make(max_rows=5)
     try:
-        caught = _record(lambda: [win.add_body(f'row {i}') for i in range(12)])
+        caught = _record(lambda: [screen_of(win).add_body(f'row {i}') for i in range(12)])
         assert len(caught) == 1
         assert caught[0].category is UserWarning
         assert 'body content limit is full' in str(caught[0].message)
@@ -85,7 +87,7 @@ def test_overflowing_the_body_pad_counts_rows_and_warns_once():
 def test_overflow_is_not_fatal_and_clear_rearms_the_warning():
     win = _make(max_rows=2)
     try:
-        caught = _record(lambda: [win.add_body(f'a{i}') for i in range(9)])
+        caught = _record(lambda: [screen_of(win).add_body(f'a{i}') for i in range(9)])
         # No exception: the app limped along, exactly as it did before.
         assert len(caught) == 1
         assert win.rows_dropped == 7
@@ -94,7 +96,7 @@ def test_overflow_is_not_fatal_and_clear_rearms_the_warning():
         assert win.rows_dropped == 0
         assert win.body.row_cnt == 0
 
-        caught = _record(lambda: [win.add_body(f'b{i}') for i in range(3)])
+        caught = _record(lambda: [screen_of(win).add_body(f'b{i}') for i in range(3)])
         assert len(caught) == 1  # one per fill episode, not one per row
         assert win.rows_dropped == 1
     finally:
@@ -106,9 +108,9 @@ def test_head_pad_overflow_is_counted_and_summed():
     try:
         def draw():
             for i in range(4):
-                win.add_header(f'h{i}')
+                screen_of(win).add_header(f'h{i}')
             for i in range(3):
-                win.add_body(f'b{i}')
+                screen_of(win).add_body(f'b{i}')
 
         caught = _record(draw)
         messages = [str(w.message) for w in caught]
@@ -125,8 +127,8 @@ def test_head_pad_overflow_is_counted_and_summed():
 def test_resume_on_a_full_pad_is_counted_too():
     win = _make(max_rows=1)
     try:
-        win.add_body('only')
-        caught = _record(lambda: win.add_body('more', resume=True))
+        screen_of(win).add_body('only')
+        caught = _record(lambda: screen_of(win).add_body('more', resume=True))
         assert len(caught) == 1
         assert 'body content limit is full' in str(caught[0].message)
         assert win.body.row_cnt == 1
@@ -138,38 +140,23 @@ def test_resume_on_a_full_pad_is_counted_too():
 def test_the_warning_blames_the_callers_line_not_the_library():
     win = _make(max_rows=1)
     try:
-        caught = _record(lambda: [win.add_body('first'), win.add_body('second')])
+        caught = _record(lambda: [screen_of(win).add_body('first'), screen_of(win).add_body('second')])
         assert caught[0].filename.endswith('test_overflow.py')
     finally:
         win.stop_curses()
 
 
-def test_draw_past_the_content_limit_uses_the_same_counter():
-    # draw() clamps at the row ceiling, but its discarded rows must be visible
-    # exactly like _add()'s: counted per row, warned once per fill episode.
-    win = _make(max_rows=3)
-    try:
-        caught = _record(lambda: [win.draw(3, 0, 'x') for _ in range(4)])
-        assert len(caught) == 1
-        assert 'body content limit is full' in str(caught[0].message)
-        assert caught[0].filename.endswith('test_overflow.py')
-        assert win.body.rows_dropped == 4
-        assert win.rows_dropped == 4
-        assert win.body.row_cnt == 0
-        assert win.body.drawn == {}
-    finally:
-        win.stop_curses()
-
-
-def test_draw_header_past_the_content_limit_counts_the_head():
+def test_rows_dropped_sums_the_head_and_body_of_the_current_screen():
     win = _make(max_rows=2)
     try:
-        caught = _record(lambda: win.draw(2, 0, 'HDR', header=True))
+        caught = _record(lambda: [screen_of(win).add_header('HDR'),
+                                  screen_of(win).add_header('HDR2'),
+                                  screen_of(win).add_header('HDR3')])
         assert len(caught) == 1
         assert 'head content limit is full' in str(caught[0].message)
         assert win.head.rows_dropped == 1
         assert win.body.rows_dropped == 0
         assert win.rows_dropped == 1
-        assert win.head.row_cnt == 0
+        assert win.head.row_cnt == 2
     finally:
         win.stop_curses()

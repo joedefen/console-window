@@ -3,6 +3,7 @@
 import curses
 
 import pytest
+from support import screen_of
 
 import console_window.window as window_mod
 from console_window import textwidth
@@ -77,7 +78,7 @@ def test_status_leaves_one_cell_before_the_scroll_indicator():
     win, _backend = _window(rows=10, cols=40)
     try:
         for i in range(200):
-            win.add_body(f'row {i:03d}')
+            screen_of(win).add_body(f'row {i:03d}')
         win.scroll_pos = 100
         win.status('status')
 
@@ -206,14 +207,22 @@ def test_unknown_level_falls_back_to_info():
 
 # --- deferred messages and rendering discipline -----------------------------
 
-def test_status_without_a_separator_row_is_stored_but_not_drawn():
+def test_status_without_a_separator_row_is_stored_and_warns_once():
     win, backend = _window(rows=2, cols=40)
     try:
         # Simulate a header band that has consumed every row: there is no
-        # separator row to paint on, so the call reports the message deferred.
+        # separator row to paint on, so the call reports the message deferred
+        # and says so once (rather than silently writing over a body row).
         win.head.view_cnt = win.rows
-        assert win.status('later') is False
+        with pytest.warns(UserWarning, match='no separator row'):
+            assert win.status('later') is False
         assert win.current_status[0] == 'later'
+
+        # One warning per episode, not one per call.
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter('error')
+            assert win.status('later again') is False
 
         # A later resize reveals the row; the stored message is drawn then.
         win.scr._rows = 10
@@ -222,7 +231,8 @@ def test_status_without_a_separator_row_is_stored_but_not_drawn():
         assert win.head.view_cnt < win.rows
 
         win.render()
-        assert any(text == 'later' for _y, _x, text, _a in _status_draws(win))
+        assert any(text == 'later again'
+                   for _y, _x, text, _a in _status_draws(win))
     finally:
         win.stop_curses()
 

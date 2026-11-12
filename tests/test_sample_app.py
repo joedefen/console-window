@@ -1,37 +1,55 @@
-"""Headless smoke tests for SampleApp.
+"""Headless smoke tests for the worked-example app.
 
-SampleApp is the package's worked example, so it should not be allowed to rot
-silently: these tests construct it against a HeadlessBackend, draw every screen,
-and assert the wiring (scoped keys, action handlers, the router) still holds.
-No TTY is required.
+The example app lives at ``demos/demo-buffet.py`` (it used to be a repo-level
+``SampleApp.py``).  These tests construct it against a HeadlessBackend, draw
+every screen through the four-call loop, and assert the wiring (scoped keys,
+action handlers, the router) still holds.  No TTY is required.
 """
 
 import curses
+import importlib.util
+import pathlib
 
 import pytest
 
 from console_window import Appearance, Theme
 from console_window.backend import HeadlessBackend
 
+DEMO_PY = pathlib.Path(__file__).resolve().parents[1] / 'demos' / 'demo-buffet.py'
+_sample_module = None
+
 
 @pytest.fixture(autouse=True)
 def _headless_curses_stubs(monkeypatch):
     # curses.has_colors() and curses.color_pair() raise until initscr() has
-    # succeeded, and the sample app's drawing code calls both, so stand them in.
+    # succeeded, and the demo's drawing code calls both, so stand them in.
     monkeypatch.setattr(curses, 'has_colors', lambda: False, raising=False)
     monkeypatch.setattr(curses, 'color_pair', lambda n=0: n << 8, raising=False)
 
 
 @pytest.fixture(autouse=True)
 def _appearance_state(monkeypatch):
-    # The color switch and the process theme are process state; the sample
+    # The color switch and the process theme are process state; the app
     # reads both when it seeds its theme option, so never leak a test's choice.
     monkeypatch.setattr(Appearance, '_COLORS_ENABLED', True)
     monkeypatch.setattr(Theme, '_current', None)
 
 
+def _load_sample():
+    """Import ``demos/demo-buffet.py`` without making ``demos`` a package."""
+    global _sample_module
+    if _sample_module is None:
+        spec = importlib.util.spec_from_file_location('demo_buffet_under_test',
+                                                      DEMO_PY)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+        _sample_module = module
+    return _sample_module
+
+
 def _app(rows=40, cols=120):
-    import SampleApp as sample
+    sample = _load_sample()
 
     # The suite runs several app instances; keep the process in per-instance
     # window mode (the first construction latches it).
@@ -39,13 +57,20 @@ def _app(rows=40, cols=120):
                                     singleton=False)
 
 
+def _draw(app, num):
+    """Run one pass of the documented loop for screen *num*."""
+    screen = app.screens[num]
+    screen.clear()
+    screen.draw_screen()
+    return screen
+
+
 def test_sample_app_builds_headless_and_draws_every_screen():
     sample, app = _app()
     try:
         for num in (sample.MAIN_ST, sample.HELP_ST, sample.HISTORY_ST,
                     sample.THEME_ST):
-            app.win.clear()
-            app.screens[num].draw_screen()
+            _draw(app, num)
             assert app.win.body.row_cnt > 0
         assert app.win.head.row_cnt > 0
     finally:
@@ -115,12 +140,12 @@ def test_router_pushes_and_pops_screens():
 def test_stress_mode_pads_the_body_within_pad_capacity():
     sample, app = _app()
     try:
-        app.screens[sample.MAIN_ST].draw_screen()
+        main = _draw(app, sample.MAIN_ST)
         normal = app.win.body.row_cnt
 
-        app.win.clear()
+        main.clear()
         app.opts.stress = True
-        app.screens[sample.MAIN_ST].draw_screen()
+        main.draw_screen()
         assert app.win.body.row_cnt > normal
         # Nothing is dropped: the pads are viewport-sized, the 2000 filler rows
         # live in the model, and the default max_rows ceiling is far above them.
@@ -129,13 +154,12 @@ def test_stress_mode_pads_the_body_within_pad_capacity():
         app.win.stop_curses()
 
 
-# --- the 2.1 in-place prompt, status and BasicTextScreen -------------------
+# --- the in-place prompt, status and the history screen ---------------------
 
 def test_confirm_prompt_consumes_every_key_and_reports_status():
     sample, app = _app()
     try:
-        main = app.screens[sample.MAIN_ST]
-        main.draw_screen()
+        main = _draw(app, sample.MAIN_ST)
         app.win.pick_pos = 0
         username = app.win.get_picked_context().item['username']
 
@@ -164,12 +188,11 @@ def test_confirm_prompt_consumes_every_key_and_reports_status():
 def test_confirm_prompt_rows_are_drawn_after_the_item():
     sample, app = _app()
     try:
-        main = app.screens[sample.MAIN_ST]
-        main.draw_screen()
+        main = _draw(app, sample.MAIN_ST)
         app.win.pick_pos = 0
 
         main.select_ACTION()
-        app.win.clear()
+        main.clear()
         main.draw_screen()
 
         assert any('Process ' in text and '[Press "y" or ESC]' in text
@@ -183,8 +206,7 @@ def test_confirm_prompt_rows_are_drawn_after_the_item():
 def test_note_prompt_is_buffered_and_rendered_in_the_header():
     sample, app = _app()
     try:
-        main = app.screens[sample.MAIN_ST]
-        main.draw_screen()
+        main = _draw(app, sample.MAIN_ST)
         app.win.pick_pos = 0
         username = app.win.get_picked_context().item['username']
 
@@ -192,7 +214,7 @@ def test_note_prompt_is_buffered_and_rendered_in_the_header():
         assert app.win.prompt_active is True
         assert app.note_item == username
 
-        app.win.clear()
+        main.clear()
         main.draw_screen()
         assert any(text.startswith(f'Note for {username}: ')
                    and '│' in text for text in app.win.head.texts)
@@ -306,13 +328,11 @@ def test_the_theme_cycle_key_walks_from_the_last_palette_into_mono():
 def test_the_picker_header_names_the_mono_theme_and_its_swatches_follow():
     sample, app = _app()
     try:
-        app.win.clear()
-        app.screens[sample.THEME_ST].draw_screen()
+        _draw(app, sample.THEME_ST)
         assert 'default' in app.win.head.texts[0]
 
         app.apply_theme_choice(Theme.MONO)
-        app.win.clear()
-        app.screens[sample.THEME_ST].draw_screen()
+        _draw(app, sample.THEME_ST)
 
         # One name for one choice: no second 'Color:' line beside the theme.
         assert 'mono' in app.win.head.texts[0]
@@ -340,8 +360,7 @@ def test_processed_rows_use_the_mono_attribute_without_asking_for_a_pair(monkeyp
             raise AssertionError(f'color pair {pair} used while color is off')
 
         monkeypatch.setattr(curses, 'color_pair', _unexpected)
-        app.win.clear()
-        app.screens[sample.MAIN_ST].draw_screen()
+        _draw(app, sample.MAIN_ST)
 
         row = next(index for index, text in enumerate(app.win.body.texts)
                    if 'Processed' in text)
@@ -351,22 +370,19 @@ def test_processed_rows_use_the_mono_attribute_without_asking_for_a_pair(monkeyp
         app.win.stop_curses()
 
 
-def test_history_screen_is_a_basic_text_screen_resolved_at_draw_time():
+def test_history_screen_draws_its_own_content_at_loop_time():
     sample, app = _app()
     try:
         history = app.screens[sample.HISTORY_ST]
-        assert isinstance(history.text_screen, sample.BasicTextScreen)
-        # Created before the window existed; draw_screen() resolves app.win.
-        assert history.text_screen.win is None
+        # The window is resolved through app.win, not captured at __init__.
+        assert history.win is app.win
 
         username = app.get_filtered_items()[0]['username']
         app.selected_items.add(username)
 
+        history.clear()
         history.draw_screen()
 
-        # The stale ``win`` left by Screen.__init__ is still None; the rows
-        # landed on the window resolved from app.win at draw time.
-        assert history.text_screen.win is None
         assert app.win.pick_mode is False
         assert app.win.head.texts[0] == 'OPERATION HISTORY'
         assert any(username in text for text in app.win.body.texts)

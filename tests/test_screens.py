@@ -58,6 +58,7 @@ def test_basic_help_screen_resolves_window_created_after_construction():
     win = _make_window()
     try:
         app.win = win
+        screen.clear()      # the loop's first call: adopts the screen
         screen.draw_screen()
         assert win.head.texts
         assert win.pick_mode is False
@@ -68,22 +69,30 @@ def test_basic_help_screen_resolves_window_created_after_construction():
 # --- BasicTextScreen -------------------------------------------------------
 
 class RecordingWin:
+    """Stands in for the window's private content implementation.
+
+    Screens own their content and delegate to these seam methods with their
+    own namespace, so a recording fake is enough to test the draw order.
+    """
+
     def __init__(self):
         self.calls = []
-        self.pick_modes = []
+        self.prompt_line = SimpleNamespace(active=False)
 
-    def set_pick_mode(self, on=True, pick_size=1):
-        self.pick_modes.append(on)
+    def get_pad_width(self):
+        return 78
 
-    def add_header(self, text, attr=None, resume=False, context=None):
-        self.calls.append(('header', text, attr))
+    def _add(self, ns, text, attr=None, resume=False, context=None, *,
+             is_body=False):
+        self.calls.append(('body' if is_body else 'header', text, attr))
 
-    def add_header_line(self, line, mode='Underline',
-                        search_pattern_attr=None, line_attr=None):
+    def _add_header_line(self, ns, line, mode='Underline',
+                         search_pattern_attr=None, line_attr=None):
         self.calls.append(('header_line', str(line), None))
 
-    def add_body(self, text, attr=None, resume=False, context=None):
-        self.calls.append(('body', text, attr))
+    def _add_fancy_header(self, ns, line, mode='Underline',
+                          search_pattern_attr=None, line_attr=None):
+        self.calls.append(('fancy', str(line), None))
 
 
 def test_text_screen_adds_headers_before_body():
@@ -94,7 +103,7 @@ def test_text_screen_adds_headers_before_body():
     screen.draw_screen()
 
     assert win.calls == [('header', 'Title', None), ('body', 'one', None)]
-    assert win.pick_modes == [False]
+    assert screen.pick_mode is False
 
 
 def test_text_screen_adds_lines_in_order_with_attrs():
@@ -143,6 +152,7 @@ def test_text_screen_disables_pick_mode():
         win.set_pick_mode(True)
         screen = BasicTextScreen(SimpleNamespace(win=win), lines=['row'])
 
+        screen.clear()
         screen.draw_screen()
 
         assert win.pick_mode is False

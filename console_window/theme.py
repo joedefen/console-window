@@ -12,7 +12,13 @@ logger = logging.getLogger(__name__)
 
 
 class _SwatchWindow(Protocol):
-    """The part of a host window the swatch renderer needs."""
+    """The part of a host screen the swatch renderer needs.
+
+    Content belongs to the Screen, so the renderer writes ``add_body()`` there
+    and reads geometry (``get_pad_width``) from the screen's window.
+    """
+
+    win: object
 
     def add_body(self, text: str, attr: int | None = None) -> None:
         ...
@@ -72,17 +78,17 @@ def _swatch_label_width(rows: list[tuple[int, str, str]], swatch: str,
     return min(max(12, label), available)
 
 
-def _draw_swatch_rows(win: _SwatchWindow, rows: list[tuple[int, str, str]],
+def _draw_swatch_rows(screen: _SwatchWindow, rows: list[tuple[int, str, str]],
                       swatch: str, attr_for: Callable[[int], int],
                       note: str | None = None) -> None:
-    """Paint one tinted line per semantic role.
+    """Paint one tinted line per semantic role onto *screen*.
 
     The block is a registered glyph, so a terminal that cannot draw U+2588
     shows '#' blocks instead of nine empty cells.  The label column widens for
     application captions and is capped to leave room for the swatch.
     """
-    label_width = _swatch_label_width(rows, swatch, win)
-    add_body = win.add_body
+    label_width = _swatch_label_width(rows, swatch, screen.win)
+    add_body = screen.add_body
     for color_id, label, usage in rows:
         line = f'{textwidth.ljust(label, label_width)} {swatch}  {usage}'
         add_body(line, attr=attr_for(color_id))
@@ -748,7 +754,7 @@ class Theme:
                 app = self.app
                 win = app.win
 
-                win.set_pick_mode(False)
+                self.set_pick_mode(False)
 
                 # Apply a theme selected through the host's option (for example
                 # an OptionSpinner cycle binding) before drawing the swatches.
@@ -768,12 +774,12 @@ class Theme:
                 hint_key = cycle_key or _discover_cycle_key(self)
 
                 # Add header showing current theme
-                win.add_header(f'COLOR THEME:  {display_theme:^18}', attr=curses.A_BOLD)
-                win.add_header(f'   Press [{hint_key}] to cycle themes, ESC to return',
-                               resume=True)
+                self.add_header(f'COLOR THEME:  {display_theme:^18}', attr=curses.A_BOLD)
+                self.add_header(f'   Press [{hint_key}] to cycle themes, ESC to return',
+                                resume=True)
 
                 _draw_swatch_rows(
-                    win,
+                    self,
                     self.swatch_rows(),
                     swatch,
                     self.swatch_attr,

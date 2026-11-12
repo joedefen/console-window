@@ -11,6 +11,7 @@ import curses
 import logging
 
 import pytest
+from support import screen_of
 
 import console_window.window as window_mod
 from console_window import ConsoleWindow, ConsoleWindowOpts, OptionSpinner
@@ -123,7 +124,7 @@ def test_taken_key_never_scrolls_and_is_returned_to_the_app(make, key):
     win, backend = make(backend=HeadlessBackend(rows=12, cols=80),
                         body_rows=60, head_rows=2, taken_nav_keys={key: 'app'})
     for i in range(40):
-        win.add_body(f'row {i}')
+        screen_of(win).add_body(f'row {i}')
     win.fix_positions()
     win.scroll_pos = min(10, win.max_scroll_pos)
     win.fix_positions()
@@ -139,7 +140,7 @@ def test_taken_key_without_binding_may_be_swallowed_when_not_relaxed(make):
     # implicitly add the key to handled_keys.
     win, backend = make(relax_handled_keys=False, taken_nav_keys={curses.KEY_DOWN: ''})
     for i in range(40):
-        win.add_body(f'row {i}')
+        screen_of(win).add_body(f'row {i}')
     win.fix_positions()
     before = win.scroll_pos
     backend.queue_keys(curses.KEY_DOWN)
@@ -180,12 +181,12 @@ def test_two_windows_with_different_bindings_do_not_affect_each_other(make):
 
     left, _left_backend = make(taken_nav_keys={curses.KEY_LEFT: 'prev'})
     for i in range(40):
-        left.add_body(f'row {i}')
+        screen_of(left).add_body(f'row {i}')
     left.fix_positions()
 
     right, right_backend = make()
     for i in range(40):
-        right.add_body(f'row {i}')
+        screen_of(right).add_body(f'row {i}')
     right.fix_positions()
     right.scroll_pos = min(5, right.max_scroll_pos)
     right.fix_positions()
@@ -262,6 +263,6 @@ def test_help_omits_taken_nav_keys_and_shows_app_labels(make):
 def test_spinner_help_renders_from_the_window(make):
     win, _backend = make(taken_nav_keys={curses.KEY_LEFT: 'prev'})
     spin = OptionSpinner(nav_keys=win.opts.nav_keys)
-    spin.show_help_nav_keys(win)
+    spin.show_help_nav_keys(screen_of(win))
     header_text = '\n'.join(win.head.texts)
     assert '←: prev' in header_text

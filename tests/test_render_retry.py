@@ -1,6 +1,5 @@
 import curses
 import time
-from types import SimpleNamespace
 
 import pytest
 
@@ -26,16 +25,11 @@ def make_window(scr):
     win.scr = scr
     win.opts = ConsoleWindowOpts()
     win.rows, win.cols = scr._rows, scr._cols
-    # Attributes touched by render()'s diagnostic dump on failure.
-    win.head = SimpleNamespace(row_cnt=0, view_cnt=0)
-    win.body = SimpleNamespace(row_cnt=0)
+    # The view state render()'s diagnostic dump reads on failure; a real one
+    # keeps head/body and pick/scroll available without a Screen.
+    win._view = window_mod._ViewState()
     win.hor_line_cnt = 0
-    win.scroll_pos = 0
     win.max_scroll_pos = 0
-    win.pick_pos = 0
-    win.last_pick_pos = -1
-    win.pick_mode = False
-    win.pick_size = 1
     return win
 
 

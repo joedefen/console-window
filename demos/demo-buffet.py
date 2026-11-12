@@ -10,7 +10,6 @@ from types import SimpleNamespace
 from console_window import (
     Appearance,
     BasicHelpScreen,
-    BasicTextScreen,
     ConsoleWindow,
     ConsoleWindowOpts,
     Context,
@@ -264,7 +263,8 @@ class SampleApp:
     def main_loop(self):
         while True:
             current_screen = self.screens[self.stack.curr.num]
-            current_screen.draw_screen()
+            current_screen.clear()          # content reset for the new pass
+            current_screen.draw_screen()    # add_header()/add_body() only
             # redraw=True forces the full-repaint recovery path (toggled by 'r').
             self.win.render(redraw=self.opts.force_redraw)
 
@@ -272,7 +272,6 @@ class SampleApp:
             if key:
                 self.handle_key(key)
             self.stack.perform_actions(self.spin)
-            self.win.clear()
 
 
 class DemoScreen(Screen):
@@ -310,7 +309,7 @@ class MainScreen(DemoScreen):
         super().__init__('MAIN', app)
 
     def draw_screen(self):
-        self.app.win.set_pick_mode(True, self.app.opts.pick_size)
+        self.set_pick_mode(True, self.app.opts.pick_size)
 
         self._draw_body()
         self._draw_header()
@@ -346,14 +345,14 @@ class MainScreen(DemoScreen):
 
             # Create context for picking
             ctx = Context(genre='item', item=item)
-            app.win.add_body(line, attr=attr, context=ctx)
+            self.add_body(line, attr=attr, context=ctx)
 
             # Draw the in-place confirmation right after the row it belongs to.
             # The wording and warning glyph stay here (product decisions); the
             # window's prompt helper owns the display composition and marks both
             # rows TRANSIENT/non-pickable for us.
             if app.win.prompt_active and app.prompt_item == username:
-                app.win.add_prompt_lines(
+                self.add_prompt_lines(
                     attr=Appearance.semantic_attr(Theme.WARNING) | cs.A_BOLD,
                     hint_attr=cs.A_DIM,
                 )
@@ -362,8 +361,8 @@ class MainScreen(DemoScreen):
             # Non-pickable filler: exercises large pads and the scroll indicator,
             # and shows DECOR rows being skipped by navigation.
             for extra in range(2000):
-                app.win.add_body(f'  filler {extra + 1}', attr=cs.A_DIM,
-                                 context=Context(genre='DECOR'))
+                self.add_body(f'  filler {extra + 1}', attr=cs.A_DIM,
+                              context=Context(genre='DECOR'))
 
     def _draw_header(self):
         app = self.app
@@ -406,11 +405,11 @@ class MainScreen(DemoScreen):
         # line.text(' ').bracket_key('h').text('ist')
         line.text(' ').bracket_key('?').text(':help')
         if header_test == 0:  # tokens, emitted verbatim (brackets are literal)
-            app.win.add_header_line(line, mode='Underline')
+            self.add_header_line(line, mode='Underline')
         elif header_test == 1:  # tokens, brackets treated as markup only
-            app.win.add_fancy_header(line, mode='Underline')
+            self.add_fancy_header(line, mode='Underline')
         else:  # str(line) re-parsed by the legacy scanner (lossy by design)
-            app.win.add_fancy_header(str(line), mode='Underline')
+            self.add_fancy_header(str(line), mode='Underline')
 
         # Column headers
         view_mode = app.opts.view_mode
@@ -421,13 +420,13 @@ class MainScreen(DemoScreen):
         else:  # compact
             header = f'{"User":<20} Status'
 
-        app.win.add_header(header, attr=cs.A_DIM | cs.A_UNDERLINE)
+        self.add_header(header, attr=cs.A_DIM | cs.A_UNDERLINE)
 
         # A buffered note prompt is a screen-wide question, so it lives in the
         # header band rather than under one row.  add_prompt_header() renders
         # the library's fixed ': buffer│' format.
         if app.win.prompt_active and app.note_item:
-            app.win.add_prompt_header()
+            self.add_prompt_header()
 
     def filter_ACTION(self):
         app = self.app
@@ -566,25 +565,22 @@ class HelpScreen(DemoScreen, BasicHelpScreen):
         )
 
 #   def draw_screen(self):
-#       app = self.app
-#       app.win.set_pick_mode(False)
+#       self.set_pick_mode(False)
 
 #       spinner = self.get_spinner()
 #       if spinner:
 #           # Use built-in help display
-#           spinner.show_help_nav_keys(app.win)
-#           spinner.show_help_body(app.win)
+#           spinner.show_help_nav_keys(self)
+#           spinner.show_help_body(self)
 
 
 class HistoryScreen(DemoScreen):
     def __init__(self, app):
         super().__init__('HISTORY', app)
-        # Constructed before the ConsoleWindow exists, exactly like the other
-        # screens: BasicTextScreen resolves app.win at draw time.
-        self.text_screen = BasicTextScreen(app)
 
     def draw_screen(self):
         app = self.app
+        self.set_pick_mode(False)
         lines = [('  Press ESC or ENTER to return', cs.A_DIM), '']
         if app.selected_items:
             lines.append(f'Total processed items: {len(app.selected_items)}')
@@ -605,8 +601,10 @@ class HistoryScreen(DemoScreen):
                 'to process it.',
             ])
         # Content is rebuilt each draw; nothing is cached across frames.
-        self.text_screen.set_text(lines, head=['OPERATION HISTORY'])
-        self.text_screen.draw_screen()
+        self.add_header('OPERATION HISTORY')
+        for item in lines:
+            text, attr = (item, None) if isinstance(item, str) else item
+            self.add_body(text, attr=attr)
 
 
 class ThemeScreen(Theme.create_picker_screen(DemoScreen, cycle_key='t')):

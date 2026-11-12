@@ -9,7 +9,7 @@ from . import glyphs
 from .keys import NAVIGATION_KEYS
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from .screens import ScreenStack
+    from .screens import Screen, ScreenStack
     from .window import ConsoleWindow
 
 
@@ -317,20 +317,21 @@ class OptionSpinner:
         raise ValueError(f"scope must be None, int, or list/set, got {type(scope)}")
 
     @staticmethod
-    def show_help_nav_keys(win: ConsoleWindow) -> None:
+    def show_help_nav_keys(screen: Screen) -> None:
         # Render from the live window so its own opts.taken_nav_keys are
         # honored: keys the app owns are not advertised as navigation.
-        for line in win.nav_help_lines():
-            win.add_header(line)
+        for line in screen.win.nav_help_lines():
+            screen.add_header(line)
 
-    def show_help_body(self, win: ConsoleWindow, screen_filter: int | list | set | None = None) -> None:
-        win.add_body('Type keys to alter choice:', curses.A_UNDERLINE)
+    def show_help_body(self, screen: Screen,
+                       screen_filter: int | list | set | None = None) -> None:
+        screen.add_body('Type keys to alter choice:', curses.A_UNDERLINE)
 
         filter_screens = self._filter_screens(screen_filter)
         for ns in self.options:
             if self._skipped_by_filter(ns, filter_screens):
                 continue
-            self._write_option_body(win, ns)
+            self._write_option_body(screen, ns)
 
     @staticmethod
     def _filter_screens(screen_filter: int | list | set | None) -> set | None:
@@ -348,27 +349,27 @@ class OptionSpinner:
             return False
         return not (ns.effective_scope & filter_screens)
 
-    def _write_option_body(self, win: ConsoleWindow, ns: SimpleNamespace) -> None:
+    def _write_option_body(self, screen: Screen, ns: SimpleNamespace) -> None:
         # Registration normalizes every option, so a missing value here means
         # the application deleted or cleared the attribute afterwards.  Render
         # an explicit placeholder instead of relying on an assert (which would
         # vanish under ``python -O`` and print "None" as the current value).
         value = self.get_value(ns.attr)
         dot = ' ' if ns.genre == 'action' else glyphs.get('bullet')
-        win.add_body(f'{ns.descr:{dot}<{self.align}} ')
+        screen.add_body(f'{ns.descr:{dot}<{self.align}} ')
         if value is None:
-            win.add_body(f'<unset: {ns.attr!r}>', resume=True, attr=curses.A_DIM)
+            screen.add_body(f'<unset: {ns.attr!r}>', resume=True, attr=curses.A_DIM)
             return
 
         if ns.genre in ('cycle', 'prompt'):
             choices = ns.vals if ns.vals else [value]
             for choice in choices:
-                win.add_body(' ', resume=True)
-                win.add_body(self._format_choice(choice), resume=True,
+                screen.add_body(' ', resume=True)
+                screen.add_body(self._format_choice(choice), resume=True,
                     attr=curses.A_REVERSE if choice == value else None)
 
         for comment in ns.comments:
-            win.add_body(f'{"":>{self.align}}:  {comment}')
+            screen.add_body(f'{"":>{self.align}}:  {comment}')
 
     @staticmethod
     def _format_choice(choice: object) -> str:

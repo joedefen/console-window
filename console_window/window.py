@@ -17,7 +17,6 @@ import weakref
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from curses.textpad import rectangle
-from types import SimpleNamespace
 from typing import Callable, ClassVar, cast
 
 from . import geometry, glyphs, signals, textwidth
@@ -360,6 +359,116 @@ class _StopCurses:
         return stop
 
 
+class _Content:
+    """One namespace's content: the rows that ``add_header()``/``add_body()`` append.
+
+    A small object rather than a ``SimpleNamespace`` because ``row_cnt`` is
+    derived from ``texts`` instead of being a second count that has to be kept
+    in step.  The pads live here too: they are viewport-sized paint buffers, and
+    keeping them beside the rows they paint is what makes ``win.body.pad``
+    (the active view's namespace) keep working.
+    """
+
+    __slots__ = (
+        'cols',
+        'contexts',
+        'hint_rows',
+        'max_header_len',
+        'pad',
+        'pad_cols',
+        'pad_rows',
+        'rows',
+        'rows_dropped',
+        'text_attrs',
+        'texts',
+        'view_cnt',
+    )
+
+    def __init__(self, rows: int, hint_rows: int | None = None,
+                 cols: int = 200) -> None:
+        self.texts: list[str] = []
+        self.text_attrs: list[list[tuple[int, int]]] = []  # RLE [(attr, count)]
+        self.contexts: list[Context | None] = []
+        self.rows = rows  # enforced ceiling (opts.max_rows or the sentinel)
+        self.rows_dropped = 0
+        self.hint_rows = hint_rows  # advisory opts.head_rows/body_rows
+        self.cols = cols
+        self.view_cnt = 0  # header rows visible (head only)
+        self.pad: CursesSurface | None = None
+        self.pad_rows = 0
+        self.pad_cols = 0
+        self.max_header_len = 0  # head only: widest header seen in this pass
+
+    @property
+    def row_cnt(self) -> int:
+        """Number of rows added (``len(texts)``: there is no other store)."""
+        return len(self.texts)
+
+    def reset(self) -> None:
+        """Drop the rows for a new pass; the pads are erased at paint time."""
+        self.texts.clear()
+        self.text_attrs.clear()
+        self.contexts.clear()
+        self.rows_dropped = 0
+        self.view_cnt = 0
+        self.max_header_len = 0
+
+
+class _ViewState:
+    """Pick/scroll state plus content for one screen (package-private).
+
+    :class:`~console_window.screens.Screen` inherits this, so a screen *is* its
+    view state and ``screen.pick_pos`` needs no double naming.  The window keeps
+    a pointer (``win._view``) at whichever one is current, which is what makes
+    stack activation a pointer swap instead of a copy.  A window-owned instance
+    is also the fallback for a ``ScreenStack`` built from bare screen numbers.
+
+    ``reset()`` is content-only: ``pick_pos``/``scroll_pos``/``free_scroll``
+    describe the user's position in that screen and survive a rebuild pass.
+    """
+
+    __slots__ = (
+        '_opts_seeded',
+        'body',
+        'free_scroll',
+        'head',
+        'pick_mode',
+        'pick_pos',
+        'pick_range',
+        'pick_size',
+        'scroll_pos',
+    )
+
+    def __init__(self) -> None:
+        self.pick_mode = False
+        self.pick_size = 1
+        self.pick_pos = 0
+        self.scroll_pos = 0
+        self.free_scroll = False
+        self.pick_range: list[int] | None = None  # [start_col, end_col] or None
+        self.head = _Content(_NO_ROW_LIMIT)
+        self.body = _Content(_NO_ROW_LIMIT)
+        # opts is a seed, not an owner: a Screen may be built before the window
+        # (and before any opts exist), so the window applies it at adoption.
+        self._opts_seeded = False
+
+    def set_pick_mode(self, on: bool = True, pick_size: int = 1) -> None:
+        """Turn the pick highlight on or off for *this* screen."""
+        self.pick_mode = bool(on)
+        self.pick_size = max(pick_size, 1)
+
+    def set_pick_range(self, start_col: int | None = None,
+                       end_col: int | None = None) -> None:
+        """Set the highlighted column range for *this* screen's picked row."""
+        self.pick_range = (None if start_col is None or end_col is None
+                           else [start_col, end_col])
+
+    def reset(self) -> None:
+        """Reset content for a new pass, preserving the view position."""
+        self.head.reset()
+        self.body.reset()
+
+
 class ConsoleWindow:
     """A curses pad-based pager with an independent pick/scroll model.
 
@@ -371,9 +480,15 @@ class ConsoleWindow:
     Completion callbacks run after the prompt is gone and passthrough mode has
     been restored, so a callback may safely call :meth:`begin_prompt` again
     (that is how a "re-edit, then ENTER or ESC" flow re-asks).  The application
-    decides where prompt rows are drawn: :meth:`add_prompt_header` for
-    screen-wide questions, :meth:`add_prompt_lines` from its own row loop for
-    item-scoped ones.  The window never learns which row that is.
+    decides where prompt rows are drawn: ``add_prompt_header()`` for screen-wide
+    questions, ``add_prompt_lines()`` from its own row loop for item-scoped
+    ones.  The window never learns which row that is.
+
+    Content and the pick/scroll position belong to the current
+    :class:`~console_window.screens.Screen`; the window paints it, owns the
+    terminal and routes keys.  The ``win.head``/``win.body`` and
+    ``win.pick_*``/``win.scroll_pos`` attributes below are views onto that
+    current screen.
     """
 
     stop_curses = _StopCurses()
@@ -522,44 +637,16 @@ class ConsoleWindow:
         self._scr_timeout_ms = ConsoleWindow.timeout_ms
 
         # Scheme B: the pads are viewport-sized blit buffers, not content
-        # stores.  `rows` below is the enforced content ceiling (opts.max_rows,
-        # or _NO_ROW_LIMIT when that option is None) and `hint_rows` is the
-        # advisory opts.head_rows/opts.body_rows value, kept for compatibility
-        # and introspection.  pad_rows/pad_cols track the actual allocation.
+        # stores.  Content lives on the current screen's _ViewState, so
+        # `win.head`/`win.body` are properties onto it and nothing is copied on
+        # activation.  The fallback view is used until a Screen is adopted, and
+        # permanently by a stack built from bare screen numbers.
         # _sync_pad_geometry() creates/sizes the pads once the terminal
         # dimensions are known (calc() runs at the end of __init__), so no
         # oversized placeholder is ever allocated.
-        row_limit = (self.opts.max_rows if self.opts.max_rows is not None
-                     else _NO_ROW_LIMIT)
-        self.head = SimpleNamespace(
-            pad=None,
-            rows=row_limit,  # enforced ceiling (NOT the pad height)
-            hint_rows=self.opts.head_rows,
-            cols=self.opts.body_cols,
-            pad_rows=0,
-            pad_cols=0,
-            row_cnt=0,  # no. head rows added
-            texts = [],
-            text_attrs = [],  # run-length encoded: [(attr, count), ...] per line
-            contexts = [],  # Context object per line (or None)
-            drawn = {},  # row -> [(x, text, attr), ...] written by draw()
-            view_cnt=0,  # no. head rows viewable (NOT in body)
-            rows_dropped=0,  # rows discarded because the content cap was reached
-        )
-        self.body = SimpleNamespace(
-            pad = None,
-            rows= row_limit,  # enforced ceiling (NOT the pad height)
-            hint_rows= self.opts.body_rows,
-            cols= self.opts.body_cols,
-            pad_rows=0,
-            pad_cols=0,
-            row_cnt = 0,
-            texts = [],
-            text_attrs = [],  # run-length encoded: [(attr, count), ...] per line
-            contexts = [],  # Context object per line (or None)
-            drawn = {},  # row -> [(x, text, attr), ...] written by draw()
-            rows_dropped = 0,  # rows discarded because the content cap was reached
-        )
+        self._fallback_view = _ViewState()
+        self._view: _ViewState = self._fallback_view
+        self._seed_view(self._fallback_view)
 
         # Register this instance so theme broadcasts and process teardown reach
         # it.  Singleton mode also republishes the old ``static_win`` pointer.
@@ -569,23 +656,7 @@ class ConsoleWindow:
 
         self.mod_pick = self.opts.mod_pick # call back to modify highlighted row
         self.hor_line_cnt = 1 if self.opts.head_line else 0 # no. h-lines in header
-        self.scroll_pos = 0  # how far down into body are we?
         self.max_scroll_pos = 0
-        self.pick_pos = 0 # in highlight mode, where are we?
-        self.last_pick_pos = -1 # last highlighted position, or -1 for none
-        # One-shot request to repaint every body row before drawing the pick.
-        # Set when pick mode/size/range changes and consumed by highlight_picked().
-        self._pick_clear_pending = False
-        self.pick_mode = self.opts.pick_mode # whether in highlight mode
-        self.pick_size = self.opts.pick_size # whether in highlight mode
-        # True while the user has deliberately scrolled past the picked row (or
-        # before it) so that non-pickable DECOR rows become viewable: in that
-        # state the pick-visibility clamp in _adjust_scroll_for_abut() must not
-        # drag the viewport back to pick_pos.  Cleared when navigation moves the
-        # pick.  Without it, the trailing filler rows of the stress mode were
-        # created but unreachable (the view snapped back to the last pickable
-        # row every frame).
-        self.free_scroll = False
         # True between suspend_curses() and resume_curses()/start_curses(): the
         # terminal was handed back (endwin) but the pads and content model stay
         # valid, so the window can be reattached to a screen later.
@@ -596,7 +667,6 @@ class ConsoleWindow:
         self.handled_keys = set(self.opts.keys) if isinstance(self.opts.keys, (set, list)) else set()
         self.pending_keys: set[int] = set()
         self.last_demo_key = ''  # Last key pressed in demo mode
-        self.max_header_len = 0  # Max visible header length from previous render
         self.passthrough_mode = False  # When True, all printable keys pass through
         # In-place prompt widget and the passthrough value to restore when it
         # ends, so a callback can start the next prompt (see begin_prompt()).
@@ -613,6 +683,7 @@ class ConsoleWindow:
         self._status_text = ''
         self._status_attr: int | None = None
         self._status_deadline: float | None = None
+        self._status_no_row_warned = False
         self.relax_handled_keys = self.opts.relax_handled_keys  # When True, pass non-nav keys without checking handled_keys
         self._set_screen_dims()
         self.calc()  # also creates the viewport-sized pads
@@ -671,6 +742,123 @@ class ConsoleWindow:
 
     def get_pad_width(self) -> int:
         return min(self.cols-1, self.body_cols)
+
+    # --- content and view indirection --------------------------------------
+    #
+    # Content and pick/scroll state belong to the current screen (a _ViewState,
+    # which Screen inherits).  These properties keep every existing internal
+    # read/write -- and the documented ``win.body``/``win.pick_pos`` surface --
+    # working without a copy on screen activation.
+
+    def _seed_view(self, view: _ViewState) -> None:
+        """Apply ``opts`` to *view* the first time it is adopted.
+
+        Screens may be built before the window (and before its opts), so the
+        defaults cannot live in their constructor; adoption is the one moment
+        both exist.  ``opts`` is a seed, never an owner: after this call the
+        screen's own fields are authoritative, so two screens can hold
+        different pick ranges and modes.
+        """
+        if view._opts_seeded:  # pylint: disable=protected-access
+            return
+        row_limit = (self.opts.max_rows if self.opts.max_rows is not None
+                     else _NO_ROW_LIMIT)
+        for content, hint in ((view.head, self.opts.head_rows),
+                              (view.body, self.opts.body_rows)):
+            content.rows = row_limit
+            content.hint_rows = hint
+            content.cols = self.opts.body_cols
+        view.pick_mode = bool(self.opts.pick_mode)
+        view.pick_size = max(self.opts.pick_size, 1)
+        view.pick_range = self.opts.pick_range
+        view._opts_seeded = True  # pylint: disable=protected-access
+
+    def _adopt_view(self, view: _ViewState) -> None:
+        """Point the window at *view* and seed it if it is new.
+
+        Called by ``Screen.clear()`` (the loop's first call, which is why that
+        order is fixed) and by ``ScreenStack`` on activation.  A window cannot
+        discover a Model A screen on its own, so the screen hands itself over.
+
+        The pads are viewport buffers owned by the content they paint, so a
+        newly adopted view gets its own pair sized to the current terminal.
+        Without this, a screen that has never been rendered has ``pad is None``
+        and the first ``render(redraw=True)`` would fail on ``redrawwin()``.
+        """
+        self._seed_view(view)
+        self._view = view
+        if getattr(self, 'scr', None) is not None:
+            if view.head.pad is None or view.body.pad is None:
+                self._sync_pad_geometry()
+            # A theme may have changed while this screen was inactive; the pad
+            # background is per-pad, so re-apply it to the incoming view's pads.
+            for content in (view.head, view.body):
+                if content.pad is not None:
+                    self._apply_pad_theme(cast(CursesSurface, content.pad))
+
+    @property
+    def head(self) -> _Content:
+        """The active screen's header content (write it through a Screen)."""
+        return self._view.head
+
+    @property
+    def body(self) -> _Content:
+        """The active screen's body content (write it through a Screen)."""
+        return self._view.body
+
+    @property
+    def pick_mode(self) -> bool:
+        """Whether the active screen shows a pick highlight."""
+        return self._view.pick_mode
+
+    @pick_mode.setter
+    def pick_mode(self, value: bool) -> None:
+        self._view.pick_mode = bool(value)
+
+    @property
+    def pick_size(self) -> int:
+        """How many rows the active screen's pick highlight spans."""
+        return self._view.pick_size
+
+    @pick_size.setter
+    def pick_size(self, value: int) -> None:
+        self._view.pick_size = max(int(value), 1)
+
+    @property
+    def pick_pos(self) -> int:
+        """The active screen's picked content row."""
+        return self._view.pick_pos
+
+    @pick_pos.setter
+    def pick_pos(self, value: int) -> None:
+        self._view.pick_pos = value
+
+    @property
+    def scroll_pos(self) -> int:
+        """The active screen's top visible body row."""
+        return self._view.scroll_pos
+
+    @scroll_pos.setter
+    def scroll_pos(self, value: int) -> None:
+        self._view.scroll_pos = value
+
+    @property
+    def free_scroll(self) -> bool:
+        """True while the active screen is scrolled away from its picked row."""
+        return self._view.free_scroll
+
+    @free_scroll.setter
+    def free_scroll(self, value: bool) -> None:
+        self._view.free_scroll = bool(value)
+
+    @property
+    def pick_range(self) -> list[int] | None:
+        """The active screen's highlighted column range (or None)."""
+        return self._view.pick_range
+
+    @pick_range.setter
+    def pick_range(self, value: list[int] | None) -> None:
+        self._view.pick_range = value
 
     @property
     def max_rows(self) -> int | None:
@@ -915,7 +1103,7 @@ class ConsoleWindow:
         for ns in (self.head, self.body):
             self._apply_pad_theme(cast(CursesSurface, ns.pad))
         self._mark_pads_for_redraw()
-        self._pick_clear_pending = True
+        self._clear_surface()
 
     def suspend_curses(self) -> None:
         """Leave curses mode without destroying this window.
@@ -1068,20 +1256,16 @@ class ConsoleWindow:
         return scr
 
     def set_pick_mode(self, on: bool = True, pick_size: int = 1) -> None:
-        was_on, was_size = self.pick_mode, self.pick_size
-        self.pick_mode = bool(on)
-        self.pick_size = max(pick_size, 1)
-        if self.pick_mode and (not was_on or was_size != self.pick_size):
-            self._pick_clear_pending = True
+        """Set pick mode on the *current* screen (see ``Screen.set_pick_mode``)."""
+        self._view.set_pick_mode(on, pick_size)
 
     def set_pick_range(self, start_col: int | None = None, end_col: int | None = None) -> None:
-        if start_col is None or end_col is None:
-            self.opts.pick_range = None
-        else:
-            self.opts.pick_range = [start_col, end_col]
-        # Force redraw of pick line
-        if self.pick_mode:
-            self._pick_clear_pending = True
+        """Set the pick column range on the *current* screen.
+
+        Kept on the window for 4.x compatibility; it no longer writes
+        ``opts.pick_range``, so two screens can hold different ranges.
+        """
+        self._view.set_pick_range(start_col, end_col)
 
     def _stop_instance(self) -> None:
         """Stop this window (and, in singleton mode, suspend the shared screen)."""
@@ -1198,7 +1382,7 @@ class ConsoleWindow:
         self.body_base = self.head.view_cnt + self.hor_line_cnt
         return not same
 
-    def _add(self, ns: SimpleNamespace, text: str, attr: int | None = None,
+    def _add(self, ns: _Content, text: str, attr: int | None = None,
              resume: bool = False, context: Context | None = None,
              *, is_body: bool = False) -> None:
         # Model-only: the row is stored here and painted by _paint_body()/
@@ -1235,28 +1419,27 @@ class ConsoleWindow:
                 # Note: context not updated on resume
         else:
             # Truncate to the single "usable width" (get_pad_width), matching
-            # the resume branch, draw() and highlight_picked() — not the raw
-            # terminal width, which is one column wider and uncapped by the pad.
+            # the resume branch, not the raw terminal width, which is one column
+            # wider and uncapped by the pad.
             actual_text = textwidth.truncate(text, self.get_pad_width())
             ns.texts.append(actual_text)  # text only history
             ns.text_attrs.append([(attr, len(actual_text))])  # run-length encoded
             ns.contexts.append(context)  # Context metadata (or None)
-            ns.row_cnt += 1
 
-    def _warn_rows_dropped(self, ns: SimpleNamespace, which: str, *,
-                           stacklevel: int = 4) -> None:
+    def _warn_rows_dropped(self, ns: _Content, which: str, *,
+                           stacklevel: int = 5) -> None:
         # The content cap is reached, so this row is discarded (as it always
         # was when the pad was the storage).  Counted always, warned about once
-        # per fill episode -- clear() resets both, so
+        # per fill episode -- Screen.clear() resets both, so
         # a bulk overflow produces exactly one message instead of one per row --
         # and never fatal: the app keeps running and can inspect
         # ConsoleWindow.rows_dropped.  A caller that would rather treat this as
         # an error can use the usual warnings machinery
         # (python -W error::UserWarning, or pytest's filterwarnings ini setting).
         #
-        # stacklevel is 4 for the _add() path:
-        # warn() <- _warn_rows_dropped() <- _add() <- add_body()/add_header()
-        # <- caller.  draw() is one frame shorter, so it passes 3.
+        # stacklevel is 5 for the content path:
+        # warn() <- _warn_rows_dropped() <- _add() <- Screen.add_body()/add_header()
+        # <- caller.
         ns.rows_dropped += 1
         if ns.rows_dropped != 1:
             return
@@ -1268,13 +1451,9 @@ class ConsoleWindow:
             stacklevel=stacklevel,
         )
 
-    def add_header(self, text: str, attr: int | None = None, resume: bool = False,
-                   context: Context | None = None) -> None:
-        self._add(self.head, text, attr, resume, context, is_body=False)
-
-    def add_body(self, text: str, attr: int | None = None, resume: bool = False,
-                 context: Context | None = None) -> None:
-        self._add(self.body, text, attr, resume, context, is_body=True)
+    # The public content writers live on Screen (see screens.Screen.add_body
+    # and friends); they delegate here with their own namespace, so a screen
+    # can fill its content before it is adopted.
 
     # --- in-place prompt lifecycle -----------------------------------------
 
@@ -1336,8 +1515,8 @@ class ConsoleWindow:
             on_cancel()
         return result
 
-    def add_prompt_header(self, attr: int | None = None,
-                          align: str | None = None) -> bool:
+    def _add_prompt_header(self, ns: _Content, attr: int | None = None,
+                           align: str | None = None) -> bool:
         """Draw the prompt as a header row; False when no prompt is active.
 
         *align* of ``'center'`` pads the row so the prompt sits in the middle of
@@ -1345,7 +1524,8 @@ class ConsoleWindow:
         because the display width of the line is only known after the prompt is
         composed (glyphs, an emoji presentation selector and the hint all
         count), and a caller-side ``len()`` would be one cell out for exactly
-        the lines that need centering most.
+        the lines that need centering most.  ``Screen.add_prompt_header()``
+        supplies its own header namespace.
         """
         if not self.prompt_line.active:
             return False
@@ -1356,14 +1536,14 @@ class ConsoleWindow:
             if lead:
                 # Two adds on one row: the pad spaces carry the prompt's own
                 # attribute so the whole band, not just its text, is painted.
-                self.add_header(' ' * lead, attr=attr)
-                self.add_header(text, attr=attr, resume=True)
+                self._add(ns, ' ' * lead, attr=attr)
+                self._add(ns, text, attr=attr, resume=True)
                 return True
-        self.add_header(text, attr=attr)
+        self._add(ns, text, attr=attr)
         return True
 
-    def add_prompt_lines(self, attr: int | None = None,
-                         hint_attr: int | None = None) -> bool:
+    def _add_prompt_lines(self, ns: _Content, attr: int | None = None,
+                          hint_attr: int | None = None) -> bool:
         """Draw the prompt and its hint as transient body rows.
 
         For item-scoped questions the application calls this from its own row
@@ -1373,56 +1553,59 @@ class ConsoleWindow:
         if not self.prompt_line.active:
             return False
         transient = Context(genre='TRANSIENT', pickable=False)
-        self.add_body(self.prompt_line.get_display_string(),
-                      attr=attr if attr is not None else curses.A_BOLD,
-                      context=transient)
+        self._add(ns, self.prompt_line.get_display_string(),
+                  attr=attr if attr is not None else curses.A_BOLD,
+                  context=transient, is_body=True)
         hint = self.prompt_line.get_hint_string()
         if hint:
-            self.add_body(textwidth.truncate(hint, max(10, self.cols - 2)),
-                          attr=hint_attr if hint_attr is not None else curses.A_DIM,
-                          context=Context(genre='TRANSIENT', pickable=False))
+            self._add(ns, textwidth.truncate(hint, max(10, self.cols - 2)),
+                      attr=hint_attr if hint_attr is not None else curses.A_DIM,
+                      context=Context(genre='TRANSIENT', pickable=False),
+                      is_body=True)
         return True
 
-    def add_fancy_header(self, line: str | HeaderLine, mode: str = 'Underline',
-                         search_pattern_attr: int | None = None,
-                         line_attr: int | None = None) -> None:
+    def _add_fancy_header(self, ns: _Content, line: str | HeaderLine,
+                          mode: str = 'Underline',
+                          search_pattern_attr: int | None = None,
+                          line_attr: int | None = None) -> None:
         """Add a header line with legacy ``[x]``/``KEY:``/``/pattern`` markup.
 
         String input is parsed unless ``mode='Off'``.  A :class:`HeaderLine`
         keeps its declared span roles, but its ``bracket_key()`` delimiters are
         treated as markup too: in every mode except ``'Off'`` they are removed,
         while the enclosed key keeps its ``KEY`` styling.  Use
-        :meth:`add_header_line` when literal brackets are wanted.
+        ``add_header_line()`` when literal brackets are wanted.
 
         *line_attr* is OR'd into the attribute of every span (and into the raw
         line emitted for ``mode='Off'``), so a caller can, for example, dim a
         whole header with ``line_attr=curses.A_DIM`` while keeping each span's
-        own bold/underline/reverse styling.
+        own bold/underline/reverse styling.  ``Screen`` supplies its own header
+        namespace.
         """
         if isinstance(line, str):
             if mode == 'Off':
                 # Legacy: no markup processing, add the raw line unchanged
                 # (except for the caller's whole-line attribute).
-                self.add_header(line, attr=line_attr)
+                self._add(ns, line, attr=line_attr)
                 return
             spans = parse_fancy_header(line)
         else:
             spans = list(line)
             if mode != 'Off':
                 spans = strip_key_brackets(spans)
-        self._emit_header_spans(spans, mode, search_pattern_attr, line_attr)
+        self._emit_header_spans(ns, spans, mode, search_pattern_attr, line_attr)
 
-    def add_header_line(self, header_line: HeaderLine | Iterable[Span],
-                        mode: str = 'Underline',
-                        search_pattern_attr: int | None = None,
-                        line_attr: int | None = None) -> None:
-        """Render explicit header spans; see :meth:`add_fancy_header`.
+    def _add_header_line(self, ns: _Content, header_line: HeaderLine | Iterable[Span],
+                         mode: str = 'Underline',
+                         search_pattern_attr: int | None = None,
+                         line_attr: int | None = None) -> None:
+        """Render explicit header spans; see ``Screen.add_fancy_header()``.
 
         *line_attr* is OR'd into every span's resolved attribute, including
         plain spans, so the whole line can carry an extra style such as
         ``curses.A_DIM``.
         """
-        self._emit_header_spans(list(header_line), mode, search_pattern_attr,
+        self._emit_header_spans(ns, list(header_line), mode, search_pattern_attr,
                                 line_attr)
 
     @staticmethod
@@ -1447,7 +1630,7 @@ class ConsoleWindow:
             attr = (attr or 0) | line_attr
         return attr
 
-    def _emit_header_spans(self, spans: Iterable[Span], mode: str,
+    def _emit_header_spans(self, ns: _Content, spans: Iterable[Span], mode: str,
                            search_pattern_attr: int | None = None,
                            line_attr: int | None = None) -> None:
         result_sections = [
@@ -1461,86 +1644,25 @@ class ConsoleWindow:
         visible_length = sum(textwidth.string_width(text) for text, attr in result_sections)
 
         # Check if this is the first header line
-        is_first_header = (self.head.row_cnt == 0)
+        is_first_header = (ns.row_cnt == 0)
 
         # Add demo indicator to first header if demo mode is active
         if is_first_header and self.opts.demo_mode and self.last_demo_key:
             # Pad to max_header_len + 2 spaces
-            padding_needed = max(0, self.max_header_len + 2 - visible_length)
+            padding_needed = max(0, ns.max_header_len + 2 - visible_length)
             if padding_needed > 0:
                 result_sections.append((' ' * padding_needed, None))
             # Add demo key in reverse video
             result_sections.append((self.last_demo_key, curses.A_REVERSE))
 
-        # Now output the sections using add_header with resume
+        # Now output the sections onto the header row, resuming each segment
         for idx, (text, attr) in enumerate(result_sections):
             resume = bool(idx > 0)  # Resume for all but the first section
-            self.add_header(text, attr=attr, resume=resume)
+            self._add(ns, text, attr=attr, resume=resume)
 
         # Track max header length for next render (excluding demo indicator)
-        if visible_length > self.max_header_len:
-            self.max_header_len = visible_length
-
-    def draw(self, y: int, x: int, text: str | bytes, text_attr: int | None = None,
-             width: int | None = None, leftpad: bool = False, header: bool = False) -> None:
-        # Scheme B keeps y a *content* row, exactly as before; the row is
-        # painted at y - scroll_pos by _paint_body() on the frames where it is
-        # visible.  The attribute has no home in texts[], so the span is also
-        # recorded in ns.drawn and replayed over the row's normal attribute runs.
-        ns = self.head if header else self.body
-        text_attr = text_attr if text_attr else curses.A_NORMAL
-        if y < 0:
-            return # nothing above the first content row
-        if y >= ns.rows:
-            # The row coordinate is past the same content ceiling _add() enforces;
-            # discard it through the shared counter so draw() overflow is counted
-            # and warned about once per fill episode, just like add_body().
-            # draw() sits one frame below _add(), hence stacklevel=3.
-            self._warn_rows_dropped(
-                ns, 'head' if header else 'body', stacklevel=3)
-            return
-        if x < 0 or x >= ns.cols:
-            return # nothing to paint outside the pad width
-        ns.row_cnt = max(ns.row_cnt, y+1)
-
-        uni = text if isinstance(text, str) else text.decode('utf-8')
-        uni = glyphs.transliterate(uni)
-
-        if width is not None:
-            width = min(width, self.get_pad_width() - x)
-            if width <= 0:
-                return
-            # Pad/truncate to exactly `width` display cells (wide-char safe).
-            uni = textwidth.rjust(uni, width) if leftpad else textwidth.ljust(uni, width)
-
-        while y >= len(ns.texts):
-            ns.texts.append('')
-            ns.text_attrs.append([])
-            ns.contexts.append(None)
-        existing = ns.texts[y]
-        left = textwidth.ljust(textwidth.truncate(existing, x), x)
-        right_start = textwidth.cell_to_index(existing, x + textwidth.string_width(uni))
-        ns.texts[y] = left + uni + existing[right_start:]
-        ns.drawn.setdefault(y, []).append((x, uni, text_attr))
-
-
-    def highlight_picked(self) -> None:
-        if not self.pick_mode:
-            return
-
-        pos0, pos1 = self.last_pick_pos, self.pick_pos
-        if self._pick_clear_pending:
-            self._redraw_rows(range(self.body.row_cnt))
-            self._pick_clear_pending = False
-            # The full clear removed the old highlight even if the row did not
-            # move, so force the normal repaint path below.
-            pos0 = -1
-        if pos0 != pos1:
-            if 0 <= pos0 < self.body.row_cnt:
-                self._redraw_rows(range(pos0, pos0 + self.pick_size))
-            if 0 <= pos1 < self.body.row_cnt:
-                self._draw_picked_rows(range(pos1, pos1 + self.pick_size))
-                self.last_pick_pos = pos1
+        if visible_length > ns.max_header_len:
+            ns.max_header_len = visible_length
 
     def _body_text(self, pos: int) -> str:
         if pos >= len(self.body.texts):
@@ -1549,30 +1671,6 @@ class ConsoleWindow:
 
     def _body_attrs(self, pos: int) -> list | None:
         return self.body.text_attrs[pos] if pos < len(self.body.text_attrs) else None
-
-    def _pad_row(self, pos: int, header: bool = False) -> int | None:
-        # Map a content row to the pad row that currently holds it.  Returns
-        # None when the row is outside the viewport, which is the common case
-        # for a long body: only the visible page lives in the pad.
-        row = pos if header else pos - self.scroll_pos
-        ns = self.head if header else self.body
-        if row < 0 or row >= ns.pad_rows:
-            return None
-        return row
-
-    def _overlay_spans(self, pad: CursesSurface, pad_row: int, ns: SimpleNamespace,
-                       pos: int) -> None:
-        # Replay the draw() spans for one content row on top of its normal
-        # attribute runs.  Off-screen rows keep their spans in ns.drawn and are
-        # painted when they scroll into view.
-        spans = ns.drawn.get(pos)
-        if not spans:
-            return
-        width = self.get_pad_width()
-        for x, text, attr in spans:
-            if x >= width:
-                continue
-            pad.addstr(pad_row, x, textwidth.truncate(text, width - x), attr)
 
     def _paint_row(self, pad: CursesSurface, pad_row: int, pos: int, *,
                    picked: bool) -> None:
@@ -1584,31 +1682,12 @@ class ConsoleWindow:
         if picked and self.mod_pick:
             text = self.mod_pick(text)
         text = textwidth.ljust(text, self.get_pad_width())
-        if picked:
-            self._draw_line_with_attrs(pad, pad_row, 0, text,
-                                       self._body_attrs(pos),
-                                       extra_attr=self.opts.pick_attr,
-                                       extra_attr_range=self.opts.pick_range)
-        else:
-            self._draw_line_with_attrs(pad, pad_row, 0, text,
-                                       self._body_attrs(pos), extra_attr=None)
-            self._overlay_spans(pad, pad_row, self.body, pos)
-
-    def _redraw_rows(self, rows: Iterable[int]) -> None:
-        for row_idx in rows:
-            pad_row = self._pad_row(row_idx)
-            if pad_row is None or row_idx >= len(self.body.texts):
-                continue
-            self._paint_row(cast(CursesSurface, self.body.pad), pad_row,
-                            row_idx, picked=False)
-
-    def _draw_picked_rows(self, rows: Iterable[int]) -> None:
-        for row_idx in rows:
-            pad_row = self._pad_row(row_idx)
-            if pad_row is None or row_idx >= len(self.body.texts):
-                continue
-            self._paint_row(cast(CursesSurface, self.body.pad), pad_row,
-                            row_idx, picked=True)
+        extra_attr = self.opts.pick_attr if picked else None
+        extra_range = self.pick_range if picked else None
+        self._draw_line_with_attrs(pad, pad_row, 0, text,
+                                   self._body_attrs(pos),
+                                   extra_attr=extra_attr,
+                                   extra_attr_range=extra_range)
 
     def _draw_line_with_attrs(self, pad: CursesSurface, row: int, col_offset: int,
                               text: str, attrs: list | None,
@@ -1727,6 +1806,10 @@ class ConsoleWindow:
         return parts
 
     def _scroll_indicator_row(self) -> int:
+        # With no separator row there is no indicator either, so the anchor is
+        # simply the top of the viewport: pick_pos tracks scroll_pos exactly.
+        if not self.hor_line_cnt:
+            return self.body_base
         return geometry.scroll_indicator_row(
             self.scroll_pos, self.max_scroll_pos, self.scroll_view_size,
             self.body_base, self.rows)
@@ -1759,12 +1842,11 @@ class ConsoleWindow:
             logger.exception(
                 'curses error while rendering: head.row_cnt=%s head.view_cnt=%s '
                 'hor_line_cnt=%s body.row_cnt=%s scroll_pos=%s max_scroll_pos=%s '
-                'pick_pos=%s last_pick_pos=%s pick_clear_pending=%s pick_mode=%s '
-                'pick_size=%s rows=%s cols=%s',
+                'pick_pos=%s pick_mode=%s pick_size=%s rows=%s cols=%s',
                 self.head.row_cnt, self.head.view_cnt, self.hor_line_cnt,
                 self.body.row_cnt, self.scroll_pos, self.max_scroll_pos,
-                self.pick_pos, self.last_pick_pos, self._pick_clear_pending,
-                self.pick_mode, self.pick_size, self.rows, self.cols)
+                self.pick_pos, self.pick_mode, self.pick_size,
+                self.rows, self.cols)
             raise
 
 
@@ -1891,7 +1973,7 @@ class ConsoleWindow:
         if indent > 0 and self.pick_mode:
             self._draw_pick_gutter()
 
-        if self.head.view_cnt < self.rows:
+        if self._separator_available():
             self._draw_separator_and_indicator()
 
         # Instead of self.scr.refresh(), use pnoutrefresh/doupdate for efficiency.
@@ -1920,13 +2002,24 @@ class ConsoleWindow:
             if self.body_base <= pos < self.body_base + self.scroll_view_size:
                 self.scr.addstr(pos, 0, '>', curses.A_REVERSE)
 
+    def _separator_available(self) -> bool:
+        """True when the window has a separator row to paint chrome onto.
+
+        ``head_line=False`` reserves no row, so there is nothing to paint a
+        rule, a scroll indicator or a status message on.  This is the single
+        test render_once() and status() share; keying it on the flag (not on
+        ``head.view_cnt``) is what stops the rule from landing on body row 0.
+        """
+        return bool(self.hor_line_cnt) and self.head.view_cnt < self.rows
+
     def _draw_separator_and_indicator(self) -> None:
         # While an in-place prompt is live it is the only thing keys can reach,
         # so an application may ask for the rule to recede behind it.
         rule_attr = (self.prompt_separator_attr
                      if self.prompt_line.active and self.prompt_separator_attr is not None
                      else curses.A_NORMAL)
-        self.scr.hline(self.head.view_cnt, 0, curses.ACS_HLINE, self.cols, rule_attr)
+        sep_row = self.body_base - 1
+        self.scr.hline(sep_row, 0, curses.ACS_HLINE, self.cols, rule_attr)
         ind_pos = self._scroll_indicator_col()
         bot, cnt = self._scroll_indicator_span(ind_pos) if ind_pos >= 0 else (-1, 0)
         # Status first: it must not be able to cover the indicator, and it must
@@ -1934,15 +2027,18 @@ class ConsoleWindow:
         self._draw_status_line(bot if ind_pos >= 0 else -1)
         if ind_pos >= 0:
             for idx in range(bot, bot + cnt):
-                self.scr.addch(self.head.view_cnt, idx, curses.ACS_HLINE,
+                self.scr.addch(sep_row, idx, curses.ACS_HLINE,
                                curses.A_REVERSE)
 
     def _draw_status_line(self, indicator_start: int) -> None:
-        """Paint the current status on the separator row, if there is one.
+        """Paint the current status on the separator row.
 
-        ``indicator_start`` is the first cell of the scroll indicator, or -1
-        when no indicator is being drawn.  The text never touches that span and
-        one blank cell is always left between the two.
+        Only called when :meth:`_separator_available` is true, so there is
+        always a row above the body.  ``indicator_start`` is the first cell of
+        the scroll indicator, or -1 when no indicator is being drawn.  The text
+        never touches that span and one blank cell is always left between the
+        two.  With no separator row ``status()`` warns on the caller instead of
+        painting over body row 0.
         """
         if not self._status_text:
             return
@@ -1955,7 +2051,7 @@ class ConsoleWindow:
         if budget < 2:
             return
         text = textwidth.truncate(self._status_text, budget)
-        self.scr.addstr(self.head.view_cnt, 0, text,
+        self.scr.addstr(self.body_base - 1, 0, text,
                         self._status_attr if self._status_attr is not None
                         else curses.A_NORMAL)
 
@@ -1984,12 +2080,6 @@ class ConsoleWindow:
             picked = (self.pick_mode
                       and self.pick_pos <= pos < self.pick_pos + self.pick_size)
             self._paint_row(pad, row, pos, picked=picked)
-        if self.pick_mode:
-            # Bookkeeping only: the paint above is stateless, but the
-            # incremental API (and the debug log) still reports the pick that
-            # was last shown and considers any pending full repaint done.
-            self.last_pick_pos = self.pick_pos
-            self._pick_clear_pending = False
         return view
 
     def _paint_head(self) -> int:
@@ -2005,7 +2095,6 @@ class ConsoleWindow:
             text = textwidth.ljust(self.head.texts[row], width)
             attrs = self.head.text_attrs[row] if row < len(self.head.text_attrs) else None
             self._draw_line_with_attrs(pad, row, 0, text, attrs, extra_attr=None)
-            self._overlay_spans(pad, row, self.head, row)
         return last_row
 
     def _refresh_pads(self, indent: int) -> None:
@@ -2389,6 +2478,18 @@ class ConsoleWindow:
             return True
         return self.opts.dialog_return == 'ENTER' and key in (10, 13)
 
+    def _clear_surface(self) -> None:
+        """Wipe the physical screen, for lifecycle paths only.
+
+        Ordinary frames never need it: the pads are erased and fully repainted
+        every render, and ``doupdate()`` diffs them against the physical screen.
+        The wipe is for a screen that has just appeared (resume/start), where
+        the terminal may still hold whatever the app before us left there.
+        """
+        scr = getattr(self, 'scr', None)
+        if scr is not None:
+            scr.clear()
+
     def _recover_from_resize(self) -> None:
         """Discard queued input and adopt the new screen geometry.
 
@@ -2399,7 +2500,7 @@ class ConsoleWindow:
         The loss is limited to the retry window bounded by
         ``render_retry_seconds``; keys typed after recovery are read normally.
         """
-        self.scr.clear()
+        self._clear_surface()
         self._backend.update_lines_cols()
         self.rows, self.cols = self.scr.getmaxyx()
         # Drain any pending events to prevent an infinite resize loop.  Keys
@@ -2434,11 +2535,17 @@ class ConsoleWindow:
         separator row; the return value is ``False`` in that case so a caller
         can tell that the message is deferred, not lost.  A later resize will
         reveal it.  An empty ``text`` clears the status and returns ``True``.
+
+        ``head_line=False`` reserves no row, so painting a status there would
+        mean overwriting the first body row.  That case returns ``False`` and
+        warns once per episode (the same shape as the ``max_rows`` warning), so
+        a caller is told rather than silently losing the message.
         """
         if text == '':
             self._status_text = ''
             self._status_attr = None
             self._status_deadline = None
+            self._status_no_row_warned = False
             return True
         level_attr = self.STATUS_LEVELS.get(level)
         if level_attr is None:
@@ -2448,7 +2555,18 @@ class ConsoleWindow:
         self._status_deadline = (None if timeout is None
                                  else time.monotonic() + max(timeout, 0.0))
         # Same availability test render_once() uses for the separator row.
-        return self.head.view_cnt < self.rows
+        available = self._separator_available()
+        if available:
+            self._status_no_row_warned = False
+        elif not self._status_no_row_warned:
+            self._status_no_row_warned = True
+            warnings.warn(
+                'console-window: status() has no separator row to draw on '
+                '(head_line=False reserves none), so the message is kept but '
+                'not shown; it will appear if a later resize/call frees a row.',
+                stacklevel=2,
+            )
+        return available
 
     def clear_status(self) -> bool:
         """Remove any current status message (equivalent to ``status('')``)."""
@@ -2700,23 +2818,15 @@ class ConsoleWindow:
         pad.refresh(scroll_top, 0, row0 + 1, col0 + 1, row0 + visible_rows, col9 - 1)
 
     def clear(self) -> None:
-        # A suspended window has no screen handle until resume_curses()/
-        # start_curses(); the content model still has to be reset so the next
-        # repaint is complete.  Calling clear() while suspended used to raise
-        # AttributeError on self.scr.
-        if self.scr is not None:
-            self.scr.clear()
-        # Viewport-sized pads: clearing costs one screenful, not one high-water
-        # mark, and no shrink/grow decision is needed at a frame boundary.
-        self.head.pad.clear()
-        self.body.pad.clear()
-        self.head.texts, self.body.texts, self.last_pick_pos = [], [], -1
-        self._pick_clear_pending = False
-        self.head.text_attrs, self.body.text_attrs = [], []
-        self.head.contexts, self.body.contexts = [], []
-        self.head.drawn, self.body.drawn = {}, {}
-        self.head.row_cnt = self.body.row_cnt = 0
-        self.head.rows_dropped = self.body.rows_dropped = 0
+        """Reset the current screen's content for a new pass.
+
+        The screen-level ``Screen.clear()`` is the supported spelling (it also
+        adopts the screen); this stays for 4.x compatibility and for the window
+        itself.  Only content is reset: the pick/scroll position describes the
+        user's place in the screen and survives a rebuild.  No surface wipe is
+        needed -- the pads erase and repaint themselves every frame.
+        """
+        self._view.reset()
 
     # --- prompt(): key intake, special keys, app passthrough, navigation ------
     #

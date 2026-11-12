@@ -7,8 +7,10 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Protocol
 
 from . import help as help_text
-from .header import HeaderLine
+from .context import Context
+from .header import HeaderLine, Span
 from .spinner import OptionSpinner
+from .window import _ViewState
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .window import ConsoleWindow
@@ -29,16 +31,96 @@ _HeadSpec = str | HeaderLine | Iterable[str | HeaderLine] | None
 HOME_ST = 0
 
 
-class Screen:
+class Screen(_ViewState):
+    """One screen: its content, its pick/scroll position, and its draw code.
+
+    A screen *is* its view state: it inherits the package-private ``_ViewState``,
+    so ``screen.pick_pos`` and ``screen.free_scroll`` are the live values the
+    window paints from and no copy happens when the stack activates it.
+
+    Content is written with ``add_header()``/``add_body()`` and friends.  The
+    supported loop is::
+
+        screen.clear()        # content reset for the new pass
+        screen.draw_screen()  # add_header()/add_body() only
+        win.render()          # paint + doupdate()
+        key = win.prompt(seconds=0.5)
+    """
+
     # Navigation control (class attributes - override in subclasses)
     come_from_whitelist = None  # None = can come from any screen, else list of screen numbers
     is_terminal = False         # True = cannot be pushed onto stack
     cannot_stack_me = False     # True = cannot have other screens pushed on top
 
     def __init__(self, app: _AppLike) -> None:
+        super().__init__()
         self.app = app  # Reference to main application instance
-        self.win = app.win
         self._cached_spinner: OptionSpinner | None = None  # Lazy-loaded spinner reference
+
+    @property
+    def win(self) -> ConsoleWindow:
+        """The window this screen draws on, resolved at call time.
+
+        Applications may construct their Screen objects before the
+        ConsoleWindow exists, so this cannot be cached in ``__init__``.
+        """
+        return self.app.win
+
+    # --- content writers ---------------------------------------------------
+    #
+    # These are the only supported writers.  They delegate to the window's
+    # private implementation with *this screen's* namespace, so they are
+    # correct even before the screen is adopted (the loop's clear() adopts it).
+
+    def add_header(self, text: str, attr: int | None = None, resume: bool = False,
+                   context: Context | None = None) -> None:
+        """Append one header row (or resume the current one, on the same row)."""
+        self.win._add(self.head, text, attr, resume, context, is_body=False)
+
+    def add_body(self, text: str, attr: int | None = None, resume: bool = False,
+                 context: Context | None = None) -> None:
+        """Append one body row (or resume the current one, on the same row)."""
+        self.win._add(self.body, text, attr, resume, context, is_body=True)
+
+    def add_fancy_header(self, line: str | HeaderLine, mode: str = 'Underline',
+                         search_pattern_attr: int | None = None,
+                         line_attr: int | None = None) -> None:
+        """Add a header line with legacy ``[x]``/``KEY:``/``/pattern`` markup."""
+        self.win._add_fancy_header(self.head, line, mode, search_pattern_attr,
+                                   line_attr)
+
+    def add_header_line(self, header_line: HeaderLine | Iterable[Span],
+                        mode: str = 'Underline',
+                        search_pattern_attr: int | None = None,
+                        line_attr: int | None = None) -> None:
+        """Render explicit header spans; see :meth:`add_fancy_header`."""
+        self.win._add_header_line(self.head, header_line, mode,
+                                  search_pattern_attr, line_attr)
+
+    def add_prompt_header(self, attr: int | None = None,
+                          align: str | None = None) -> bool:
+        """Draw the active in-place prompt as a header row; False if inactive."""
+        return self.win._add_prompt_header(self.head, attr, align)
+
+    def add_prompt_lines(self, attr: int | None = None,
+                         hint_attr: int | None = None) -> bool:
+        """Draw the active in-place prompt and hint as transient body rows."""
+        return self.win._add_prompt_lines(self.body, attr, hint_attr)
+
+    def clear(self) -> None:
+        """Start a new content pass on this screen.
+
+        This is the loop's first call, and its other job is to hand the screen
+        to the window (``_adopt_view``): the window cannot discover a Model A
+        screen on its own, and every later ``add_*()``/``render()`` in the pass
+        depends on the window already pointing at this screen.
+
+        Content is reset; the pick/scroll position, the pick mode and
+        ``free_scroll`` are not -- they describe where the user is in this
+        screen and must survive a rebuild.
+        """
+        self.win._adopt_view(self)
+        self.reset()
 
     def draw_screen(self) -> None:
         pass
@@ -144,17 +226,29 @@ class ScreenStack:
 
     def _activate(self, screen: int, prev_pos: int) -> None:
         if self.curr:
-            self.curr.pick_pos = self.win.pick_pos
-            self.curr.scroll_pos = self.win.scroll_pos
+            # The outgoing screen owns its pick/scroll state, so the frame only
+            # remembers the row the *parent* asked us to return to.
             self.curr.prev_pos = prev_pos
             self.stack.append(self.curr)
-        self.curr = SimpleNamespace(num=screen,
-                  name=self.screens[screen], pick_pos=-1,
-                                scroll_pos=-1, prev_pos=-1)
-        self.win.pick_pos = self.win.scroll_pos = 0
-        # Entering a screen starts a fresh pick/scroll pairing; drop any
-        # free-scroll state left over from the screen we came from.
-        self.win.free_scroll = False
+        self.curr = SimpleNamespace(num=screen, name=self.screens[screen],
+                                    prev_pos=-1)
+        self.win._adopt_view(self._view_for(screen))
+
+    def _view_for(self, screen: int) -> _ViewState:
+        """The view state for *screen*: its Screen, or the window fallback.
+
+        A ``ScreenStack`` built from bare numbers has no Screen objects, so
+        the window-owned fallback view carries the state instead.  It is reset
+        on activation to reproduce the old "entering a screen starts at the
+        top" behavior; a real Screen keeps its own position.
+        """
+        obj = self.screen_objects.get(screen) if self.screen_objects else None
+        if obj is not None:
+            return obj
+        view = self.win._fallback_view  # pylint: disable=protected-access
+        view.pick_pos = view.scroll_pos = 0
+        view.free_scroll = False
+        return view
 
     def get_curr_obj(self) -> Screen | None:
         if self.curr:
@@ -181,10 +275,10 @@ class ScreenStack:
                     # Previous screen rejected resuming (rare, but allowed)
                     return None
 
-        # Navigation approved - proceed
+        # Navigation approved - proceed: the restored screen already holds its
+        # own pick/scroll state, so activation is just a pointer swap.
         self.curr = self.stack.pop()
-        self.win.pick_pos = self.curr.pick_pos
-        self.win.scroll_pos = self.curr.scroll_pos
+        self.win._adopt_view(self._view_for(self.curr.num))
         return self.curr.prev_pos
 
     def is_curr(self, screens: int | str | list | tuple | set) -> bool:
@@ -265,32 +359,31 @@ class BasicHelpScreen(Screen):
     show_display_notes = False
 
     def draw_screen(self) -> None:
-        # Resolve the window at draw time: applications may construct their
-        # Screen objects before the ConsoleWindow exists (the sample app does),
-        # so the value captured by Screen.__init__ can still be None here.
-        win = self.app.win
-        win.set_pick_mode(False)
+        # The screen draws itself: pick mode is its own, and every writer below
+        # targets this screen's content, so no window handle is resolved here.
+        self.set_pick_mode(False)
         spinner = self.get_spinner()
         if spinner:
-            spinner.show_help_nav_keys(win)
-            spinner.show_help_body(win)
-        self.draw_notes(win)
+            spinner.show_help_nav_keys(self)
+            spinner.show_help_body(self)
+        self.draw_notes()
 
-    def draw_notes(self, win: ConsoleWindow | None = None) -> None:
+    def draw_notes(self) -> None:
         """Append the app's paragraphs and the display notes, dim and wrapped.
 
         A method rather than inline code so a subclass can add its own notes
         and still get the wrapping, the indent, and the ``A_DIM`` attribute
         from one place.
         """
-        target = win if win is not None else self.app.win
         paragraphs = list(self.extra_help_paragraphs())
         if self.show_display_notes:
-            paragraphs.append(help_text.glyph_paragraph(target))
-        width = max(getattr(target, 'cols', 80) - 8, 20)
+            # The window answers ``ascii_mode``; that is a terminal property,
+            # not a screen one.
+            paragraphs.append(help_text.glyph_paragraph(self.win))
+        width = max(getattr(self.win, 'cols', 80) - 8, 20)
         for paragraph in paragraphs:
             for line in textwrap.wrap(paragraph, width=width):
-                target.add_body(line, attr=curses.A_DIM)
+                self.add_body(line, attr=curses.A_DIM)
 
 
 class BasicTextScreen(Screen):
@@ -339,15 +432,14 @@ class BasicTextScreen(Screen):
         return list(head)
 
     def draw_screen(self) -> None:
-        win = self.app.win
-        win.set_pick_mode(False)
+        self.set_pick_mode(False)
         for head_item in self._heads:
             if isinstance(head_item, HeaderLine):
                 # Keep the declared span roles; add_header() takes plain text.
-                win.add_header_line(head_item)
+                self.add_header_line(head_item)
             else:
-                win.add_header(head_item)
+                self.add_header(head_item)
         for text, attr in self._lines:
             # No Context: these are plain, scrollable rows (the same shape
             # ViewScreen/CompareScreen produced before this helper existed).
-            win.add_body(text, attr=attr)
+            self.add_body(text, attr=attr)

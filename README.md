@@ -102,21 +102,34 @@ See [Running the Sample App (from source)](#running-the-sample-app-from-source) 
 
 ### The shape of every app
 
+A `Screen` owns its content and its pick/scroll position; the window owns the
+terminal, the pads and key routing.  The loop is four calls, and rebuilding the
+whole page every pass is the sanctioned style:
+
 ```python
-from console_window import ConsoleWindow, ConsoleWindowOpts
+from types import SimpleNamespace
+
+from console_window import ConsoleWindow, ConsoleWindowOpts, Screen
+
+
+class Pager(Screen):
+    def draw_screen(self) -> None:
+        self.add_header('hello - q or ESC to quit')
+        for i in range(100):
+            self.add_body(f'row {i}')
 
 
 def main() -> None:
     # ConsoleWindow.__init__ performs the curses setup (no curses.wrapper needed).
     # No row sizing is required; max_rows is only a safety ceiling.
     win = ConsoleWindow(opts=ConsoleWindowOpts(head_line=True))
+    app = SimpleNamespace(win=win)
+    screen = Pager(app)
     try:
         while True:
-            win.clear()
-            win.add_header('hello - q or ESC to quit')
-            for i in range(100):
-                win.add_body(f'row {i}')
-            win.render()
+            screen.clear()          # content reset for the new pass
+            screen.draw_screen()    # add_header()/add_body() only
+            win.render()            # pads repaint, doupdate() diffs
             key = win.prompt(seconds=0.5)   # key code, or None on timeout
             if key in (ord('q'), 27):
                 break
@@ -128,7 +141,12 @@ if __name__ == '__main__':
     main()
 ```
 
-For anything beyond a single list, subclass `Screen` and drive it with `ScreenStack` — that is what the sample app does, and it is the paradigm the library is designed around.
+`clear()` is also what hands the screen to the window, which is why it comes
+first.  The pick/scroll position, pick mode and free-scroll latch live on the
+screen and survive each pass, so a rebuild never loses the user's place.  For
+more than one screen, subclass `Screen` and drive the screens with
+`ScreenStack` — activation is a pointer swap, so returning to a screen restores
+its position with no copying in the application.
 
 ### Inline editing and key forwarding
 
@@ -156,7 +174,7 @@ win.status('Backup tag failed', level='error', timeout=5.0)
 
 The message appears on the next `render()`/`prompt()`; `status()` never renders by itself. Levels `'info'`, `'warn'` and `'error'` select an attribute from `ConsoleWindow.STATUS_LEVELS` (`info` dim, `warn` bold, `error` bold+reverse); an unknown level falls back to `'info'` instead of raising, and `attr=` overrides the level for that message only. `timeout=None` keeps the message until it is replaced or cleared; any number expires it lazily at draw time. `status('')` and `clear_status()` remove it, and `current_status` returns `(text, attr)`.
 
-The exact rendering rule is: the text starts at column 0 of `head.view_cnt` and is truncated to leave **one blank cell between it and the scroll indicator**.  If the window currently has no separator row, the text is still stored and `status()` returns `False` (the message is deferred, not lost); a later resize reveals it.
+The exact rendering rule is: the text starts at column 0 of the separator row and is truncated to leave **one blank cell between it and the scroll indicator**.  If the window currently has no separator row, the text is still stored and `status()` returns `False` (the message is deferred, not lost); a later resize reveals it.  With `head_line=False` there is no separator row at all, so `status()` also warns once per episode instead of painting over the first body row.
 
 ### In-place prompts
 
@@ -180,11 +198,11 @@ The display formats are fixed so applications do not have to reproduce them:
 * single-key modes `Y`/`y`: `f'{prompt}  [Press "{mode}" or ESC]'`, e.g.  `Really quit?  [Press "y" or ESC]`;
 * every other mode: `f'{prompt}: {buffer}{caret}{rest}'`, e.g. `Value: 5│`.
 
-`get_hint_string(width)` returns the hint (truncated when a width is given), and `get_choice_lines()` returns one row per choice, marking the currently resolved one: `⮞ alpha` versus `  beta`. Drawing is the application's choice: `add_prompt_header()` puts a screen-wide question in the header band, while `add_prompt_lines()` appends a bold prompt row and a dim hint row as `Context(genre='TRANSIENT', pickable=False)` from the application's own row loop. The window never learns which item the prompt belongs to.
+`get_hint_string(width)` returns the hint (truncated when a width is given), and `get_choice_lines()` returns one row per choice, marking the currently resolved one: `⮞ alpha` versus `  beta`. Drawing is the application's choice: `Screen.add_prompt_header()` puts a screen-wide question in the header band, while `Screen.add_prompt_lines()` appends a bold prompt row and a dim hint row as `Context(genre='TRANSIENT', pickable=False)` from the application's own row loop. The window never learns which item the prompt belongs to.
 
 ### Read-only text screens
 
-`BasicTextScreen` is the small `Screen` for preformatted, scrollable text. It resolves `app.win` at draw time, disables pick mode, adds each header before the body, and adds each line with `add_body()` and no `Context` (so normal navigation scrolls it). Content is normalized by `set_text()`, which is safe before or after the first draw:
+`BasicTextScreen` is the small `Screen` for preformatted, scrollable text. It resolves `app.win` at call time, disables pick mode, adds each header before the body, and adds each line with `add_body()` and no `Context` (so normal navigation scrolls it). Content is normalized by `set_text()`, which is safe before or after the first draw; the loop still calls `screen.clear()` before `draw_screen()`:
 
 ```python
 screen = BasicTextScreen(app, head='COMPARE',
@@ -292,6 +310,35 @@ The appearance layer is shared too. `Appearance.semantic_attr(role)` returns the
 `console-window` follows semantic versioning: patch releases fix behavior without changing the public API, minor releases add functionality, and major releases may make incompatible changes.
 
 Deprecated APIs remain supported **indefinitely**. A deprecation is a request to migrate, not a scheduled removal: deprecated functions and parameters keep working, and one is removed only when there is significant value in doing so (for example, the API is actively harmful or blocks a necessary redesign).  Deprecated paths emit a `DeprecationWarning` where practical.
+
+### 4.0.0 Breakages
+
+`4.0.0` moves content and the pick/scroll state from `ConsoleWindow` onto
+`Screen`, which removes one of the two drawing models.  Each break, with its
+replacement:
+
+- **`win.add_header()`, `win.add_body()`, `win.add_fancy_header()`,
+  `win.add_header_line()`, `win.add_prompt_header()` and `win.add_prompt_lines()`
+  are gone.** Call them on the current `Screen` instead (`self.add_body(...)`
+  inside `draw_screen()`).  The window keeps `head`/`body` as read-only views.
+- **`win.draw(y, x, text, ...)` is gone**, with `highlight_picked()` and the
+  deferred `drawn` span store.  There is one drawing model: append rows with
+  `add_*()`; a row's column placement is composed by the application with
+  `textwidth.string_width`/`ljust`/`truncate`.
+- **Content and pick/scroll state are per screen.** `win.pick_pos`,
+  `win.scroll_pos`, `win.pick_mode`, `win.free_scroll` and
+  `win.pick_range` read and write the *current* screen; `pick_range` is no
+  longer stored in `ConsoleWindowOpts`, so two screens can hold different
+  ranges.  `last_pick_pos` and `_pick_clear_pending` are gone with the
+  incremental painter.
+- **The loop is `screen.clear(); screen.draw_screen(); win.render();
+  win.prompt()`.** `Screen.clear()` is what makes the screen current, so it
+  must be the first call.  `ConsoleWindow.clear()` still works and resets the
+  current screen's content, but it no longer wipes the physical screen (the
+  pads repaint themselves every frame).
+- **`head_line=False` now has no side effects.** It no longer paints a rule,
+  a scroll indicator or a status line onto the body's first row, and in scroll
+  mode the pick tracks the top of the viewport (`pick_pos == scroll_pos`).
 
 ### 3.0.0 Breakages
 

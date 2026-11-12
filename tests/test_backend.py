@@ -3,6 +3,7 @@ import sys
 import warnings
 
 import pytest
+from support import screen_of
 
 import console_window.backend as backend_mod
 import console_window.window as window_mod
@@ -289,8 +290,11 @@ def test_singleton_stop_curses_suspends_and_start_curses_resumes():
     # The pre-2.0 stop_curses()/start_curses() pair must keep working: in
     # singleton mode it is a suspend/resume pair, not a one-way teardown.
     code = '''
+from types import SimpleNamespace
+
 from console_window.backend import HeadlessBackend
 from console_window.opts import ConsoleWindowOpts
+from console_window.screens import Screen
 from console_window.window import ConsoleWindow
 
 first_backend = HeadlessBackend()
@@ -298,7 +302,9 @@ first = ConsoleWindow(opts=ConsoleWindowOpts(body_rows=3, head_rows=2),
                       backend=first_backend, singleton=True)
 second = ConsoleWindow(opts=ConsoleWindowOpts(body_rows=3, head_rows=2),
                        backend=HeadlessBackend())
-first.add_body('kept across the suspend')
+_first_screen = Screen(SimpleNamespace(win=first))
+_first_screen.clear()
+_first_screen.add_body('kept across the suspend')
 old_screen = first.scr
 
 ConsoleWindow.stop_curses()   # the pre-2.0 unbound call: suspend
@@ -333,7 +339,7 @@ def test_per_instance_suspend_and_resume_curses():
     backend = HeadlessBackend()
     win = _make(backend)
     try:
-        win.add_body('kept across the suspend')
+        screen_of(win).add_body('kept across the suspend')
         win.suspend_curses()
         assert win.suspended is True
         assert win.scr is None
@@ -361,17 +367,17 @@ def test_clear_while_suspended_only_resets_the_content_model():
     backend = HeadlessBackend()
     win = _make(backend)
     try:
-        win.add_body('old row')
+        screen_of(win).add_body('old row')
         win.suspend_curses()
         win.clear()  # regression: raised AttributeError on self.scr
         assert win.body.texts == []
         assert win.scr is None
-        win.add_body('new row')
+        screen_of(win).add_body('new row')
         scr = win._start_curses()
         assert win.scr is scr
         assert win.body.texts == ['new row']
-        win.clear()  # the live screen is cleared again
-        assert scr.calls_named('clear')
+        win.clear()  # content-only: the pads repaint, the surface is not wiped
+        assert win.body.texts == []
     finally:
         win.stop_curses()
 
@@ -383,7 +389,7 @@ def test_legacy_instance_start_curses_reattaches_after_suspend():
     backend = HeadlessBackend()
     win = _make(backend)
     try:
-        win.add_body('kept across the dump')
+        screen_of(win).add_body('kept across the dump')
         win.suspend_curses()
         assert win.scr is None and win.suspended
 
@@ -394,8 +400,8 @@ def test_legacy_instance_start_curses_reattaches_after_suspend():
         assert win in ConsoleWindow.active_windows()
         assert win.body.texts == ['kept across the dump']
         win.clear()   # the call that crashed psistat after returning
-        assert scr.calls_named('clear')
-        win.add_body('after clear')
+        assert win.body.texts == []
+        screen_of(win).add_body('after clear')
     finally:
         win.stop_curses()
     assert win.scr is None
@@ -405,14 +411,19 @@ def test_singleton_legacy_instance_start_curses_resumes_shared_screen():
     # Same compatibility hook, but in the pre-2.0 singleton model, where
     # stop_curses() suspends the shared screen rather than tearing it down.
     code = '''
+from types import SimpleNamespace
+
 from console_window.backend import HeadlessBackend
 from console_window.opts import ConsoleWindowOpts
+from console_window.screens import Screen
 from console_window.window import ConsoleWindow
 
 backend = HeadlessBackend()
 win = ConsoleWindow(opts=ConsoleWindowOpts(body_rows=3, head_rows=2),
                     backend=backend, singleton=True)
-win.add_body('kept across the dump')
+_win_screen = Screen(SimpleNamespace(win=win))
+_win_screen.clear()
+_win_screen.add_body('kept across the dump')
 win.stop_curses()                 # pre-2.0 call: suspend
 assert win.scr is None and win.suspended
 
@@ -424,8 +435,8 @@ assert win.suspended is False
 assert win in ConsoleWindow.active_windows()
 assert win.body.texts == ['kept across the dump']
 win.clear()
-assert scr.calls_named('clear')
-win.add_body('after clear')
+assert win.body.texts == []
+_win_screen.add_body('after clear')
 
 ConsoleWindow.stop_all()          # permanent teardown
 assert win.scr is None and ConsoleWindow.static_scr is None

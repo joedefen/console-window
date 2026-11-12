@@ -10,6 +10,8 @@ import curses as cs
 import sys
 from types import SimpleNamespace
 
+from PrimeRows import PrimeRows
+
 from console_window import (
     BasicHelpScreen,
     ConsoleWindow,
@@ -19,7 +21,6 @@ from console_window import (
     Screen,
     ScreenStack,
 )
-from PrimeRows import PrimeRows
 
 MAIN_ST = 0
 HELP_ST = 1
@@ -43,24 +44,24 @@ def quit_app(app):
 
 class MainScreen(Screen):
     def draw_screen(self):
-        win = self.app.win
-        win.set_pick_mode(False)
+        self.set_pick_mode(False)
 
         line = HeaderLine()
         line.text('prime rows 100-200  ')
         line.bracket_key('q').text('uit  ')
         line.bracket_key('?').text(':help')
-        win.add_fancy_header(line, mode='Underline', line_attr=cs.A_DIM)
+        self.add_fancy_header(line, mode='Underline', line_attr=cs.A_DIM)
 
-        win.add_header(COLUMN_HEADER, attr=cs.A_BOLD)
+        self.add_header(COLUMN_HEADER, attr=cs.A_BOLD)
         for row in self.app.rows:
-            win.add_body(row_line(row))
+            self.add_body(row_line(row))
 
     def quit_ACTION(self):
         quit_app(self.app)
 
     def help_screen_ACTION(self):
-        self.app.stack.push(HELP_ST, self.app.win.pick_pos)
+        # The parent's own pick position: per-screen state, no window copy.
+        self.app.stack.push(HELP_ST, self.pick_pos)
 
 
 class HelpScreen(BasicHelpScreen):
@@ -109,14 +110,14 @@ class ScreenPagerApp:
     def main_loop(self):
         while True:
             screen = self.stack.get_curr_obj()
-            screen.draw_screen()
-            self.win.render()
+            screen.clear()          # content reset for the new pass
+            screen.draw_screen()    # add_header()/add_body() only
+            self.win.render()       # paints, doupdate() diffs
 
             key = self.win.prompt(seconds=0.5)
             if key:
                 self.handle_key(key)
             self.stack.perform_actions(self.spin)
-            self.win.clear()
 
 
 def main(backend=None, singleton=True):

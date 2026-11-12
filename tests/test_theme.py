@@ -100,6 +100,7 @@ def test_create_picker_screen_draws_swatches(color_recorder, monkeypatch):
     win, app = _picker_app('dark')
     screen = Theme.create_picker_screen(Screen)(app)
     try:
+        screen.clear()
         screen.draw_screen()
         assert win.pick_mode is False
         assert any('COLOR THEME' in line for line in win.head.texts)
@@ -115,6 +116,7 @@ def test_create_picker_screen_honors_the_apps_selected_theme(color_recorder, mon
     win, app = _picker_app('nord')
     screen = Theme.create_picker_screen(Screen)(app)
     try:
+        screen.clear()
         screen.draw_screen()
         assert Theme.get_current() == 'nord'
     finally:

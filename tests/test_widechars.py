@@ -1,7 +1,7 @@
 import curses
-from types import SimpleNamespace
 
 import pytest
+from support import screen_of
 
 import console_window.window as window_mod
 from console_window import textwidth as tw
@@ -75,22 +75,22 @@ def make_window(cols=10, body_cols=10):
     win = object.__new__(ConsoleWindow)
     win._backend = HeadlessBackend(cols, body_cols)
     win.opts = ConsoleWindowOpts()
-    win.pick_mode = False
+    win._view = window_mod._ViewState()
     win.cols = cols
     win.body_cols = body_cols
-    for name in ('head', 'body'):
-        pad = FakePad()
-        setattr(win, name, SimpleNamespace(
-            pad=pad, rows=50, cols=body_cols, row_cnt=0,
-            pad_rows=50, pad_cols=body_cols, drawn={},
-            texts=[], text_attrs=[], contexts=[]))
+    for content in (win.head, win.body):
+        content.pad = FakePad()
+        content.rows = 50
+        content.cols = body_cols
+        content.pad_rows = 50
+        content.pad_cols = body_cols
     return win
 
 # --- _add truncation --------------------------------------------------------
 
 def test_add_body_truncates_by_display_cells():
     win = make_window(cols=5, body_cols=10)
-    win.add_body(CJK * 5)  # 10 cells of content, only 5 columns available
+    screen_of(win).add_body(CJK * 5)  # 10 cells of content, only 5 columns available
 
     assert win.body.texts[0] == CJK * 2  # two wide chars (4 cells); a third won't fit
     assert tw.string_width(win.body.texts[0]) <= 5
@@ -98,7 +98,7 @@ def test_add_body_truncates_by_display_cells():
 
 def test_add_header_attr_run_counts_code_points():
     win = make_window(cols=5, body_cols=10)
-    win.add_header(CJK * 5, attr=curses.A_BOLD)
+    screen_of(win).add_header(CJK * 5, attr=curses.A_BOLD)
 
     _attr, count = win.head.text_attrs[0][0]
     assert count == len(win.head.texts[0])
@@ -109,38 +109,18 @@ def test_add_body_truncates_to_pad_width_not_terminal_width():
     # fresh line is stored no wider than the pad (was previously truncated to the
     # raw terminal width, self.cols == 10).
     win = make_window(cols=10, body_cols=8)
-    win.add_body('x' * 20)
+    screen_of(win).add_body('x' * 20)
     assert win.body.texts[0] == 'x' * 8
     assert tw.string_width(win.body.texts[0]) <= win.get_pad_width()
 
 
 def test_add_body_reserves_last_terminal_column():
     # get_pad_width() is cols-1 even when the pad is wider: the last terminal
-    # column is reserved, matching draw()/highlight_picked().
+    # column is reserved, matching the viewport painter.
     win = make_window(cols=10, body_cols=50)
-    win.add_body('x' * 20)
+    screen_of(win).add_body('x' * 20)
     assert win.body.texts[0] == 'x' * 9
     assert tw.string_width(win.body.texts[0]) == win.get_pad_width()
-
-# --- draw padding -----------------------------------------------------------
-
-def test_draw_pads_to_cells():
-    win = make_window(cols=8, body_cols=8)
-    win.draw(0, 0, CJK, width=6)
-
-    # draw() now records the span; the viewport painter replays it (with the
-    # same display-cell padding) on the frame where row 0 is visible.
-    x, text, _attr = win.body.drawn[0][-1]
-    assert x == 0
-    assert tw.string_width(text) == 6
-
-
-def test_draw_leftpad_pads_on_the_left():
-    win = make_window(cols=8, body_cols=8)
-    win.draw(0, 0, CJK, width=4, leftpad=True)
-
-    text = win.body.drawn[0][-1][1]
-    assert text == '  ' + CJK
 
 # --- pick-range highlighting ------------------------------------------------
 

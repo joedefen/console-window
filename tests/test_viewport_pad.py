@@ -9,6 +9,7 @@ even when the row was written long before it scrolled into view.
 import curses
 
 import pytest
+from support import screen_of
 
 import console_window.window as window_mod
 from console_window.backend import HeadlessBackend
@@ -61,7 +62,7 @@ def test_render_paints_the_visible_page_into_pad_row_zero():
     win, _backend = _window(rows=8, cols=40, head_line=False)
     try:
         for i in range(100):
-            win.add_body(f'row {i:03d}')
+            screen_of(win).add_body(f'row {i:03d}')
         win.scroll_pos = 50
         win.render()
 
@@ -69,36 +70,6 @@ def test_render_paints_the_visible_page_into_pad_row_zero():
         assert 'row 050' in rows[0]
         assert 'row 057' in rows[7]
         assert not any('row 000' in text for text in rows.values())
-    finally:
-        win.stop_curses()
-
-
-def test_draw_span_is_replayed_with_its_attribute():
-    win, _backend = _window(rows=6, cols=30, head_line=False)
-    try:
-        win.draw(1, 2, 'X', curses.A_BOLD)
-        win.render()
-
-        assert any(y == 1 and x == 2 and text == 'X' and attr == curses.A_BOLD
-                   for y, x, text, attr in _addstrs(win.body.pad))
-    finally:
-        win.stop_curses()
-
-
-def test_draw_on_an_offscreen_row_survives_until_it_is_scrolled_to():
-    win, _backend = _window(rows=6, cols=30, head_line=False)
-    try:
-        for i in range(40):
-            win.add_body(f'r{i}')
-        win.draw(30, 5, 'ZZ', curses.A_BOLD)
-
-        win.render()
-        assert not any(text == 'ZZ' for _y, _x, text, _a in _addstrs(win.body.pad))
-
-        win.scroll_pos = 30
-        win.render()
-        assert any(y == 0 and x == 5 and text == 'ZZ' and attr == curses.A_BOLD
-                   for y, x, text, attr in _addstrs(win.body.pad))
     finally:
         win.stop_curses()
 
@@ -125,7 +96,7 @@ def test_pick_highlight_follows_the_viewport_without_moving_the_pick():
     win, _backend = _window(rows=6, cols=30, head_line=False, pick_mode=True)
     try:
         for i in range(40):
-            win.add_body(f'row {i}')
+            screen_of(win).add_body(f'row {i}')
         win.pick_pos = 5
 
         win.render()
@@ -140,13 +111,15 @@ def test_pick_highlight_follows_the_viewport_without_moving_the_pick():
         win.stop_curses()
 
 
-def test_clear_drops_recorded_draw_spans():
+def test_clear_resets_content_but_keeps_the_scroll_position():
     win, _backend = _window(rows=6, cols=30, head_line=False)
     try:
-        win.draw(0, 0, 'X')
-        assert win.body.drawn
+        for i in range(10):
+            screen_of(win).add_body(f'row {i}')
+        win.scroll_pos = 3
         win.clear()
-        assert win.body.drawn == {}
+        assert win.body.texts == []
         assert win.body.row_cnt == 0
+        assert win.scroll_pos == 3
     finally:
         win.stop_curses()

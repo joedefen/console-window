@@ -2,6 +2,7 @@ import curses
 import logging
 
 import pytest
+from support import screen_of
 
 import console_window.signals as signals
 import console_window.window as window_mod
@@ -172,7 +173,7 @@ def test_prompt_requeues_a_handled_key_seen_during_ctrl_c(monkeypatch, make):
 def test_j_and_k_move_the_pick_one_row(make):
     win, backend = make(pick_mode=True, body_rows=10, head_rows=2)
     for i in range(5):
-        win.add_body(f'row {i}')
+        screen_of(win).add_body(f'row {i}')
     win.fix_positions()
     assert win.pick_pos == 0
 
@@ -188,7 +189,7 @@ def test_j_and_k_move_the_pick_one_row(make):
 def test_navigation_scrolls_the_body_without_pick_mode(make):
     win, backend = make(backend=HeadlessBackend(rows=10, cols=80), body_rows=50, head_rows=2)
     for i in range(10):
-        win.add_body(f'row {i}')
+        screen_of(win).add_body(f'row {i}')
     win.fix_positions()
     backend.queue_keys(ord('j'))
     win.prompt()
@@ -198,7 +199,7 @@ def test_navigation_scrolls_the_body_without_pick_mode(make):
 def test_navigation_key_clears_the_demo_indicator(make):
     win, backend = make(demo_mode=True, body_rows=10, head_rows=2)
     for i in range(5):
-        win.add_body(f'r{i}')
+        screen_of(win).add_body(f'r{i}')
     win.last_demo_key = ' x '
     backend.queue_keys(ord('j'))
     win.prompt()
@@ -210,7 +211,7 @@ def test_prompt_navigation_key_families_all_drive_the_engine(make):
     # key is consumed and the scroll position stays inside its legal range.
     win, backend = make(backend=HeadlessBackend(rows=12, cols=80), body_rows=60, head_rows=2)
     for i in range(40):
-        win.add_body(f'row {i}')
+        screen_of(win).add_body(f'row {i}')
     win.fix_positions()
 
     keys = [
@@ -231,7 +232,7 @@ def test_prompt_navigation_key_families_all_drive_the_engine(make):
 def test_prompt_renders_after_navigation_when_return_if_pos_change_is_false(make):
     win, backend = make(return_if_pos_change=False, body_rows=10, head_rows=2)
     for i in range(5):
-        win.add_body(f'r{i}')
+        screen_of(win).add_body(f'r{i}')
     backend.queue_keys(ord('j'))
     assert win.prompt() is None
     # render() ran, so the pads were pushed to the screen.
@@ -242,9 +243,9 @@ def test_prompt_renders_after_navigation_when_return_if_pos_change_is_false(make
 
 def _add_decor_body(win, pickable=20, decor=200):
     for i in range(pickable):
-        win.add_body(f'item {i}', context=Context(genre='item'))
+        screen_of(win).add_body(f'item {i}', context=Context(genre='item'))
     for i in range(decor):
-        win.add_body(f'filler {i}', context=Context(genre='DECOR'))
+        screen_of(win).add_body(f'filler {i}', context=Context(genre='DECOR'))
 
 
 def test_trailing_decor_is_reachable_by_scrolling_down(make):
@@ -315,9 +316,9 @@ def test_leading_decor_is_reachable_by_scrolling_up(make):
     win, backend = make(backend=HeadlessBackend(rows=24, cols=80),
                         pick_mode=True, body_rows=400, head_rows=2)
     for i in range(200):
-        win.add_body(f'filler {i}', context=Context(genre='DECOR'))
+        screen_of(win).add_body(f'filler {i}', context=Context(genre='DECOR'))
     for i in range(20):
-        win.add_body(f'item {i}', context=Context(genre='item'))
+        screen_of(win).add_body(f'item {i}', context=Context(genre='item'))
     win.fix_positions()
     # The pick starts on the first pickable row; scrolling up reveals the DECOR
     # rows above it (which the old clamp already allowed), and scrolling back
@@ -350,12 +351,11 @@ def test_prompt_min_size_abort_returns_esc_when_handled(make):
 
 def test_render_draws_gutter_separator_and_indicator(make):
     win, backend = make(pick_mode=True, body_rows=10, head_rows=2, pick_size=2)
-    win.add_header('HDR')
+    screen_of(win).add_header('HDR')
     for i in range(5):
-        win.add_body(f'body {i}')
+        screen_of(win).add_body(f'body {i}')
     win.pick_mode = True
     win.pick_pos = 2
-    win._pick_clear_pending = True  # force the "clear every row" path
 
     win.render(redraw=True)
 
@@ -363,7 +363,6 @@ def test_render_draws_gutter_separator_and_indicator(make):
     assert backend.screen.calls_named('hline')  # header separator
     assert win.body.pad.calls_named('noutrefresh')
     assert win.head.pad.calls_named('noutrefresh')
-    assert win.last_pick_pos == 2
 
 
 def test_scroll_indicator_span_single_cell_branch(make):
@@ -374,7 +373,7 @@ def test_scroll_indicator_span_single_cell_branch(make):
 def test_scroll_indicator_span_proportional_branch(make):
     win, _backend = make(single_cell_scroll_indicator=False)
     win.scroll_view_size = 20
-    win.body.row_cnt = 40
+    win.body.texts = ['x'] * 40  # row_cnt is len(texts)
     win.cols = 80
     bot, cnt = win._scroll_indicator_span(40)
     assert bot >= 1
@@ -415,126 +414,59 @@ def test_render_gives_up_after_the_retry_budget(monkeypatch, caplog, make):
     assert 'pick_mode=False' in caplog.text
 
 
-# --- draw(): the direct row writer ------------------------------------------
+# --- the picked-row painter (stateless: pick styling follows the paint) -----
 
-def test_draw_writes_a_row_and_tracks_row_cnt(make):
-    win, _backend = make(body_rows=10, body_cols=40)
-    win.draw(2, 1, 'hello')
-    assert win.body.row_cnt == 3
-    assert win.body.texts[2] == ' hello'
-    # Deferred painting: the span is recorded now and replayed by render().
-    assert win.body.drawn[2] == [(1, 'hello', curses.A_NORMAL)]
-    win.render()
-    assert win.body.pad.calls_named('addstr')
-
-
-def test_draw_out_of_bounds_is_a_no_op(make):
-    # Only the row ceiling (max_rows) is an overflow; negative rows and columns
-    # outside the pad are simply not painted.  _add() owns the overflow warning,
-    # and draw() routes past-the-ceiling rows through the same counter.
-    win, _backend = make(max_rows=10, body_cols=40)
-    for y, x in ((-1, 0), (0, -1), (0, 999)):
-        win.draw(y, x, 'x')
-    assert win.body.row_cnt == 0
-    assert win.body.texts == []
-    assert win.rows_dropped == 0
-
-
-def test_draw_header_flag_targets_the_head_pad(make):
-    win, _backend = make(head_rows=5)
-    win.draw(0, 0, 'HDR', header=True)
-    assert win.head.row_cnt == 1
-    win.render()
-    assert win.head.pad.calls_named('addstr')
-
-
-def test_draw_width_and_leftpad_use_display_cells(make):
-    win, _backend = make(body_rows=10, body_cols=40)
-    win.draw(0, 0, 'ab', width=5, leftpad=True)
-    assert win.body.texts[0] == '   ab'
-
-
-def test_draw_handles_wide_characters(make):
-    win, _backend = make(body_rows=10, body_cols=40)
-    win.draw(0, 0, '漢字')
-    assert win.body.texts[0] == '漢字'
-
-
-# --- highlight_picked() and the attribute run painter -----------------------
-
-def test_highlight_picked_clears_and_repaints_with_pick_size(make):
-    win, _backend = make(pick_mode=True, pick_size=2, body_rows=10)
-    for i in range(6):
-        win.add_body(f'row {i}')
-    win.pick_mode = True
-    win.pick_size = 2
-    win.pick_pos = 2
-    win._pick_clear_pending = True
-    win.highlight_picked()
-    assert win.body.pad.calls_named('addstr')
-    assert win.last_pick_pos == 2
-    assert win._pick_clear_pending is False
-
-
-def test_pick_range_repaints_when_position_is_unchanged(make):
-    # set_pick_range() must repaint the picked row even when it did not move:
-    # the full clear removes the old highlight, so treating "same position" as
-    # "nothing to do" would leave the row unhighlighted.
-    win, _backend = make(pick_mode=True, pick_size=1, body_rows=10)
-    win.add_body('row 0')
-    win.add_body('row 1')
-    win.pick_pos = 1
-    win.last_pick_pos = 1
-    win.set_pick_range(0, 2)
-    assert win._pick_clear_pending is True
-    win.highlight_picked()
-    assert win._pick_clear_pending is False
-    picked = [args for _name, args, _kw in win.body.pad.calls_named('addstr')
-              if args[0] == 1]
-    assert picked
-    assert any(args[3] & curses.A_REVERSE for args in picked)
-
-
-def test_set_pick_mode_requests_a_full_clear(make):
+def test_set_pick_mode_updates_the_current_view(make):
     win, _backend = make()
     win.set_pick_mode(True, 2)
-    assert win._pick_clear_pending is True
+    assert win.pick_mode is True
+    assert win.pick_size == 2
 
 
-def test_draw_picked_rows_plain_line_with_range(make):
+def test_set_pick_range_is_per_screen(make):
+    win, _backend = make()
+    screen_of(win).set_pick_range(0, 2)
+    assert win.pick_range == [0, 2]
+    # Not the window options: two screens can hold different ranges.
+    assert win.opts.pick_range is None
+
+
+def test_paint_row_plain_line_with_range(make):
     win, _backend = make(pick_mode=True, pick_range=[0, 2], body_rows=10)
     for i in range(3):
-        win.add_body(f'ab{i}')
+        screen_of(win).add_body(f'ab{i}')
     win.pick_mode = True
     win.body.text_attrs = []  # force the no-run-length "plain line" painter
-    win._draw_picked_rows([0])
+    win._paint_row(win.body.pad, 0, 0, picked=True)
     assert win.body.pad.calls_named('addstr')
 
 
-def test_draw_picked_rows_plain_line_without_range(make):
+def test_paint_row_plain_line_without_range(make):
     win, _backend = make(pick_mode=True, pick_range=None, body_rows=10)
     for i in range(3):
-        win.add_body(f'ab{i}')
+        screen_of(win).add_body(f'ab{i}')
     win.pick_mode = True
     win.body.text_attrs = []
-    win._draw_picked_rows([0])
+    win._paint_row(win.body.pad, 0, 0, picked=True)
     assert win.body.pad.calls_named('addstr')
 
 
-def test_draw_picked_rows_applies_mod_pick(make):
+def test_paint_row_applies_mod_pick(make):
     win, _backend = make(pick_mode=True, mod_pick=str.upper, body_rows=10)
     for i in range(3):
-        win.add_body(f'ab{i}')
+        screen_of(win).add_body(f'ab{i}')
     win.pick_mode = True
-    win._draw_picked_rows([0])
+    win._paint_row(win.body.pad, 0, 0, picked=True)
     assert win.body.pad.calls_named('addstr')
+    texts = [args[2] for _name, args, _kw in win.body.pad.calls_named('addstr')]
+    assert any('AB0' in (text or '') for text in texts)
 
 
-def test_draw_attr_runs_split_around_the_pick_range(make):
+def test_paint_row_attr_runs_split_around_the_pick_range(make):
     win, _backend = make(pick_mode=True, pick_range=[3, 6], body_rows=10)
-    win.add_body('abcdefghij')  # one run-length-coded row
+    screen_of(win).add_body('abcdefghij')  # one run-length-coded row
     win.pick_mode = True
-    win._draw_picked_rows([0])
+    win._paint_row(win.body.pad, 0, 0, picked=True)
     assert win.body.pad.calls_named('addstr')
 
 

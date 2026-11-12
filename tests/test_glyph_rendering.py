@@ -1,5 +1,7 @@
 """The ASCII-mode invariant: every cell the library paints is plain ASCII."""
 
+from support import screen_of
+
 from console_window import ConsoleWindow, ConsoleWindowOpts, InlineConfirmation
 from console_window.backend import HeadlessBackend
 from console_window.glyphs import set_ascii
@@ -26,8 +28,8 @@ def _painted_text(win):
 def test_rows_are_ascii_in_ascii_mode():
     win = _window(ascii=True)
     try:
-        win.add_header('header \u2500 with \u2502 art')
-        win.add_body('body \u2b9e and \u2192')
+        screen_of(win).add_header('header \u2500 with \u2502 art')
+        screen_of(win).add_body('body \u2b9e and \u2192')
         rows = win.head.texts + win.body.texts
         assert rows
         assert all(row.isascii() for row in rows)
@@ -38,7 +40,7 @@ def test_rows_are_ascii_in_ascii_mode():
 def test_rows_keep_their_unicode_in_unicode_mode():
     win = _window(ascii=False)
     try:
-        win.add_body('body \u2b9e and \u2192')
+        screen_of(win).add_body('body \u2b9e and \u2192')
         assert any('\u2b9e' in row for row in win.body.texts)
     finally:
         win.stop_curses()
@@ -47,17 +49,17 @@ def test_rows_keep_their_unicode_in_unicode_mode():
 def test_content_survives_both_modes():
     win = _window(ascii=True)
     try:
-        win.add_body('Gr\u00fc\u00dfe aus K\u00f6ln')
+        screen_of(win).add_body('Gr\u00fc\u00dfe aus K\u00f6ln')
         assert win.body.texts == ['Gr\u00fc\u00dfe aus K\u00f6ln']
     finally:
         win.stop_curses()
 
 
-def test_drawn_text_is_transliterated_before_it_is_measured():
+def test_resumed_segments_are_transliterated_before_they_are_measured():
     win = _window(ascii=True)
     try:
-        win.add_body('x' * 70)
-        win.draw(0, 0, '\u2b9e tail', width=10)
+        screen_of(win).add_body('x' * 70)
+        screen_of(win).add_body('\u2b9e tail', resume=True)
         assert win.body.texts[0].isascii()
     finally:
         win.stop_curses()

@@ -267,20 +267,21 @@ differ in how much of the stack/spinner/help machinery they take.
 - If a Model A app wants navigation keys, it takes on the help obligation and
   becomes Model B. Not advertising nav keys is what lets the smallest apps omit
   help without pretending the help screen is optional everywhere.
-- Content drawing belongs to `Screen`: `draw()`, `add_header()`, `add_body()`,
-  `add_fancy_header()` and `add_header_line()` are Screen API, not
-  `ConsoleWindow` API. `ConsoleWindow` keeps terminal/input/chrome concerns
-  (`clear()`, `render()`, `prompt()`, `status()`, `flash()`, dialogs).
-- Within one screen's draw pass, use either `draw()` or
-  `add_header()`/`add_body()` (and the fancy/token header variants), never both.
-  They are alternative placement models: absolute row/column drawing versus
-  flow-ordered rows. Mixing them makes overflow, scrolling and paint order
-  ambiguous. The rule is the same for Model A and Model B.
-- Enforcement of the no-mixing rule is still a choice (documentation, warning,
-  or assertion); the rule itself is not optional.
-- Moving the drawing methods from `ConsoleWindow` to `Screen` is a deliberate
-  one-time break. The project maintains all consumers and most already use
-  `Screen`, so a compatibility shim is optional; if one exists, it is temporary.
+- Content drawing belongs to `Screen`: `add_header()`, `add_body()`,
+  `add_fancy_header()`, `add_header_line()`, `add_prompt_header()` and
+  `add_prompt_lines()` are Screen API, not `ConsoleWindow` API.
+  `ConsoleWindow` keeps terminal/input/chrome concerns (`clear()`, `render()`,
+  `prompt()`, `status()`, `flash()`, dialogs).
+- **Amended by the Screen overhaul (4.0.0): `draw()` is deleted.** There is one
+  drawing model — flow-ordered `add_*()` rows; column placement is composed by
+  the application with `textwidth`. The old no-mixing rule is therefore moot and
+  is replaced by "add_* only".
+- The loop is four explicit calls: `screen.clear()`, `screen.draw_screen()`,
+  `win.render()`, `win.prompt()`. `clear()` both resets content and makes the
+  screen current, so it comes first.
+- Moving the drawing methods from `ConsoleWindow` to `Screen` was a deliberate
+  one-time break, shipped as 4.0.0 with no compatibility shim: every consumer is
+  in this project.
 - Sample-app mapping: the sample set should demonstrate exactly these two
   models. A Screen-only pager is Model A; the spinner pager is Model B. The
   intermediate stack-plus-hand-written-help pager is not a durable third sample.
@@ -349,13 +350,14 @@ the help screen pops to the parent; `quit` raises `SystemExit` through the
 - Model A draws through a bare `Screen` with no stack or spinner and exits
   normally.
 - Model B supplies its help screen without a hand-written help body.
-- Once enforcement is chosen, a draw pass that mixes `draw()` with
-  `add_header()`/`add_body()` trips the no-mixing policy.
+- ESC on the help screen restores the parent's pick mode and scroll position
+  (the per-screen state payoff of the Screen overhaul).
 
 ### O8. Nothing enforces the loop
 
 For Model B, decision 10 makes the objects mandatory, but the paradigm is also
-a five-call loop: `draw_screen()`, `render()`, `prompt()`, `handle_key()` and
+a four-call loop (amended by the Screen overhaul): `screen.clear()`,
+`draw_screen()`, `render()` and `prompt()`; plus `handle_key()` and
 `perform_actions()` ([`SampleApp.py:264`](../SampleApp.py:264)). An app can build
 the stack and the spinner correctly and still never call the dispatcher, and
 nothing complains — which is the same "apps decide too much" failure with a

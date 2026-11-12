@@ -1,6 +1,7 @@
 import curses
 
 import pytest
+from support import screen_of
 
 from console_window import HeaderLine, Span
 from console_window.backend import HeadlessBackend
@@ -123,7 +124,7 @@ def _make_window():
 def test_add_header_line_renders_explicit_spans():
     win = _make_window()
     try:
-        win.add_header_line(HeaderLine().label('T').text(' ').bracket_key('v'),
+        screen_of(win).add_header_line(HeaderLine().label('T').text(' ').bracket_key('v'),
                             mode='Underline')
         assert win.head.texts[0] == 'T [v]'
         attrs = [attr for attr, _count in win.head.text_attrs[0]]
@@ -136,7 +137,7 @@ def test_add_header_line_renders_explicit_spans():
 def test_add_header_line_never_highlights_plain_data():
     win = _make_window()
     try:
-        win.add_header_line(HeaderLine().text('/etc/passwd'), mode='Underline')
+        screen_of(win).add_header_line(HeaderLine().text('/etc/passwd'), mode='Underline')
         assert win.head.texts[0] == '/etc/passwd'
         # No SEARCH (bold+reverse) run: the data was not misread as a pattern.
         search_attr = curses.A_BOLD | curses.A_REVERSE
@@ -148,7 +149,7 @@ def test_add_header_line_never_highlights_plain_data():
 def test_add_fancy_header_string_form_still_parses():
     win = _make_window()
     try:
-        win.add_fancy_header('[v]iew', mode='Underline')
+        screen_of(win).add_fancy_header('[v]iew', mode='Underline')
         assert win.head.texts[0] == 'view'
         attrs = [attr for attr, _count in win.head.text_attrs[0]]
         assert KEY_ATTR in attrs
@@ -159,7 +160,7 @@ def test_add_fancy_header_string_form_still_parses():
 def test_add_fancy_header_off_adds_raw_line():
     win = _make_window()
     try:
-        win.add_fancy_header('[v]iew', mode='Off')
+        screen_of(win).add_fancy_header('[v]iew', mode='Off')
         assert win.head.texts[0] == '[v]iew'  # no markup processing
     finally:
         win.stop_curses()
@@ -168,7 +169,7 @@ def test_add_fancy_header_off_adds_raw_line():
 def test_add_fancy_header_headerline_strips_bracket_delimiters():
     win = _make_window()
     try:
-        win.add_fancy_header(
+        screen_of(win).add_fancy_header(
             HeaderLine().text(' ').bracket_key('v').text('iew=compact'),
             mode='Underline',
         )
@@ -182,7 +183,7 @@ def test_add_fancy_header_headerline_strips_bracket_delimiters():
 def test_add_fancy_header_headerline_off_keeps_bracket_delimiters():
     win = _make_window()
     try:
-        win.add_fancy_header(
+        screen_of(win).add_fancy_header(
             HeaderLine().text(' ').bracket_key('v').text('iew=compact'),
             mode='Off',
         )
@@ -196,7 +197,7 @@ def test_add_fancy_header_headerline_preserves_explicit_roles():
     # not re-guess roles from the rendered text (lowercase '?:' stays a key).
     win = _make_window()
     try:
-        win.add_fancy_header(
+        screen_of(win).add_fancy_header(
             HeaderLine().text(' ').key('?').text(':help'),
             mode='Underline',
         )
@@ -212,7 +213,7 @@ def test_add_fancy_header_line_attr_dims_every_run():
     # its underlined keys and its explicitly styled search field.
     win = _make_window()
     try:
-        win.add_fancy_header('[v]iew /pat', mode='Underline',
+        screen_of(win).add_fancy_header('[v]iew /pat', mode='Underline',
                              search_pattern_attr=curses.A_BOLD,
                              line_attr=curses.A_DIM)
         assert win.head.texts[0] == 'view /pat'
@@ -229,7 +230,7 @@ def test_add_fancy_header_line_attr_applies_in_off_mode():
     # applies (otherwise a caller could not dim it at all).
     win = _make_window()
     try:
-        win.add_fancy_header('[v]iew', mode='Off', line_attr=curses.A_DIM)
+        screen_of(win).add_fancy_header('[v]iew', mode='Off', line_attr=curses.A_DIM)
         assert win.head.texts[0] == '[v]iew'
         assert all(attr & curses.A_DIM
                    for attr, _count in win.head.text_attrs[0])
@@ -240,7 +241,7 @@ def test_add_fancy_header_line_attr_applies_in_off_mode():
 def test_add_header_line_line_attr_dims_plain_spans():
     win = _make_window()
     try:
-        win.add_header_line(HeaderLine().text('plain').label('T'),
+        screen_of(win).add_header_line(HeaderLine().text('plain').label('T'),
                             mode='Underline', line_attr=curses.A_DIM)
         attrs = [attr for attr, _count in win.head.text_attrs[0]]
         assert curses.A_DIM in attrs             # the PLAIN run
@@ -255,7 +256,7 @@ def test_string_reparse_drops_keys_the_legacy_grammar_cannot_spell():
     # neither, which is why the sample spells those keys as '[l]'/'[?]'.
     win = _make_window()
     try:
-        win.add_fancy_header(' l:alrtDemo ?:help', mode='Underline')
+        screen_of(win).add_fancy_header(' l:alrtDemo ?:help', mode='Underline')
         assert win.head.texts[0] == ' l:alrtDemo ?:help'
         attrs = [attr for attr, _count in win.head.text_attrs[0]]
         assert KEY_ATTR not in attrs
@@ -278,8 +279,8 @@ def test_token_and_string_paths_converge_for_legacy_spelled_keys():
     as_tokens = _make_window()
     as_string = _make_window()
     try:
-        as_tokens.add_fancy_header(line, mode='Underline')
-        as_string.add_fancy_header(str(line), mode='Underline')
+        screen_of(as_tokens).add_fancy_header(line, mode='Underline')
+        screen_of(as_string).add_fancy_header(str(line), mode='Underline')
         assert as_string.head.texts[0] == as_tokens.head.texts[0]
         # Runs may differ in grouping ('iew=full ' vs 'iew=full' + ' '), so
         # compare the per-cell attributes, which is what the pad paints.
