@@ -1,6 +1,6 @@
 # Single source of truth for the package version: pyproject.toml declares
 # ``dynamic = ["version"]``, so flit reads this value instead of duplicating it.
-__version__ = "4.0.0"
+__version__ = "3.0.0"
 
 from ._appearance import (
     MONO_ROLES,

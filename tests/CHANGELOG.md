@@ -6,6 +6,20 @@ This project follows [Semantic Versioning](https://semver.org/).
 ## [3.0.0]
 
 ### Changed
+- **Breaking:** content and the pick/scroll state moved from `ConsoleWindow`
+  onto `Screen`, and `draw()` is deleted, leaving one drawing model.  The
+  `win.add_header()`, `win.add_body()`, `win.add_fancy_header()`,
+  `win.add_header_line()`, `win.add_prompt_header()` and
+  `win.add_prompt_lines()` writers are `Screen` methods now, called inside
+  `draw_screen()`; the loop is `screen.clear(); screen.draw_screen();
+  win.render(); win.prompt()`, where `clear()` both resets content and makes the
+  screen current.  `win.pick_pos`/`scroll_pos`/`pick_mode`/`free_scroll`/
+  `pick_range` read and write the current screen, so two screens keep
+  independent positions, and `pick_range` left `ConsoleWindowOpts`.
+  `head_line=False` no longer paints a rule, a scroll indicator or status text
+  onto the body's first row, and in scroll mode the pick tracks the top of the
+  viewport.  The README's single "3.0.0 Breakages" section lists each break with
+  its replacement.
 - **Breaking:** the appearance layer's public name is now `Appearance`
   (`console_window.Appearance`), capitalized to match the other package-root
   names (`Theme`, `Glyphs`, `Context`, ...). Its implementation module is now

@@ -1,6 +1,6 @@
 # Screen Overhaul: Plan, Decisions, Open Issues
 
-Status: **implemented** (4.0.0). Phases 0-6 are in the tree; the two app ports that
+Status: **implemented** (3.0.0). Phases 0-6 are in the tree; the two app ports that
 live outside this repository (nanny, psistat) remain, see "Implementation notes".
 This was the predecessor to the remaining items in
 [`HELP-SCOPING-PLAN.md`](HELP-SCOPING-PLAN.md) because it changes the signatures those
@@ -213,8 +213,11 @@ so the stack is built after the window, as today.
   apps legitimately assign them mid-frame (nanny selects a confirm row that way).
 - `win.add_*` writers are removed with no deprecation shim; every consumer is in this
   repo.
-- The version notes in [`README.md`](../README.md:290) gate "upward compatible across 3.x",
-  so this is a **4.0.0** with a "4.0.0 Breakages" section beside the 3.0.0 one.
+- This ships as **3.0.0**, not a 4.0.0: only the 2.x line has been released, so the
+  break belongs to the same 3.0.0 that already drops `OptionSpinner.add()` and renames
+  `appearance`.  The "upward compatible across 3.x" promise in
+  [`README.md`](../README.md:345) starts at this release, which is why the README has a
+  single "3.0.0 Breakages" section covering both the appearance and Screen changes.
 
 ### D13. App ports
 

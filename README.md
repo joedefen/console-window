@@ -311,11 +311,11 @@ The appearance layer is shared too. `Appearance.semantic_attr(role)` returns the
 
 Deprecated APIs remain supported **indefinitely**. A deprecation is a request to migrate, not a scheduled removal: deprecated functions and parameters keep working, and one is removed only when there is significant value in doing so (for example, the API is actively harmful or blocks a necessary redesign).  Deprecated paths emit a `DeprecationWarning` where practical.
 
-### 4.0.0 Breakages
+### 3.0.0 Breakages
 
-`4.0.0` moves content and the pick/scroll state from `ConsoleWindow` onto
-`Screen`, which removes one of the two drawing models.  Each break, with its
-replacement:
+`3.0.0` is the first release after the 2.x line, so every deliberate break from 2.x is collected here, each with its replacement.  Later 3.x releases are intended to remain upward compatible with this one.
+
+**The Screen owns content.** Content and the pick/scroll state moved from `ConsoleWindow` onto `Screen`, which removes one of the two drawing models:
 
 - **`win.add_header()`, `win.add_body()`, `win.add_fancy_header()`,
   `win.add_header_line()`, `win.add_prompt_header()` and `win.add_prompt_lines()`
@@ -340,9 +340,7 @@ replacement:
   a scroll indicator or a status line onto the body's first row, and in scroll
   mode the pick tracks the top of the viewport (`pick_pos == scroll_pos`).
 
-### 3.0.0 Breakages
-
-`3.0.0` opens the 3.x line, and every later 3.x release is intended to remain upward compatible with it. The deliberate breaks from 2.x are collected here, each with its replacement:
+**Appearance and themes.**
 
 - **`appearance` is now `Appearance`.** This matches the rest of the package root (`Theme`, `Glyphs`, `Context`, …).
 - **`--no-color` is gone.** Select the real `mono` theme instead (`--theme mono`), or rely on the `NO_COLOR` environment convention. `cli.resolve_no_color()` and the `no_color=` / `saved_colors=` parameters of `Appearance.resolve_appearance()` were removed with it.

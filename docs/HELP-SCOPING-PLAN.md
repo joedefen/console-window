@@ -272,7 +272,7 @@ differ in how much of the stack/spinner/help machinery they take.
   `add_prompt_lines()` are Screen API, not `ConsoleWindow` API.
   `ConsoleWindow` keeps terminal/input/chrome concerns (`clear()`, `render()`,
   `prompt()`, `status()`, `flash()`, dialogs).
-- **Amended by the Screen overhaul (4.0.0): `draw()` is deleted.** There is one
+- **Amended by the Screen overhaul (3.0.0): `draw()` is deleted.** There is one
   drawing model — flow-ordered `add_*()` rows; column placement is composed by
   the application with `textwidth`. The old no-mixing rule is therefore moot and
   is replaced by "add_* only".
@@ -280,8 +280,8 @@ differ in how much of the stack/spinner/help machinery they take.
   `win.render()`, `win.prompt()`. `clear()` both resets content and makes the
   screen current, so it comes first.
 - Moving the drawing methods from `ConsoleWindow` to `Screen` was a deliberate
-  one-time break, shipped as 4.0.0 with no compatibility shim: every consumer is
-  in this project.
+  one-time break, shipped as 3.0.0 with no compatibility shim: every consumer is
+  in this project, and no 3.x release had shipped yet.
 - Sample-app mapping: the sample set should demonstrate exactly these two
   models. A Screen-only pager is Model A; the spinner pager is Model B. The
   intermediate stack-plus-hand-written-help pager is not a durable third sample.
