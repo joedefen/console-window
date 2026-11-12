@@ -63,8 +63,8 @@ becomes `self.pick_pos = ...` inside its Screen.
 
 Three consequences to implement:
 
-- **Adoption happens in `Screen.clear()`.** The window cannot find a Model A screen on its
-  own, and `clear()` is the loop's first call, so `clear()` begins with
+- **Adoption happens in `Screen.clear()`.** The window cannot find a screen on its own,
+  and `clear()` is the loop's first call, so `clear()` begins with
   `self.win._adopt_view(self)`. That is also why the D14 order is fixed: `clear()` first,
   or `render()` paints with the previous view.
 - **A fallback view exists.** [`ScreenStack.__init__`](../console_window/screens.py:95)
@@ -138,8 +138,7 @@ composed with `textwidth.string_width`/`ljust`/`truncate` — not `len()`/`str.l
 because `_add()` transliterates glyphs before the width math
 ([window.py:1215](../console_window/window.py:1215)).
 
-The no-mixing rule in decision 11 of the help plan becomes moot and is replaced by
-"add_* only".
+Any no-mixing rule between `draw()` and `add_*()` is moot; there is only "add_* only".
 
 ### D8. Navigation and key routing stay on the window
 
@@ -226,7 +225,7 @@ so the stack is built after the window, as today.
 | `demos/demo-screen-pager.py` | two `PrimeTableScreen` pages (ONE/TWO) on a `ScreenStack`; keys are handled by hand; live spelled churn |
 | `demos/demo-spinner-pager.py` | one table plus an `OptionSpinner` range prompt and order cycle, with `BasicHelpScreen`; the range prompt carries `check_ans`, so bad text is rejected inside the dialog; live spelled churn |
 | `demos/demo-buffet.py` | mechanical: drop `win.` prefixes, `win` onto `self` |
-| `demos/demo-basic-pager.py` | one `PagerScreen(Screen)` drawing the table; its hand-written help page was dropped in the demo rework, leaving a pure Model A sample |
+| `demos/demo-basic-pager.py` | one `PagerScreen(Screen)` drawing the table; its hand-written help page was dropped in the demo rework, leaving a bare-`Screen` sample |
 | nanny (`/tmp/nanny.py`, outside this repo) | delete the `_draw_separator_and_indicator` monkey-patch (D10 ships first); `draw(y, x, ...)` lines become composed `add_body()` segments; `_set_body_context()` dies (`context=` exists); `body.drawn[row] = []` resets die; `_draw_kill_confirm()` becomes an ordinary row in the loop; state file read on mtime change, not per frame; `max_rows` left at the default so a rebuild cannot warn every frame |
 | psistat (outside this repo) | already `add_body`-shaped; wrap in one Screen (`self.add_body`, `self.clear()` at the top of the pass); help-as-mode stays or becomes a second screen |
 
@@ -240,10 +239,10 @@ while True:
     key = win.prompt(seconds=0.5)
 ```
 
-No `render_pass()`, no `run()`, no library-owned pass. In Model B the first three act on
-the screen the stack makes current. The four calls are permanent public API: if help-plan
-O8 later adds a `dispatch()` or `run()` seam it may only wrap them, never replace or
-rename them. That is what lets this overhaul land before O8 is decided.
+No `render_pass()`, no `run()`, no library-owned pass. When a stack is in use, the first
+three act on the screen it makes current. The four calls are permanent public API, and
+the help plan settles that they stay explicit: no `dispatch()` or `run()` wrapper is
+coming, so they are never replaced or renamed.
 
 ## Phases
 
@@ -265,8 +264,8 @@ rename them. That is what lets this overhaul land before O8 is decided.
 5. **Call sites** — spinner help helpers, `BasicHelpScreen`, `BasicTextScreen`, the
    `head_line` paint guard, `__init__` exports. *(done)*
 6. **Tests and docs** — retarget the ~130 window-content references; update README's
-   "shape of every app", worked example and version section; amend help-plan decision 11.
-   *(done; new coverage in `tests/test_screen_state.py`)*
+   "shape of every app", worked example and version section; fold the settled shape into
+   the help plan. *(done; new coverage in `tests/test_screen_state.py`)*
 7. **App ports** — the D13 table, each app on its own commit. *(in-repo demos done;
    nanny and psistat live outside this repository — see Implementation notes)*
 
@@ -285,30 +284,29 @@ three were answered while implementing:
 
 Yes, this goes first, and it moves that document rather than competing with it:
 
-- **Amends decision 11.** "Content drawing belongs to `Screen`: `draw()`, `add_header()`,
-  ..." loses `draw()`, and the no-mixing paragraph collapses to "add_* only".
-- **Closes part of O6.** Its last bullet ("a draw pass that mixes `draw()` with
-  `add_header()`/`add_body()` trips the no-mixing policy") becomes untestable and is
-  deleted; the Model A / Model B bullets stay and get the D14 loop.
-- **Touches every remaining item's call sites.** O3 (`self.num` + `screen_filter=`),
-  O4 (`options_for_screen()`, `show_help_body()` wording) and O9 (`get_spinner()`
-  injection) all rewrite `show_help_body()`'s signature or `BasicHelpScreen.draw_screen()`.
-  Doing them first means editing those signatures twice.
-- **O8 no longer constrains the order.** D14 fixes the loop as four permanent public
-  calls, so O8 can add a `dispatch()`/`run()` wrapper later without touching any app a
-  second time. It stays open, and it stays additive.
-- **O3, O4, O5, O9 remain open and unsolved by this plan.** O5 (incremental search) is
-  untouched; O3/O4/O9 are help/spinner concerns whose signatures this plan changes.
-- **Doc inconsistency, resolved by the demo rework:** decision 11 says a Model A app has
-  no help, but `demo-basic-pager.py` originally was Model A with a hand-written help page.
-  That page has been removed, so the samples now match the plan: basic pager is Model A,
-  while the screen/spinner pagers are Model B.
+- **Its settled shape is recorded there.** `Screen` mandatory, `draw()` deleted, one
+  drawing model and the four-call loop now live in that document's "Assumed" section;
+  they are not reopened there.
+- **It retires the no-mixing test.** "A draw pass that mixes `draw()` with
+  `add_header()`/`add_body()` trips the no-mixing policy" is untestable and deleted.
+- **Its call sites are settled by the help plan.** O3 asks `show_help_body()` to read
+  `screen.num` and drop `screen_filter=` toward `options_for_screen()`, and O9 replaces
+  `BasicHelpScreen`'s `get_spinner()` scan with injection; doing them before the
+  overhaul would have meant editing those twice.
+- **O8 is settled as documented-only.** D14 fixes the loop as four permanent public
+  calls, and the help plan records that nothing will wrap them. The loop stays visible
+  in every app.
+- **O5 remains open and unsolved by this plan.** Incremental search is untouched; the
+  help/spinner signatures it would build on are pinned by the help plan's decisions 4
+  and 6.
+- **The samples match the shape.** `demo-basic-pager.py` is one bare `Screen`; the screen
+  and spinner pagers use a stack, and the spinner pager also uses a help screen.
 
 ## Verification to add to the gate
 
 - Every sample app's loop is exactly the four calls in D14, and none of them is renamed.
-- Model A loop with a bare `Screen`, no stack and no spinner, exits normally.
-- Model B help screen draws only current-screen options plus spinners.
+- A bare `Screen` loop, with no stack and no spinner, exits normally.
+- A help screen draws only the options scoped to it.
 - ESC on the help screen pops to the parent with the parent's pick mode and scroll
   position intact (the D3/D4 payoff).
 - Switching A → B → A restores A's `pick_pos`/`scroll_pos` without any copy in the app.

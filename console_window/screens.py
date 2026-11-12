@@ -111,9 +111,9 @@ class Screen(_ViewState):
         """Start a new content pass on this screen.
 
         This is the loop's first call, and its other job is to hand the screen
-        to the window (``_adopt_view``): the window cannot discover a Model A
-        screen on its own, and every later ``add_*()``/``render()`` in the pass
-        depends on the window already pointing at this screen.
+        to the window (``_adopt_view``): the window cannot discover a screen on
+        its own, and every later ``add_*()``/``render()`` in the pass depends on
+        the window already pointing at this screen.
 
         Content is reset; the pick/scroll position, the pick mode and
         ``free_scroll`` are not -- they describe where the user is in this

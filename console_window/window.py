@@ -778,7 +778,7 @@ class ConsoleWindow:
 
         Called by ``Screen.clear()`` (the loop's first call, which is why that
         order is fixed) and by ``ScreenStack`` on activation.  A window cannot
-        discover a Model A screen on its own, so the screen hands itself over.
+        discover a screen on its own, so the screen hands itself over.
 
         The pads are viewport buffers owned by the content they paint, so a
         newly adopted view gets its own pair sized to the current terminal.
