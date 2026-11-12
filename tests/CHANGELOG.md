@@ -17,6 +17,28 @@ This project follows [Semantic Versioning](https://semver.org/).
   `semantic_attr`, `set_colors_enabled`) are unchanged and remain importable
   from the package root. `3.0.0` opens the 3.x line, which is intended to remain
   upward compatible from here.
+- **Changed:** the help screen's navigation map is now two aligned rows of
+  `action: keys` chunks under a `NavKeys:` label --
+  `pos: H/M/L    half: ^u/^d    page: ^b/^f/PPAGE/NPAGE` above
+  `up: k/UP  down: j/DOWN  first: 0/HOME   last: $/END` -- instead of nine rows
+  with one description each. The action word is stored once per row, so the
+  whole map fits at terminal width while `^u`/`^d` and `H`/`M`/`L` still say
+  what they do. Control keys moved to caret notation (the same spelling
+  `_raw_key_label()` uses), which keeps the map well inside 80 columns.
+  `NAV_HELP_ROWS` is replaced by `NAV_HELP_LINES`, a per-line tuple of
+  `(action, keys, gap)` rows; the per-row gap is what lands `last:` in the same
+  column as `page:` above it. A key the application took still disappears from
+  its chunk, and `NAV_KEY_LINES`, `get_nav_key_lines()` and
+  `get_nav_keys_blurb()` keep their tuple-of-lines shape.
+
+### Removed
+- `OptionSpinner.add()`, the pre-2.0 registration shim that had raised
+  `NotImplementedError` since 2.0, is deleted together with its regression
+  test. `add_key()` is the only registration path, and its docstring now
+  documents every argument plus the implicit rules: genre inference, key
+  inference from `descr[0]`, scope resolution and subtraction, value
+  initialization, and the duplicate-attribute, navigation-key and
+  per-screen-key-conflict errors.
 
 ## [2.2.2]
 

@@ -221,7 +221,17 @@ def test_default_help_is_generated_from_the_structured_table():
     opts = ConsoleWindowOpts()
     lines = window_mod.render_nav_help(opts.nav_keys, opts.taken_nav_keys)
     assert lines == NAV_KEY_LINES
-    assert 'k, UP: up one row' in lines[0]
+    # Two aligned rows: one action per chunk, each key an alternative for it.
+    assert len(lines) == 2
+    assert lines[0] == ('NavKeys:    pos: H/M/L    half: ^u/^d    '
+                        'page: ^b/^f/PPAGE/NPAGE')
+    assert lines[1] == (' up: k/UP  down: j/DOWN  first: 0/HOME   '
+                        'last: $/END')
+    # The gap on the last row's "first" chunk exists to land its last column
+    # under the top row's "page".
+    assert lines[0].index('page:') == lines[1].index('last:')
+    # The compact form exists to stay readable at terminal width.
+    assert all(len(line) <= 78 for line in lines)
 
 
 def test_help_omits_taken_nav_keys_and_shows_app_labels(make):
@@ -231,15 +241,21 @@ def test_help_omits_taken_nav_keys_and_shows_app_labels(make):
         curses.KEY_RIGHT: 'next',
     })
     lines = win.nav_help_lines()
-    joined = '\n'.join(lines)
+    # Everything from the App: line onward is the app's block; its second line
+    # is indented, so split at the boundary instead of filtering on "App:".
+    app_start = next(
+        index for index, line in enumerate(lines) if line.startswith('App:'))
+    nav_text = '\n'.join(lines[:app_start])
+    app_text = '\n'.join(lines[app_start:])
 
-    # UP is gone from the navigation rows, but its sibling k remains.
-    assert 'k, UP' not in joined
-    assert 'k: up one row' in joined
+    # UP is gone from its action chunk, but its vi sibling k remains.
+    assert 'k/UP' not in nav_text
+    assert 'up: k' in nav_text
+    assert 'down: j/DOWN' in nav_text
     # Taken keys are advertised under App: with the caller's labels.
-    assert '←: prev' in joined
-    assert '→: next' in joined
-    assert 'UP: app up' in joined
+    assert '←: prev' in app_text
+    assert '→: next' in app_text
+    assert 'UP: app up' in app_text
     assert lines[-2].startswith('App:') or lines[-1].startswith('App:')
 
 

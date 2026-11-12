@@ -24,7 +24,7 @@ The library is small, dependency-free, and unusually disciplined for a single-au
 
 There is no data-loss or security defect, and the interactive core is well covered. What is left is a small body of public surface with no consumer outside the test suite; the dialog retry policy is documented as an accepted limitation and every lint finding now states its reason. Highest-risk findings, in order:
 
-1. **Some public API has no consumer.** `ConsoleWindow.set_pick_range()`, `ConsoleWindow.draw()` and the `OptionSpinner.add()` tombstone are reached only from tests (§3.1).
+1. **Some public API has no consumer.** `ConsoleWindow.set_pick_range()` and `ConsoleWindow.draw()` are reached only from tests (§3.1).
 2. **The dialog retry policy is class-wide and discards input.** `answer()` spends the shared `render_retry_seconds` budget, and resize recovery drains every queued key. Both are now explicit, documented limitations rather than silent surprises (§3.2).
 
 ## 2. Architecture as implemented
@@ -65,16 +65,15 @@ No consumer outside the test suite for:
 | Symbol | Where | Note |
 | --- | --- | --- |
 | `ConsoleWindow.set_pick_range()` | [`window.py:609`](console_window/window.py:609) | The `pick_range` feature's only public entry point; called only by [`tests/test_interactive.py`](tests/test_interactive.py:434) |
-| `OptionSpinner.add()` | [`spinner.py:163`](console_window/spinner.py:163) | Retired tombstone that raises `NotImplementedError` pointing at `add_key()`; only [`tests/test_spinner.py`](tests/test_spinner.py:259) calls it, to assert the raise |
 | `ConsoleWindow.draw()` | [`window.py:863`](console_window/window.py:863) | Named as a model-writing entry point in [`README.md`](README.md:52), but no library or example code calls it; only tests do ([`tests/test_interactive.py`](tests/test_interactive.py:368), [`tests/test_overflow.py`](tests/test_overflow.py:152), [`tests/test_viewport_pad.py`](tests/test_viewport_pad.py:79), [`tests/test_widechars.py`](tests/test_widechars.py:129)) |
 
-`OptionSpinner.add()` keeps its old signature so pre-2.0 call sites fail at the call rather than at import, and its `NotImplementedError` names the replacement call. It is otherwise inert, so the only thing keeping it alive is its own regression test.
+`OptionSpinner.add()` was the third row: the pre-2.0 registration shim had been a `NotImplementedError` tombstone since 2.0, kept alive only by its own regression test. It has been **removed** in 3.0.0; `add_key()` is the only registration path.
 
 `draw()` is the inverse case: the README presents it as part of the row-model API while every actual caller is a test, so the documentation promises a path the project never demonstrates.
 
 The former fourth row of this table, `SampleApp.do_key()`, has been **removed**: it had no caller at all because `main_loop` dispatches through `handle_key()`, which already forwards spinner keys itself.
 
-**Fix:** delete what no consumer needs, or promote it deliberately: give each survivor an exercising caller (the example or a documented snippet) alongside its test. For `OptionSpinner.add()`, either set a removal release or keep it explicitly documented as deprecated.
+**Fix:** delete what no consumer needs, or promote it deliberately: give each survivor an exercising caller (the example or a documented snippet) alongside its test.
 
 ### 3.2 ✅ `answer()` residual: documented limitations
 

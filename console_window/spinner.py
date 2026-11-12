@@ -171,32 +171,86 @@ class OptionSpinner:
 
         self.keys.add(key)
 
-    def add(self, obj: object, specs: list) -> None:
-        """Retired pre-2.0 registration shim: use add_key() instead.
-
-        The old call shape was ``spin.add(obj, [(descr, attr, *vals)])`` with an
-        optional ``None`` separating values from comments.  Its comment handling
-        sliced the already-truncated value list with the pre-truncation index,
-        so ``comments`` was always empty.  Rather than silently registering a
-        half-configured option, this method now fails loudly for callers still
-        on the old API.
-        """
-        del obj, specs  # signature kept only so old call sites fail loudly
-        raise NotImplementedError(
-            'OptionSpinner.add() was retired in 2.0 and no longer registers '
-            'options; upgrade to OptionSpinner.add_key(attr, descr, obj=..., '
-            'vals=..., prompt=..., keys=..., comments=...). For example, '
-            "replace spin.add(obj, [('n - name', 'name', 'Ada', 'Grace')]) "
-            "with spin.add_key('name', 'n - name', obj=obj, "
-            "vals=['Ada', 'Grace'])."
-        )
-
     def add_key(self, attr: str, descr: str, obj: object | None = None,
                 vals: list | None = None, prompt: str | None = None,
                 keys: int | str | list | tuple | set | None = None,
                 comments: str | list[str] | tuple[str, ...] | None = None,
                 genre: str | None = None,
                 scope: int | list | set | None = None) -> None:
+        """Register one option: a setting to cycle, a prompt, or an action.
+
+        This is the only registration path; the pre-2.0 ``add()`` shim has been
+        removed.
+
+        ``attr``
+            Attribute name on the target object, and the option's unique id.
+            Two options may not share it (``ValueError``).  For an action it is
+            also the method name: ``perform_actions()`` calls
+            ``f'{attr}_ACTION'`` on the current screen.  To reuse a key on two
+            screens, register two options with different ``attr`` values, the
+            same ``keys`` and different ``scope`` values; scope subtraction
+            keeps the bindings apart.
+
+        ``descr``
+            Text shown on the help screen.  Its first character is the key when
+            ``keys`` is omitted, so ``'v - view mode'`` binds ``v`` and then
+            repeats the binding in the text.  The help body prints the whole
+            string, so keep the key visible in it.
+
+        ``obj``
+            Object the value lives on.  Defaults to ``default_obj``, which is
+            the ``ScreenStack`` object when the spinner was given a stack.  The
+            value is initialized at registration: the first entry of ``vals``
+            for a cycle, the empty string otherwise.  An action's flag is
+            therefore falsy until its key sets it.
+
+        ``vals``
+            Allowed values in cycle order.  Supplying it makes the option a
+            ``cycle``: each key press advances to the next value, wrapping at
+            the end, and writes it to ``obj``.  The current value is shown on
+            the help screen with the matching entry reversed.
+
+        ``prompt``
+            Question for a ``prompt`` option.  Each key press runs
+            ``win.answer(prompt=..., seed=<current value>)`` and writes the
+            reply.  An aborted dialog returns ``None`` and leaves the previous
+            value untouched.
+
+        ``keys``
+            Key code, character, or iterable of either (a string is expanded
+            per character), that drives the option.  Defaults to
+            ``ord(descr[0])``.  Navigation keys are rejected with
+            ``ValueError`` unless the window released them through
+            ``taken_nav_keys``, so a binding can never shadow scrolling.
+
+        ``comments``
+            Extra explanatory lines printed under the option on the help
+            screen, one body row each.
+
+        ``genre``
+            ``'action'``, ``'cycle'`` or ``'prompt'``.  Normally inferred
+            (``vals`` means cycle, ``prompt`` means prompt, neither means
+            action).  Passing a genre that contradicts the arguments raises
+            ``ValueError`` rather than mis-registering the option.
+
+        ``scope``
+            Screen number, or iterable of them, the key is live on.  ``None``
+            means every screen for a setting, and every screen implementing the
+            ``_ACTION`` method for an action.  Later registrations that claim
+            the same key subtract their screens from earlier options, so the
+            last writer wins and the earlier option keeps the screens nobody
+            else took.  A key claimed twice on the same screen raises
+            ``ValueError``.
+
+        Raises ``ValueError`` for a duplicate ``attr``, a navigation key, a
+        genre that contradicts the arguments, or a key already bound on one of
+        the requested screens.
+
+        ``effective_scope`` is computed once at registration and recorded per
+        screen in ``key_scopes``; that table is what ``do_key()`` and
+        ``perform_actions()`` consult, so a key registered for a screen is
+        dispatchable only there.
+        """
         ns = self._make_option_ns()
         ns.keys = self._parse_keys(keys, descr)
         ns.comments = self._parse_comments(comments)

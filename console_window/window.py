@@ -45,8 +45,11 @@ logger = logging.getLogger(__name__)
 _CTRL_PAGE_UP, _CTRL_HALF_DOWN, _CTRL_PAGE_DOWN, _CTRL_HALF_UP = 2, 4, 6, 21
 
 # Display labels for the keys that can appear in the navigation help.  Arrow
-# keys are listed too even though the default rows do not use them: an app that
+# keys are listed too even though the default lines do not use them: an app that
 # takes LEFT/RIGHT gets `←`/`→` on the "App:" line without supplying a label.
+# Control keys use caret notation, the same spelling `_raw_key_label()` uses for
+# them, so the navigation map stays narrow: `^b/^f` costs four columns where
+# `Ctrl-b/Ctrl-f` cost eleven.
 NAV_KEY_LABELS: dict[int, str] = {
     curses.KEY_UP: 'UP',
     curses.KEY_DOWN: 'DOWN',
@@ -63,31 +66,51 @@ NAV_KEY_LABELS: dict[int, str] = {
     ord('H'): 'H',
     ord('M'): 'M',
     ord('L'): 'L',
-    _CTRL_HALF_UP: 'Ctrl-u',
-    _CTRL_HALF_DOWN: 'Ctrl-d',
-    _CTRL_PAGE_UP: 'Ctrl-b',
-    _CTRL_PAGE_DOWN: 'Ctrl-f',
+    _CTRL_HALF_UP: '^u',
+    _CTRL_HALF_DOWN: '^d',
+    _CTRL_PAGE_UP: '^b',
+    _CTRL_PAGE_DOWN: '^f',
 }
 
-# Structured navigation help: (key codes, description).  The rendered lines are
-# generated from this table and the window's effective key set, so a key the
+# Structured navigation help: one entry per printed line, each a tuple of rows
+# (action, key codes in reading order, gap after the chunk).  The rendered text
+# is generated from this table and the window's effective key set, so a key the
 # application took disappears from the help instead of being advertised and
 # doing nothing.  Keep this table in step with `_navigation_target()`; the two
 # are the single sources of truth for "what scrolls" and "what we say scrolls".
-NAV_HELP_ROWS: tuple[tuple[tuple[int, ...], str], ...] = (
-    ((ord('k'), curses.KEY_UP), 'up one row'),
-    ((ord('j'), curses.KEY_DOWN), 'down one row'),
-    ((ord('0'), curses.KEY_HOME), 'first row'),
-    ((ord('$'), curses.KEY_END), 'last row'),
-    ((_CTRL_HALF_UP,), 'half-page up'),
-    ((_CTRL_HALF_DOWN,), 'half-page down'),
-    ((_CTRL_PAGE_UP, curses.KEY_PPAGE), 'page up'),
-    ((_CTRL_PAGE_DOWN, curses.KEY_NPAGE), 'page down'),
-    ((ord('H'), ord('M'), ord('L')), 'top/middle/end-of-page'),
+#
+# One row per action, not one row per key: the action word is stored once and
+# every key that performs it hangs off it.  That is what lets the whole map
+# print in two lines while still saying what `^u` or `H` does -- a bare list of
+# vi keys would advertise them without explaining them.
+#
+# The gap lives on the row, not on the line, so the columns can be nudged
+# individually: `first: 0/HOME` gets three spaces and lands `last:` in the same
+# column as `page:` above it.  A uniform gap could not do that, because the
+# two lines carry different numbers of chunks.  The final row's gap is empty;
+# trailing spaces are stripped anyway, so it never reaches the screen.
+NAV_HELP_LINES: tuple[tuple[tuple[str, tuple[int, ...], str], ...], ...] = (
+    # Whole-screen and half/full-page moves: the least guessable keys.
+    (
+        ('pos', (ord('H'), ord('M'), ord('L')), '    '),  # top/mid/end of screen
+        ('half', (_CTRL_HALF_UP, _CTRL_HALF_DOWN), '    '),
+        ('page', (_CTRL_PAGE_UP, _CTRL_PAGE_DOWN,
+                  curses.KEY_PPAGE, curses.KEY_NPAGE), ''),
+    ),
+    # Single-step moves, where the vi key and the terminal key pair up.
+    (
+        ('up', (ord('k'), curses.KEY_UP), '  '),
+        ('down', (ord('j'), curses.KEY_DOWN), '  '),
+        ('first', (ord('0'), curses.KEY_HOME), '   '),
+        ('last', (ord('$'), curses.KEY_END), ''),
+    ),
 )
 
 _NAV_HELP_COLUMN = 38
-_NAV_HELP_PREFIX = 'Navigation:  '
+_NAV_HELP_PREFIX = 'NavKeys:    '
+# The second line is a bare row, not a continuation of the label, so it gets a
+# single leading space rather than a pad as wide as "NavKeys:".
+_NAV_CONTINUATION = ' '
 _NAV_APP_PREFIX = 'App:         '
 
 
@@ -145,24 +168,46 @@ def _pair_nav_entries(entries: list[str], prefix: str) -> list[str]:
     return lines
 
 
+def _nav_row_chunk(action: str, keys: tuple[int, ...],
+                   effective: frozenset[int]) -> str | None:
+    """One ``action: keys`` chunk, or None when every key in the row was taken.
+
+    Slash-joined with no spaces, because every key after the colon is an
+    alternative for the same action: ``page: ^b/^f/PPAGE/NPAGE`` reads as "any
+    of these pages", not as a key sequence.
+    """
+    shown = [_nav_key_label(key) for key in keys if key in effective]
+    if not shown:
+        return None
+    return f'{action}: {"/".join(shown)}'
+
+
 def render_nav_help(effective: Iterable[int],
                     taken: dict[int, str] | None = None) -> tuple[str, ...]:
     """Render the navigation help for one window's effective key set.
 
     ``effective`` is the set of key codes still dispatched as navigation;
     ``taken`` maps the app-owned keys to the label the app wants shown.  The
-    default (no taken keys) output is the public ``NAV_KEY_LINES`` text.
+    default (no taken keys) output is the public ``NAV_KEY_LINES`` text: two
+    aligned rows of ``action: keys`` chunks covering the whole scroll map.
     """
     effective = frozenset(effective)
-    entries = []
-    for keys, label in NAV_HELP_ROWS:
-        shown = [_nav_key_label(key) for key in keys if key in effective]
-        if shown:
-            entries.append(f'{", ".join(shown)}: {label}')
+    lines = []
+    for rows in NAV_HELP_LINES:
+        text = ''
+        for action, keys, gap in rows:
+            chunk = _nav_row_chunk(action, keys, effective)
+            if chunk is not None:
+                text += chunk + gap
+        text = text.rstrip()
+        if not text:
+            continue
+        # The label belongs to the block, not to a particular line: if the top
+        # row is entirely taken by the app, the bottom row carries it instead.
+        head = _NAV_HELP_PREFIX if not lines else _NAV_CONTINUATION
+        lines.append(f'{head}{text}')
 
-    if entries:
-        lines = _pair_nav_entries(entries, _NAV_HELP_PREFIX)
-    else:
+    if not lines:
         lines = [
             _NAV_HELP_PREFIX
             + '(no navigation keys: all are bound by the application)'
