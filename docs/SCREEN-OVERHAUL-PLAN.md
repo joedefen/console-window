@@ -289,15 +289,15 @@ Yes, this goes first, and it moves that document rather than competing with it:
   they are not reopened there.
 - **It retires the no-mixing test.** "A draw pass that mixes `draw()` with
   `add_header()`/`add_body()` trips the no-mixing policy" is untestable and deleted.
-- **Its call sites are settled by the help plan.** O3 asks `show_help_body()` to read
-  `screen.num` and drop `screen_filter=` toward `options_for_screen()`, and O9 replaces
-  `BasicHelpScreen`'s `get_spinner()` scan with injection; doing them before the
-  overhaul would have meant editing those twice.
+- **Its call sites are settled by the help plan and implemented.** `show_help_body()`
+  reads `screen.num` through `options_for_screen()`, and `BasicHelpScreen` gets the
+  spinner from `stack.spinner` injection; doing those before the overhaul would have
+  meant editing them twice.
 - **O8 is settled as documented-only.** D14 fixes the loop as four permanent public
   calls, and the help plan records that nothing will wrap them. The loop stays visible
   in every app.
 - **O5 remains open and unsolved by this plan.** Incremental search is untouched; the
-  help/spinner signatures it would build on are pinned by the help plan's decisions 4
+  help/spinner signatures it would build on are fixed by the help plan's decisions 4
   and 6.
 - **The samples match the shape.** `demo-basic-pager.py` is one bare `Screen`; the screen
   and spinner pagers use a stack, and the spinner pager also uses a help screen.

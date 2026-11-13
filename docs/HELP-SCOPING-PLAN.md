@@ -1,8 +1,8 @@
 # Help Screen: Decisions and Open Items
 
 Status as of 2026-11-12.  The Screen overhaul is implemented and assumed here;
-[`SCREEN-OVERHAUL-PLAN.md`](SCREEN-OVERHAUL-PLAN.md) records it.  What is left
-is how help and the spinner fit around that shape.
+[`SCREEN-OVERHAUL-PLAN.md`](SCREEN-OVERHAUL-PLAN.md) records it.  The decisions
+below are implemented too; only the modal-layer item remains open.
 
 ## Assumed (not revisited)
 
@@ -25,13 +25,14 @@ is how help and the spinner fit around that shape.
   `win.render()`, `win.prompt()`.  `clear()` adopts the screen, so it comes
   first.
 
-## Decisions
+## Decisions (implemented)
 
 ### 1. The help body lists what is live on the help screen
 
 An option is drawn when its `effective_scope` contains the help screen's number,
-so "shown" and "works" are the same set; today every option is dumped and dead
-keys are advertised.  An option that must work on the help screen names it in
+so "shown" and "works" are the same set; before this change every option was
+dumped and dead keys were advertised.  An option that must work on the help
+screen names it in
 `scope=` (as the buffet demo does).  There is no implicit auto-scoping, so the
 spinner never needs to know which screens are help screens.  With no stack there
 are no scopes to filter by, and the body lists everything -- which is exactly
@@ -43,14 +44,16 @@ are shown.
 
 An app that uses the spinner should not have to spell these two bindings again.
 The spinner registers `quit` (`q`, `^C`) and `escape` (`ESC`, `^J`, `ENTER`)
-before the app registers anything, and reserves their keys: a later `add_key()`
-on one of them raises with a message naming `quit_keys=` / `escape_keys=`.  They
-are shown once in the `NavKeys:` block, not in the body.  `Screen` supplies
+before the app registers anything and reserves their keys: an implicit
+(scope-less) later `add_key()` on one of them raises with a message naming
+`quit_keys=` / `escape_keys=`, while an explicit `scope=` is a deliberate
+per-screen override (ESC clearing a filter on MAIN is the demo case).  They are
+shown once in the `NavKeys:` block, not in the body.  `Screen` supplies
 `escape_ACTION()` (pop; no-op at home) and `quit_ACTION()` (`SystemExit`; the
 atexit hook already tears curses down), both ordinary overridable methods.  A
 screen reaches the stack through the injected handle described in decision 4.
-Decided, not implemented.  The defaults are reached through the stack's action
-dispatch, so a stackless app gets the bindings but supplies its own handling.
+The defaults are reached through the stack's action dispatch, so a stackless app
+gets the bindings but supplies its own handling.
 
 ### 3. The loop stays explicit and documented
 
@@ -66,44 +69,43 @@ shape.
 and constructing a second spinner on the same stack raises.  A screen reaches
 the stack through the stack's own injection: at construction it assigns
 `obj.num` and `obj.stack` to the screens it owns (the number is decision 6's
-job), so [`Screen.get_spinner()`](../console_window/screens.py:147) becomes
+job), so [`Screen.get_spinner()`](../console_window/screens.py:151) becomes
 `self.stack.spinner`, or `None` when the screen has no stack.  The
-`dir()`/`getattr` scan and its cache go away.  The scan only existed because a
+`dir()`/`getattr` scan and its cache went away.  The scan only existed because a
 screen could be drawn before the app had built its spinner; with the
 construction order fixed and documented -- screens, window, stack, spinner --
-injection has no chicken-and-egg gap.  Not implemented.
+injection has no chicken-and-egg gap.
 
 ### 5. Help-screen collisions need no special rule
 
 The help screen is just another number in `scope=`.  The rule, already
 implemented, is last registration wins within an overlapping scope: a later
 option subtracts the overlap from the earlier one
-([`_subtract_scope()`](../console_window/spinner.py:147)), so within a screen the
-newest registration owns the key.  One key may carry different options on
+([`_subtract_scope()`](../console_window/spinner.py:209)), so within a screen
+the newest registration owns the key.  One key may carry different options on
 different screens -- a MAIN-only key and a HELP-only key with the same code are
 not a conflict, and dispatch resolves by the current screen.  Without a stack
 there is one global namespace, so a duplicate key is an error there and only
 there.  The case that used to resolve badly, a spinner silently unbinding ESC/^C
-on the help screen, is gone once decision 2 reserves those keys.  Consequence:
-[`_reject_key_conflicts()`](../console_window/spinner.py:155) cannot fire,
-because subtraction always removes the overlap first; it should be deleted
-rather than kept as a rule that never fires.
+on the help screen, is gone because decision 2 reserves those keys.  Consequence:
+the old key-conflict guard could not fire, because subtraction always removes
+the overlap first; it is deleted rather than kept as a rule that never fires.
 
 ### 6. The help body asks the spinner what applies
 
 - **The number.**  `Screen.num = None` on the class, documented "assigned by
   the stack"; `ScreenStack.__init__` sets `obj.num = num` for every entry in
   `screen_objects` (sharing the loop that injects `obj.stack`, decision 4).
-  [`BasicHelpScreen.draw_screen()`](../console_window/screens.py:393) already
-  passes itself to `show_help_body()`, so that method reads `screen.num`
-  directly and its `screen_filter=` argument goes away.
-- **One definition.**  Add `OptionSpinner.options_for_screen(screen)`: the body
-  options for that screen -- all of them (minus the built-in `quit`/`escape`,
-  decision 2) when the spinner has no stack or the screen has no number,
-  otherwise those whose `effective_scope` contains `screen.num`.  Both
-  `show_help_body()` and an app drawing its own help call it, so "applies here"
-  has one definition.  `_filter_screens()` and `_skipped_by_filter()` are
-  deleted, and the built-in options are marked so the method never returns them.
+  [`BasicHelpScreen.draw_screen()`](../console_window/screens.py:403) passes
+  itself to `show_help_body()`, so that method reads `screen.num` directly and
+  its `screen_filter=` argument is gone.
+- **One definition.**  `OptionSpinner.options_for_screen(screen)` is the body-
+  options lookup: all options (minus the built-in `quit`/`escape`, decision 2)
+  when the spinner has no stack or the screen has no number, otherwise those
+  whose `effective_scope` contains `screen.num`.  Both `show_help_body()` and an
+  app drawing its own help call it, so "applies here" has one definition.
+  `_filter_screens()` and `_skipped_by_filter()` are deleted, and the built-in
+  options are marked so the method never returns them.
 - **The empty body.**  When nothing applies, omit the "Type keys to alter
   choice:" heading and draw no placeholder; the `NavKeys:` block and the app's
   notes remain.  A heading with nothing under it is worse than silence.
@@ -123,10 +125,10 @@ rather than kept as a rule that never fires.
   with explicit `scope=`, the spinner never has to detect help screens, so the
   flag, the ordering caveat and the subtraction special case all go.
 
-## Open items
+## Open item
 
-The earlier items (O2, O7, O8, O9) are settled or no longer apply and are not
-repeated here; O1 and O3 are decisions 5 and 6.  What remains is below.
+O1 and O3 are decisions 5 and 6; the earlier items are settled or no longer
+apply.  Only O5 remains.
 
 ### O5. Modal layers (deferred)
 
@@ -135,15 +137,3 @@ outranks the spinner while it is active.  It is a layer, not a screen, so it has
 no `effective_scope`, and help is unreachable underneath it.  Deferred: list its
 keys in a separate "while typing" block, or have it take its keys from the
 current screen's spinner set so the two cannot diverge.
-
-### O6. Tests to add when the decisions land
-
-- An option scoped to MAIN is absent from help; a spinner key pressed on help
-  changes the value; with no stack the body lists every option.
-- A help screen with no applicable option draws no heading and no placeholder.
-- `quit` and `escape` appear in the `NavKeys:` block and not in the body; ESC on
-  help pops; `quit` raises `SystemExit`; an app binding ESC raises from
-  `add_key()` naming `escape_keys=`.
-- A second spinner on the same stack raises; `get_spinner()` is `None` on a
-  screen with no stack.
-

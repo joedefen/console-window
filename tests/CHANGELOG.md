@@ -5,7 +5,31 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## [3.0.0]
 
+### Added
+- `OptionSpinner` registers `quit` (`q`, `^C`) and `escape` (`ESC`, `^J`,
+  `ENTER`) before the application registers anything; override the key sets with
+  the `quit_keys=` / `escape_keys=` constructor arguments.  They are shown once
+  in the `NavKeys:` block, never in the option body.  `Screen` supplies the
+  default `quit_ACTION()` (`SystemExit`) and `escape_ACTION()` (pop one screen,
+  a no-op at home), both ordinary overridable methods.
+- A `ScreenStack` owns at most one spinner: the spinner injects itself as
+  `stack.spinner`, the stack assigns each screen its `num` and `stack` at
+  construction, and `Screen.get_spinner()` reads the injection instead of
+  scanning the application's attributes.  A second spinner on the same stack
+  raises `ValueError`.
+- `OptionSpinner.options_for_screen(screen)` is the single definition of which
+  options apply on a screen; `ScreenStack` numbers its screens so the help body
+  can use it.
+
 ### Changed
+- The help body lists only options whose scope includes the help screen, and it
+  omits the `Type keys to alter choice:` heading when nothing applies.  The
+  built-in actions stay in the navigation block.  `show_help_body()` takes just
+  the screen; its `screen_filter=` argument is gone.
+- Registering an option on a built-in key now requires an explicit `scope=`;
+  an implicit (scope-less) registration raises and names the built-in action.
+  A deliberate per-screen override, such as `ESC` clearing a filter on `MAIN`,
+  still works.
 - **Breaking:** content and the pick/scroll state moved from `ConsoleWindow`
   onto `Screen`, and `draw()` is deleted, leaving one drawing model.  The
   `win.add_header()`, `win.add_body()`, `win.add_fancy_header()`,
@@ -46,13 +70,17 @@ This project follows [Semantic Versioning](https://semver.org/).
   `get_nav_keys_blurb()` keep their tuple-of-lines shape.
 
 ### Removed
+- `_filter_screens()` and `_skipped_by_filter()` are replaced by
+  `options_for_screen()`, and the unreachable `_reject_key_conflicts()` is
+  deleted: a later registration always subtracts its overlap from an earlier
+  one, so the newest option owns the key on a screen.
 - `OptionSpinner.add()`, the pre-2.0 registration shim that had raised
   `NotImplementedError` since 2.0, is deleted together with its regression
   test. `add_key()` is the only registration path, and its docstring now
   documents every argument plus the implicit rules: genre inference, key
   inference from `descr[0]`, scope resolution and subtraction, value
-  initialization, and the duplicate-attribute, navigation-key and
-  per-screen-key-conflict errors.
+  initialization, and the duplicate-attribute, navigation-key and reserved-key
+  errors.
 
 ## [2.2.2]
 

@@ -163,16 +163,18 @@ class SpinnerPagerApp:
                                               [self.main, self.help])
 
         self.running = True
-        spin = self.spin = OptionSpinner(stack=self.stack)
+        spin = self.spin = OptionSpinner(
+            stack=self.stack,
+            # Keep the demo's uppercase Q; order is the help block's spelling.
+            quit_keys=(ord('q'), ord('Q'), 0x3),
+        )
         spin.add_key('range', 'r - rank range',
                      prompt='Prime ranks (min-max):',
                      check_ans=check_range, keys=[ord('r')])
         spin.add_key('order', 'o - sort order', vals=['up', 'down'],
                      keys=[ord('o')])
-        spin.add_key('quit', 'q,CTRL-C - quit',
-                     keys={0x3, ord('q'), ord('Q')}, genre='action')
-        # Actions infer their screens from which objects define *_ACTION.
-        spin.add_key('escape', 'ESC - back', keys=[27], genre='action')
+        # quit/escape are built in; actions infer their screens from which
+        # objects define *_ACTION.
         spin.add_key('help_screen', '? - help', keys=[ord('?')],
                      genre='action')
 

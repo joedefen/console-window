@@ -104,17 +104,58 @@ def test_basic_help_screen_resolves_window_created_after_construction():
     # SampleApp creates Screen objects before its ConsoleWindow, so the window
     # captured by Screen.__init__ is None. BasicHelpScreen.draw_screen() must
     # read the current app.win instead of that stale attribute.
-    app = SimpleNamespace(win=None, spin=OptionSpinner())
+    app = SimpleNamespace(win=None)
     screen = BasicHelpScreen(app)
     assert screen.win is None
 
     win = _make_window()
     try:
         app.win = win
+        stack = ScreenStack(win, SimpleNamespace(), ('HELP',), {0: screen})
+        OptionSpinner(stack=stack)
         screen.clear()      # the loop's first call: adopts the screen
         screen.draw_screen()
         assert win.head.texts
         assert win.pick_mode is False
+    finally:
+        win.stop_curses()
+
+
+def test_the_stack_numbers_links_and_supplies_the_spinner():
+    win = _make_window()
+    try:
+        app = SimpleNamespace(win=win)
+        screen = BasicTextScreen(app, lines=['row'])
+        stack = ScreenStack.from_screens(win, SimpleNamespace(), [screen])
+
+        assert screen.num == 0
+        assert screen.stack is stack
+        assert screen.get_spinner() is None
+
+        spin = OptionSpinner(stack=stack)
+        assert screen.get_spinner() is spin
+    finally:
+        win.stop_curses()
+
+
+def test_escape_action_pops_and_quit_action_exits():
+    win = _make_window()
+    try:
+        app = SimpleNamespace(win=win)
+        main = BasicTextScreen(app, lines=['main'])
+        other = BasicTextScreen(app, lines=['other'])
+        stack = ScreenStack.from_screens(win, SimpleNamespace(), [main, other])
+
+        stack.push(other)
+        assert stack.curr.num == 1
+        stack.get_curr_obj().escape_ACTION()
+        assert stack.curr.num == 0
+
+        main.escape_ACTION()  # home: a no-op, not an error
+        assert stack.curr.num == 0
+
+        with pytest.raises(SystemExit):
+            main.quit_ACTION()
     finally:
         win.stop_curses()
 

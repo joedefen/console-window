@@ -52,10 +52,14 @@ class Screen(_ViewState):
     is_terminal = False         # True = cannot be pushed onto stack
     cannot_stack_me = False     # True = cannot have other screens pushed on top
 
+    #: Assigned by the owning ScreenStack when the stack is constructed.  A
+    #: screen built without a stack keeps ``None`` for both.
+    num: int | None = None
+    stack: ScreenStack | None = None
+
     def __init__(self, app: _AppLike) -> None:
         super().__init__()
         self.app = app  # Reference to main application instance
-        self._cached_spinner: OptionSpinner | None = None  # Lazy-loaded spinner reference
 
     @property
     def win(self) -> ConsoleWindow:
@@ -145,23 +149,14 @@ class Screen(_ViewState):
         return True
 
     def get_spinner(self) -> OptionSpinner | None:
-        # Return cached spinner if already found
-        if self._cached_spinner is not None:
-            return self._cached_spinner
+        """The spinner injected into this screen's stack, or None.
 
-        # Search through app's attributes for an OptionSpinner instance
-        for attr_name in dir(self.app):
-            if not attr_name.startswith('_'):  # Skip private attributes
-                try:
-                    attr_value = getattr(self.app, attr_name)
-                    if isinstance(attr_value, OptionSpinner):
-                        self._cached_spinner = attr_value
-                        return attr_value
-                except (AttributeError, TypeError):
-                    continue
-
-        # Not found - return None (don't cache to allow retry)
-        return None
+        Injection (``stack.spinner``) replaces the old scan of the app's
+        attributes: a screen built without a stack has no spinner, and a screen
+        whose stack has none simply draws without the option body.
+        """
+        stack = self.stack
+        return None if stack is None else getattr(stack, 'spinner', None)
 
     def handle_action(self, action_name: str) -> bool:
         method_name = f'{action_name}_ACTION'
@@ -172,6 +167,15 @@ class Screen(_ViewState):
             return True
         return False
 
+    def escape_ACTION(self) -> None:
+        """Default back action: pop one screen; a no-op on the home screen."""
+        if self.stack is not None:
+            self.stack.pop()
+
+    def quit_ACTION(self) -> None:
+        """Default quit action: leave the process (curses teardown is on atexit)."""
+        raise SystemExit
+
 
 class ScreenStack:
     def __init__(self, win: ConsoleWindow, spins_obj: object, screens: tuple,
@@ -181,6 +185,12 @@ class ScreenStack:
         self.screens = screens
         # Dict of screen_num -> Screen instance
         self.screen_objects: dict[int, Screen] = screen_objects or {}
+        # Number and link the screens this stack owns, so a Screen can find its
+        # own number, its stack, and (through it) the injected spinner.
+        for num, screen_obj in self.screen_objects.items():
+            screen_obj.num = num
+            screen_obj.stack = self
+        self.spinner: OptionSpinner | None = None
         self.stack: list[SimpleNamespace] = []
         self.curr: SimpleNamespace | None = None
         # Push home screen (HOME_ST=0) as the initial screen

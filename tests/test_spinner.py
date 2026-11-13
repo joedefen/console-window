@@ -1,3 +1,4 @@
+import curses
 import re
 from types import SimpleNamespace
 
@@ -36,51 +37,84 @@ def test_default_obj_syncs_with_stack():
     assert spin.default_obj is stack.obj
 
 
+def test_builtin_actions_are_registered_first():
+    spin = OptionSpinner()
+    assert [ns.attr for ns in spin.options[:2]] == ['quit', 'escape']
+    assert all(ns.builtin and ns.reserved for ns in spin.options[:2])
+    assert spin.attr_to_option['quit'].genre == 'action'
+    assert spin.attr_to_option['escape'].keys == [27, 10, curses.KEY_ENTER]
+
+
+def test_second_spinner_on_the_same_stack_raises():
+    stack = make_stack()
+    OptionSpinner(stack=stack)
+    with pytest.raises(ValueError, match='only one OptionSpinner'):
+        OptionSpinner(stack=stack)
+
+
 def test_action_scope_detected_from_methods():
     stack = make_stack()
     spin = OptionSpinner(stack=stack)
-    spin.add_key('quit', 'q - quit', genre='action', keys=[ord('q')])
-    ns = spin.attr_to_option['quit']
-    # quit_ACTION exists only on screen 0
+    spin.add_key('clear_filter', 'ESC - clear', genre='action', keys=[ord('x')])
+    ns = spin.attr_to_option['clear_filter']
+    # clear_filter_ACTION exists only on screen 0
     assert ns.effective_scope == {0}
 
 
 def test_new_binding_subtracts_from_earlier_scope():
     stack = make_stack()
     spin = OptionSpinner(stack=stack)
-    # Global escape (present on screens 0 and 1)
-    spin.add_key('escape', 'ESC - back', genre='action', keys=[27])
-    assert spin.attr_to_option['escape'].effective_scope == {0, 1}
+    spin.add_key('zoom', 'x - zoom', genre='action', keys=[ord('x')])
+    assert spin.attr_to_option['zoom'].effective_scope == {0, 1}
     # Narrow clear_filter to screen 0 with the same key -> subtract screen 0
-    spin.add_key('clear_filter', 'ESC - clear', genre='action', keys=[27], scope={0})
-    assert spin.attr_to_option['escape'].effective_scope == {1}
+    spin.add_key('clear_filter', 'x - clear', genre='action', keys=[ord('x')],
+                 scope={0})
+    assert spin.attr_to_option['zoom'].effective_scope == {1}
     assert spin.attr_to_option['clear_filter'].effective_scope == {0}
 
 
 def test_scoped_lookup_by_current_screen():
     stack = make_stack()
     spin = OptionSpinner(stack=stack)
-    spin.add_key('escape', 'ESC - back', genre='action', keys=[27])
-    spin.add_key('clear_filter', 'ESC - clear', genre='action', keys=[27], scope={0})
+    spin.add_key('zoom', 'x - zoom', genre='action', keys=[ord('x')])
+    spin.add_key('clear_filter', 'x - clear', genre='action', keys=[ord('x')],
+                 scope={0})
     obj = spin.default_obj
 
-    # On screen 0, key 27 resolves to clear_filter
+    # On screen 0, key x resolves to clear_filter
     stack.curr = SimpleNamespace(num=0)
-    spin.do_key(27, win=None)
+    spin.do_key(ord('x'), win=None)
     assert obj.clear_filter is True
 
-    # On screen 1, key 27 resolves to escape
+    # On screen 1, key x resolves to zoom
     stack.curr = SimpleNamespace(num=1)
-    spin.do_key(27, win=None)
-    assert obj.escape is True
+    spin.do_key(ord('x'), win=None)
+    assert obj.zoom is True
+
+
+def test_implicit_registration_of_a_reserved_key_raises():
+    stack = make_stack()
+    spin = OptionSpinner(stack=stack)
+    with pytest.raises(ValueError,
+                       match=r"reserved by the built-in.*change escape_keys="):
+        spin.add_key('oops', 'ESC - oops', genre='action', keys=[27])
+
+
+def test_an_explicit_scope_may_take_a_reserved_key():
+    stack = make_stack()
+    spin = OptionSpinner(stack=stack)
+    spin.add_key('clear_filter', 'ESC - clear', genre='action', keys=[27],
+                 scope={0})
+    assert spin.attr_to_option['escape'].effective_scope == {1}
+    assert spin.key_scopes[(27, 0)].attr == 'clear_filter'
 
 
 def test_duplicate_attr_raises():
     stack = make_stack()
     spin = OptionSpinner(stack=stack)
-    spin.add_key('quit', 'q - quit', genre='action', keys=[ord('q')])
+    spin.add_key('a_opt', 'a - one', genre='action', keys=[ord('a')])
     with pytest.raises(ValueError):
-        spin.add_key('quit', 'q - quit again', genre='action', keys=[ord('Q')])
+        spin.add_key('a_opt', 'a - again', genre='action', keys=[ord('A')])
 
 
 def test_navigation_key_conflicts_raise():
@@ -346,3 +380,68 @@ def test_help_body_renders_placeholder_for_unset_option():
     texts = [text for text, _attr, _resume in win.calls]
     assert any('unset' in text for text in texts)
     assert not any('None' in text for text in texts)
+
+
+class FakeBodyScreen(FakeBodyWindow):
+    """A body sink that also knows its own stack number."""
+
+    def __init__(self, num=None):
+        super().__init__()
+        self.num = num
+
+
+def test_help_body_lists_only_options_for_the_screens_number():
+    spin = OptionSpinner(stack=make_stack())
+    spin.add_key('everywhere', 'e - everywhere', vals=['a'], keys=[ord('e')])
+    spin.add_key('main_only', 'm - main', vals=['a'], keys=[ord('m')], scope={0})
+
+    help_screen = FakeBodyScreen(num=1)
+    spin.show_help_body(help_screen)
+    texts = [text for text, _attr, _resume in help_screen.calls]
+
+    assert any('Type keys to alter choice' in text for text in texts)
+    assert any('everywhere' in text for text in texts)
+    assert not any('main_only' in text for text in texts)
+
+
+def test_help_body_without_a_stack_lists_every_option():
+    spin = OptionSpinner()
+    spin.add_key('mode', 'm - mode', vals=['a'], keys=[ord('m')])
+
+    screen = FakeBodyScreen()
+    spin.show_help_body(screen)
+    texts = [text for text, _attr, _resume in screen.calls]
+
+    assert any('mode' in text for text in texts)
+
+
+def test_help_body_with_nothing_to_list_draws_no_heading():
+    spin = OptionSpinner(stack=make_stack())
+    screen = FakeBodyScreen(num=0)
+
+    spin.show_help_body(screen)
+
+    assert screen.calls == []
+
+
+class FakeNavScreen:
+    """Header sink for the navigation block."""
+
+    def __init__(self):
+        self.win = SimpleNamespace(nav_help_lines=lambda: ['NavKeys:    up: k'])
+        self.headers = []
+
+    def add_header(self, text, *args, **kwargs):
+        self.headers.append(text)
+
+
+def test_help_nav_block_advertises_the_builtin_actions():
+    spin = OptionSpinner()
+    screen = FakeNavScreen()
+
+    spin.show_help_nav_keys(screen)
+
+    assert screen.headers == [
+        'NavKeys:    up: k',
+        'quit: q/^C   back: ESC/^J/ENTER',
+    ]

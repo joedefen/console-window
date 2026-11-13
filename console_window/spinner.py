@@ -4,7 +4,7 @@ import curses
 import re
 from collections.abc import Callable, Iterable
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from . import glyphs
 from .keys import NAVIGATION_KEYS
@@ -15,8 +15,29 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 
 class OptionSpinner:
+    """Keys and values for a Screen application.
+
+    A spinner may be used without a stack (no screen scoping) or with one.  A
+    stack may own at most one spinner, which the spinner injects as
+    ``stack.spinner`` so screens find it without scanning the app.  Two actions
+    are registered before the application registers anything: ``quit`` (``q``,
+    ``^C``) and ``escape`` (``ESC``, ``^J``, ``ENTER``).  They are shown in the
+    help navigation block, never in the option body, and an implicit
+    registration that would claim their keys raises; name the screens with
+    ``scope=`` to override one deliberately.
+    """
+
+    #: Default key sets for the two built-in actions.  Override them with the
+    #: ``quit_keys=`` / ``escape_keys=`` constructor arguments.
+    _DEFAULT_QUIT_KEYS: tuple[int, ...] = (ord('q'), 0x3)
+    _DEFAULT_ESCAPE_KEYS: tuple[int, ...] = (27, 10, curses.KEY_ENTER)
+    _BUILTIN_NAV_LABELS: ClassVar[dict[str, str]] = {
+        'quit': 'quit', 'escape': 'back'}
+
     def __init__(self, stack: ScreenStack | None = None,
-                 nav_keys: Iterable[int] | None = None) -> None:
+                 nav_keys: Iterable[int] | None = None,
+                 quit_keys: int | str | list | tuple | set | None = None,
+                 escape_keys: int | str | list | tuple | set | None = None) -> None:
         self.options: list[SimpleNamespace] = []
         self.keys: set[int] = set()
         # The navigation set this spinner validates against.  Pass the owning
@@ -38,12 +59,21 @@ class OptionSpinner:
 
         # Sync with stack.obj: use stack's obj if available, otherwise provide ours
         if self.stack:
+            existing = getattr(self.stack, 'spinner', None)
+            if existing is not None:
+                raise ValueError(
+                    'A ScreenStack may own only one OptionSpinner; '
+                    'construct a second spinner with its own stack.'
+                )
+            self.stack.spinner = self
             if self.stack.obj is not None:
                 # Stack already has an obj - use it as our default_obj
                 self._default_obj = self.stack.obj
             else:
                 # Stack has no obj - give it ours
                 self.stack.obj = self._default_obj
+
+        self._register_builtins(quit_keys, escape_keys)
 
     @property
     def default_obj(self) -> object:
@@ -54,6 +84,25 @@ class OptionSpinner:
         self._default_obj = value
         if self.stack:
             self.stack.obj = value  # Keep in sync!
+
+    def _register_builtins(
+            self,
+            quit_keys: int | str | list | tuple | set | None,
+            escape_keys: int | str | list | tuple | set | None,
+    ) -> None:
+        """Register ``quit`` and ``escape`` before the app registers anything."""
+        specs = (
+            ('quit', self._DEFAULT_QUIT_KEYS if quit_keys is None else quit_keys),
+            ('escape', self._DEFAULT_ESCAPE_KEYS if escape_keys is None else escape_keys),
+        )
+        for attr, keys in specs:
+            # Keep the built-in descriptions out of the body's column width.
+            align = self.align
+            self.add_key(attr, f'{attr} (built in)', genre='action', keys=keys)
+            ns = self.attr_to_option[attr]
+            ns.builtin = True
+            ns.reserved = True
+            self.align = align
 
     @staticmethod
     def _make_option_ns() -> SimpleNamespace:
@@ -68,6 +117,8 @@ class OptionSpinner:
             comments=[],
             genre=None,
             scope=None,  # None = all screens, or set of screen numbers
+            builtin=False,  # registered by OptionSpinner, not by the app
+            reserved=False,  # its keys may only be taken with an explicit scope
         )
 
     def get_value(self, attr: str) -> object:
@@ -110,8 +161,8 @@ class OptionSpinner:
 
         for key in ns.keys:
             self._reject_navigation_key(key)
-            self._subtract_scope(key, effective_scope)
-            self._reject_key_conflicts(key, effective_scope)
+            self._subtract_scope(key, effective_scope,
+                                 explicit=ns.scope is not None)
             self._store_key_scope(key, ns, effective_scope)
 
         self.options.append(ns)
@@ -133,9 +184,20 @@ class OptionSpinner:
 
         return all_screens
 
-    @staticmethod
-    def _key_label(key: int) -> str:
-        return chr(key) if 32 <= key < 127 else f'<{key}>'
+    #: Names for the keys whose caret spelling would be unreadable in help.
+    _KEY_LABELS: ClassVar[dict[int, str]] = {
+        27: 'ESC', 10: '^J', curses.KEY_ENTER: 'ENTER'}
+
+    @classmethod
+    def _key_label(cls, key: int) -> str:
+        label = cls._KEY_LABELS.get(key)
+        if label is not None:
+            return label
+        if 0 <= key < 32:
+            return f'^{chr(key + 64)}'
+        if 32 <= key < 127:
+            return chr(key)
+        return f'<{key}>'
 
     def _reject_navigation_key(self, key: int) -> None:
         if key in self.nav_keys:
@@ -144,22 +206,21 @@ class OptionSpinner:
                 f'Navigation keys are reserved for cursor movement and scrolling.'
             )
 
-    def _subtract_scope(self, key: int, effective_scope: set) -> None:
+    def _subtract_scope(self, key: int, effective_scope: set, *,
+                        explicit: bool = False) -> None:
         for existing_ns in self.options:
             if key in existing_ns.keys and hasattr(existing_ns, 'effective_scope'):
                 overlap = existing_ns.effective_scope & effective_scope
+                if overlap and not explicit and getattr(existing_ns, 'reserved', False):
+                    raise ValueError(
+                        f'Key {self._key_label(key)} is reserved by the built-in '
+                        f"'{existing_ns.attr}' action; pass an explicit scope= to "
+                        f'override it on named screens, or change '
+                        f'{existing_ns.attr}_keys=.'
+                    )
                 for screen_num in overlap:
                     self.key_scopes.pop((key, screen_num), None)
                 existing_ns.effective_scope -= effective_scope
-
-    def _reject_key_conflicts(self, key: int, effective_scope: set) -> None:
-        for screen_num in effective_scope:
-            if (key, screen_num) in self.key_scopes:
-                existing_ns = self.key_scopes[(key, screen_num)]
-                raise ValueError(
-                    f'Key {self._key_label(key)} ({key}) already defined for screen {screen_num} '
-                    f'in option "{existing_ns.descr}". Cannot define same key twice for same screen.'
-                )
 
     def _store_key_scope(self, key: int, ns: SimpleNamespace, effective_scope: set) -> None:
         for screen_num in effective_scope:
@@ -184,7 +245,8 @@ class OptionSpinner:
         """Register one option: a setting to cycle, a prompt, or an action.
 
         This is the only registration path; the pre-2.0 ``add()`` shim has been
-        removed.
+        removed.  ``quit`` and ``escape`` are already registered by the
+        constructor (see the class docstring).
 
         ``attr``
             Attribute name on the target object, and the option's unique id.
@@ -255,13 +317,14 @@ class OptionSpinner:
             ``_ACTION`` method for an action.  Later registrations that claim
             the same key subtract their screens from earlier options, so the
             last writer wins and the earlier option keeps the screens nobody
-            else took.  A key claimed twice on the same screen raises
-            ``ValueError``.
+            else took.  The built-in ``quit``/``escape`` keys are reserved:
+            taking one requires an explicit ``scope=``; an implicit
+            registration on it raises ``ValueError``.
 
         Raises ``ValueError`` for a duplicate ``attr``, a navigation key, a
         genre that contradicts the arguments, ``check_ans`` on a non-prompt
         option, a ``check_ans`` string that is not a valid regular expression,
-        or a key already bound on one of the requested screens.
+        or an implicit registration on a reserved built-in key.
 
         ``effective_scope`` is computed once at registration and recorded per
         screen in ``key_scopes``; that table is what ``do_key()`` and
@@ -324,7 +387,10 @@ class OptionSpinner:
         if not keys:
             return [ord(descr[0])]
 
-        raw = list(keys) if isinstance(keys, (list, tuple, set)) else [keys]
+        # A set is unordered; sort it so the help block reads the same on every
+        # run.  List and tuple order is the caller's reading order.
+        raw = (sorted(keys) if isinstance(keys, set)
+               else list(keys) if isinstance(keys, (list, tuple)) else [keys])
         codes: list[int] = []
         for key in raw:
             if isinstance(key, str):
@@ -368,38 +434,47 @@ class OptionSpinner:
             return set(scope)
         raise ValueError(f"scope must be None, int, or list/set, got {type(scope)}")
 
-    @staticmethod
-    def show_help_nav_keys(screen: Screen) -> None:
+    def show_help_nav_keys(self, screen: Screen) -> None:
         # Render from the live window so its own opts.taken_nav_keys are
         # honored: keys the app owns are not advertised as navigation.
         for line in screen.win.nav_help_lines():
             screen.add_header(line)
+        builtin = self._builtin_nav_line()
+        if builtin:
+            screen.add_header(builtin)
 
-    def show_help_body(self, screen: Screen,
-                       screen_filter: int | list | set | None = None) -> None:
-        screen.add_body('Type keys to alter choice:', curses.A_UNDERLINE)
-
-        filter_screens = self._filter_screens(screen_filter)
-        for ns in self.options:
-            if self._skipped_by_filter(ns, filter_screens):
+    def _builtin_nav_line(self) -> str:
+        """The ``quit: ... back: ...`` row, or '' when the built-ins are gone."""
+        chunks = []
+        for attr, label in self._BUILTIN_NAV_LABELS.items():
+            ns = self.attr_to_option.get(attr)
+            if ns is None or not ns.builtin:
                 continue
+            keys = '/'.join(self._key_label(key) for key in ns.keys)
+            chunks.append(f'{label}: {keys}')
+        return '   '.join(chunks)
+
+    def options_for_screen(self, screen: Screen) -> list[SimpleNamespace]:
+        """The body options that apply on *screen*, built-ins excluded.
+
+        Without a stack -- or on a screen the stack did not number -- there is
+        no scope to filter by, so every application option applies.  This is the
+        one definition of "applies here" used by the help body and by an app
+        drawing its own help.
+        """
+        shown = [ns for ns in self.options if not ns.builtin]
+        num = getattr(screen, 'num', None)
+        if self.stack is None or num is None:
+            return shown
+        return [ns for ns in shown
+                if num in getattr(ns, 'effective_scope', set())]
+
+    def show_help_body(self, screen: Screen) -> None:
+        options = self.options_for_screen(screen)
+        if options:
+            screen.add_body('Type keys to alter choice:', curses.A_UNDERLINE)
+        for ns in options:
             self._write_option_body(screen, ns)
-
-    @staticmethod
-    def _filter_screens(screen_filter: int | list | set | None) -> set | None:
-        if screen_filter is None:
-            return None
-        if isinstance(screen_filter, int):
-            return {screen_filter}
-        if isinstance(screen_filter, (list, tuple, set)):
-            return set(screen_filter)
-        return None
-
-    @staticmethod
-    def _skipped_by_filter(ns: SimpleNamespace, filter_screens: set | None) -> bool:
-        if filter_screens is None or not hasattr(ns, 'effective_scope'):
-            return False
-        return not (ns.effective_scope & filter_screens)
 
     def _write_option_body(self, screen: Screen, ns: SimpleNamespace) -> None:
         # Registration normalizes every option, so a missing value here means

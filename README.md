@@ -91,7 +91,7 @@ It is a read-only `/etc/passwd` browser, and it is deliberately more than a list
 * **`status()` and `flash()`** — `status()` is a non-modal one-line message on the separator row; `flash()` is a modal box that clears the screen. The demo uses `status()` for "Processed", "Cancelled" and note-saved feedback.
 * **`BasicTextScreen`** — the HISTORY screen is rebuilt each draw from a `BasicTextScreen` via `set_text()` (headers plus `(text, attr)` lines), and resolves its window at draw time because the screens are constructed before the `ConsoleWindow`.
 * **Token-based headers** — `HeaderLine` (`text`, `bracket_key`, `key`, `extend`) rendered with `add_header_line()`, rather than string markup. Both header helpers accept `line_attr`, an attribute OR'd into every span, so a whole header can be dimmed (`curses.A_DIM`) without losing its per-span styling.
-* **`Ctrl-C` as an application key** — `ctrl_c_terminates=False` and `keys={0x3, ord('q')}` on the quit action. This works only while no live window in the process has requested terminating Ctrl-C: once any window uses the default (`ctrl_c_terminates=True`), terminating Ctrl-C is latched for as long as a window depends on it. The handler that was installed before the first window is captured and restored when the last window stops, and `reset_ctrl_c()` does the same deliberately for an embedding application that manages SIGINT itself.
+* **`Ctrl-C` as an application key** — `ctrl_c_terminates=False`, with `0x3` in the spinner's built-in `quit` keys. This works only while no live window in the process has requested terminating Ctrl-C: once any window uses the default (`ctrl_c_terminates=True`), terminating Ctrl-C is latched for as long as a window depends on it. The handler that was installed before the first window is captured and restored when the last window stops, and `reset_ctrl_c()` does the same deliberately for an embedding application that manages SIGINT itself.
 * **Full-repaint recovery** — `r` toggles `render(redraw=True)`, the path that repaints after terminal corruption.
 * **Multi-row picking** — `p` sets `pick_size` (1–3) via `set_pick_mode(True, size)`.
 * **Large-body stress** — `z` appends 2000 non-pickable filler rows to exercise long bodies and the scroll indicator. No option is needed for them: the pads stay viewport-sized, memory and `clear()` cost do not grow with the row count, and the default `max_rows` ceiling is far above 2000.
@@ -211,7 +211,7 @@ screen = BasicTextScreen(app, head='COMPARE',
 screen.set_text(lines=['replacement'])
 ```
 
-`lines` items are `str` or `(str, attr)`; `head` may be a `str`, a `HeaderLine`, or an iterable of either. There is no pick mode, no action handler and no spinner: ESC/back remains the application's `escape_ACTION`.
+`lines` items are `str` or `(str, attr)`; `head` may be a `str`, a `HeaderLine`, or an iterable of either. There is no pick mode, no action handler and no spinner: ESC/back uses the default `Screen.escape_ACTION` (pop), which the application may override.
 
 ### Taking navigation keys for the application
 
@@ -235,6 +235,18 @@ spin.add_key('prev', '← - previous', genre='action', keys=[curses.KEY_LEFT])
 A taken key is withdrawn from navigation dispatch for that window only: it no longer scrolls, it is no longer advertised as navigation, and it takes the normal `handled_keys`/`relax_handled_keys` path on return. Text editing is unchanged — dialogs and widgets still use LEFT/RIGHT/HOME/END for the caret.  Because ownership lives in `ConsoleWindowOpts`, two windows in one process can have different bindings; `NAVIGATION_KEYS` itself is never mutated. Taking every vertical key is allowed (and logged as "reduced navigation"), since the application is then responsible for its own scrolling.
 
 `ScreenStack.perform_actions()` is the normal router: it walks the spinner options, honors their scopes, and calls the matching `<attr>_ACTION` method.  For apps that dispatch an action themselves, `ScreenStack.act_in(action, screens=None)` is the low-level single-flag variant: it clears that flag from `stack.obj` and returns whether it was set and the current screen matched.  `ScreenStack.is_curr()` answers the screen test on its own. A missing flag reads as `False`, so an options object need not pre-seed every action.
+
+### Help body, built-in actions and the spinner
+
+A spinner registers two actions before the application registers anything: `quit` (`q`, `^C`) and `escape` (`ESC`, `^J`, `ENTER`). They are printed once in the `NavKeys:` block, never in the option body. `Screen` supplies the default handlers — `quit_ACTION()` exits and `escape_ACTION()` pops one screen (a no-op at home) — and an app overrides either method as usual. The key sets are constructor arguments:
+
+```python
+spin = OptionSpinner(stack=stack, quit_keys=(ord('q'), ord('Q'), 0x3))
+```
+
+A `ScreenStack` owns at most one spinner: the spinner injects itself as `stack.spinner`, and the stack assigns each screen its `num` and `stack`, so a help screen finds the spinner without scanning the application. Constructing a second spinner on the same stack raises `ValueError`.
+
+The help body lists only the options whose scope includes the help screen, so "shown" and "works" are the same set; an option meant to work on help names it in `scope=`. The built-in actions are excluded, and when nothing applies the `Type keys to alter choice:` heading is omitted. `OptionSpinner.options_for_screen(screen)` is the same definition an application can use when drawing its own help. A registration that would take a built-in key must name its screens explicitly (`scope=...`); an implicit registration raises, so a global option can no longer silently unbind `q`/`^C`/`ESC`.
 
 ### Singleton vs. per-instance windows
 

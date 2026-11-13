@@ -101,8 +101,8 @@ class SampleApp:
             # option.  max_rows is only a safety ceiling (32767 by default).
             min_cols_rows=(60,10),
             pick_attr=cs.A_REVERSE,
-            # Ctrl-C arrives as an ordinary key code (bound to 'quit' below)
-            # instead of tearing down curses.
+            # Ctrl-C arrives as an ordinary key code (the spinner's built-in
+            # quit action owns it) instead of tearing down curses.
             ctrl_c_terminates=False,
         )
 
@@ -116,10 +116,8 @@ class SampleApp:
 
         # Add view mode and sort options
         # NOTE: settings shown on the HELP screen are scoped to HELP_ST as well,
-        # so their spinner keys keep working while help is open.
-        spin.add_key('quit', 'q,CTL-C - quit', genre='action', keys={0x3, ord('q')})
-        spin.add_key('escape', 'ESC,ENTER - back',
-                     keys=[27,10,cs.KEY_ENTER], genre='action')
+        # so their spinner keys keep working while help is open.  ``quit`` and
+        # ``escape`` are supplied by the spinner itself.
         spin.add_key('view_mode', 'v - view mode',
                      vals=['compact', 'detailed', 'full'], scope={MAIN_ST, HELP_ST})
         spin.add_key('sort_by', 's - sort by',
@@ -235,13 +233,8 @@ class SampleApp:
             if self.filter_bar.handle_key(key):
                 return None  # Key was consumed
 
-        # Handle ENTER for screen navigation
-        if key in (cs.KEY_ENTER, 10):
-            if self.stack.curr.num != MAIN_ST:
-                self.stack.pop()
-                return None
-
-        # Handle spinner keys LAST (normal priority)
+        # Handle spinner keys LAST (normal priority).  ENTER/ESC navigation is
+        # the spinner's built-in escape action, dispatched by perform_actions().
         if key in self.spin.keys:
             previous_theme = self.opts.theme
             self.spin.do_key(key, self.win)
@@ -282,13 +275,6 @@ class DemoScreen(Screen):
         # but Screen identifies a screen by its stack number, not a label.
         super().__init__(app)
         self.app = app
-
-    def get_spinner(self):
-        return self.app.spin if hasattr(self.app, 'spin') else None
-
-    def escape_ACTION(self):
-        app = self.app
-        app.stack.pop()
 
     def quit_ACTION(self):
         app = self.app
