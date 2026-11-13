@@ -106,7 +106,7 @@ def test_choice_lines_mark_the_resolved_choice():
     line = PromptLine()
     line.start('Pick', choices=['alpha', 'beta'], seed='beta')
 
-    assert line.get_choice_lines() == ['  alpha', '⮞ beta']
+    assert line.get_choice_lines() == ['  alpha', '➤ beta']
 
     # A plain text prompt has no choice rows.
     line.start('Value', mode='text')

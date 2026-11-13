@@ -45,15 +45,15 @@ _CTRL_PAGE_UP, _CTRL_HALF_DOWN, _CTRL_PAGE_DOWN, _CTRL_HALF_UP = 2, 4, 6, 21
 
 # Display labels for the keys that can appear in the navigation help.  Arrow
 # keys are listed too even though the default lines do not use them: an app that
-# takes LEFT/RIGHT gets `←`/`→` on the "App:" line without supplying a label.
+# takes LEFT/RIGHT gets `⬅`/`➡` on the "App:" line without supplying a label.
 # Control keys use caret notation, the same spelling `_raw_key_label()` uses for
 # them, so the navigation map stays narrow: `^b/^f` costs four columns where
 # `Ctrl-b/Ctrl-f` cost eleven.
 NAV_KEY_LABELS: dict[int, str] = {
     curses.KEY_UP: 'UP',
     curses.KEY_DOWN: 'DOWN',
-    curses.KEY_LEFT: '←',
-    curses.KEY_RIGHT: '→',
+    curses.KEY_LEFT: '\u2b05',
+    curses.KEY_RIGHT: '\u27a1',
     curses.KEY_HOME: 'HOME',
     curses.KEY_END: 'END',
     curses.KEY_PPAGE: 'PPAGE',
@@ -134,7 +134,7 @@ def _key_label(key: int) -> str:
     never hides *which* key arrived.
 
     The arrow labels are decorative, so they pass through the glyph registry:
-    on a terminal that cannot draw ``←`` the help reads ``<-`` instead.
+    on a terminal that cannot draw ``⬅`` the help reads ``<-`` instead.
     """
     return glyphs.transliterate(_raw_key_label(key))
 

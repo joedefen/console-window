@@ -4,6 +4,7 @@ import pytest
 
 from console_window.glyphs import (
     BUILTIN_GLYPHS,
+    DEPRECATED_GLYPHS,
     Glyph,
     Glyphs,
     catalog_items,
@@ -183,3 +184,13 @@ def test_re_registering_a_builtin_takes_effect_after_the_table_is_built():
     assert transliterate('\u2713') == 'v'
     register('check', '\u2713', 'OK')
     assert transliterate('\u2713') == 'OK'
+
+
+def test_every_deprecated_spelling_maps_to_a_registered_replacement():
+    registered = {glyph.unicode for glyph in BUILTIN_GLYPHS.values()}
+    for old, new in DEPRECATED_GLYPHS.items():
+        assert string_width(old) == 1, old
+        assert new in registered, new
+        # A deprecated form still present as a built-in would never upgrade,
+        # and the app-wins rule would never fire, so the table would be dead.
+        assert old not in registered, old

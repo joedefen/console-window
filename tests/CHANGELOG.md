@@ -53,6 +53,21 @@ This project follows [Semantic Versioning](https://semver.org/).
   point, whether it re-registers the built-in's name or claims the character
   under a new one.  Previously a built-in kept the fallback it was registered
   with first, and the override was silently ignored.
+- **Breaking:** the symbols the library draws itself moved to their heavier,
+  font-covered forms.  The resolved-choice marker is `➤` (U+27A4) instead of
+  `⮞` (U+2B9E), which DejaVu Sans Mono does not contain, so the marker was drawn
+  by a fallback font that can be wider than one cell; `Glyphs.get('choice')`,
+  `get_choice_lines()` and `InlineConfirmation` follow it, and the ASCII fallback
+  stays `>`.  The help-legend arrows are `⬅`/`➡` and the vertical ones `⬆`/`⬇`
+  (black, from the same font) instead of `←`/`→`/`↑`/`↓`, the hollow circle is
+  `◯` (large) rather than `○`, and the square pair is the matched medium
+  `◻`/`◼` rather than the large `□`/`■`.  Old spellings are upgraded in both
+  modes: `⮞`/`←`/`→`/`↑`/`↓`/`○`/`□`/`■` are rewritten to the new code points
+  before the text is measured, so text written against 2.x renders from the
+  basic font without a source change, and registering an old code point
+  (`Glyphs.register('choice', '⮞', '>')`) keeps it.  Hollow triangles have no
+  heavier outline form in Unicode, so `△▽◁▷` stay as they are; their heavy
+  counterparts are the filled `▲▼◀▶`.
 - **Breaking:** content and the pick/scroll state moved from `ConsoleWindow`
   onto `Screen`, and `draw()` is deleted, leaving one drawing model.  The
   `win.add_header()`, `win.add_body()`, `win.add_fancy_header()`,

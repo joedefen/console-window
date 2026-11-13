@@ -12,7 +12,7 @@ from console_window.glyphs import (
 
 
 def test_unicode_mode_is_the_identity_function():
-    text = 'a\u2502b \u2b9e'
+    text = 'a\u2502b \u27a4'
     assert transliterate(text) is text
 
 
@@ -105,3 +105,29 @@ def test_glyph_widths_follow_the_substitution():
     register('stop_sign', '\U0001f6d1', 'STOP')
     set_ascii(True)
     assert glyphs.transliterate('a\U0001f6d1') == 'aSTOP'
+
+
+def test_a_deprecated_spelling_is_upgraded_in_unicode_mode():
+    # Text written against an older release keeps the shape, from the font that
+    # actually has it.
+    assert transliterate('\u2b9e') == '\u27a4'
+    assert transliterate('\u2192 and \u25a1') == '\u27a1 and \u25fb'
+
+
+def test_a_deprecated_spelling_still_degrades_in_ascii_mode():
+    set_ascii(True)
+    assert transliterate('\u2192 \u25a1') == '-> []'
+
+
+def test_a_deprecated_variation_selector_spelling_is_upgraded():
+    assert transliterate('\u2192\ufe0f') == '\u27a1'
+
+
+def test_an_app_registration_keeps_a_deprecated_spelling():
+    # Render once first: the compiled table must be rebuilt, not reused, when
+    # the app claims the old code point.
+    assert transliterate('\u2b9e') == '\u27a4'
+    register('choice', '\u2b9e', '>')
+    assert transliterate('\u2b9e') == '\u2b9e'
+    set_ascii(True)
+    assert transliterate('\u2b9e') == '>'

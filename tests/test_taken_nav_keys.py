@@ -254,8 +254,8 @@ def test_help_omits_taken_nav_keys_and_shows_app_labels(make):
     assert 'up: k' in nav_text
     assert 'down: j/DOWN' in nav_text
     # Taken keys are advertised under App: with the caller's labels.
-    assert '←: prev' in app_text
-    assert '→: next' in app_text
+    assert '⬅: prev' in app_text
+    assert '➡: next' in app_text
     assert 'UP: app up' in app_text
     assert lines[-2].startswith('App:') or lines[-1].startswith('App:')
 
@@ -265,4 +265,4 @@ def test_spinner_help_renders_from_the_window(make):
     spin = OptionSpinner(nav_keys=win.opts.nav_keys)
     spin.show_help_nav_keys(screen_of(win))
     header_text = '\n'.join(win.head.texts)
-    assert '←: prev' in header_text
+    assert '⬅: prev' in header_text

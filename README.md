@@ -196,7 +196,7 @@ The display formats are fixed so applications do not have to reproduce them:
 * single-key modes `Y`/`y`: `f'{prompt}  [Press "{mode}" or ESC]'`, e.g.  `Really quit?  [Press "y" or ESC]`;
 * every other mode: `f'{prompt}: {buffer}{caret}{rest}'`, e.g. `Value: 5│`.
 
-`get_hint_string(width)` returns the hint (truncated when a width is given), and `get_choice_lines()` returns one row per choice, marking the currently resolved one: `⮞ alpha` versus `  beta`. Drawing is the application's choice: `Screen.add_prompt_header()` puts a screen-wide question in the header band, while `Screen.add_prompt_lines()` appends a bold prompt row and a dim hint row as `Context(genre='TRANSIENT', pickable=False)` from the application's own row loop. The window never learns which item the prompt belongs to.
+`get_hint_string(width)` returns the hint (truncated when a width is given), and `get_choice_lines()` returns one row per choice, marking the currently resolved one: `➤ alpha` versus `  beta`. Drawing is the application's choice: `Screen.add_prompt_header()` puts a screen-wide question in the header band, while `Screen.add_prompt_lines()` appends a bold prompt row and a dim hint row as `Context(genre='TRANSIENT', pickable=False)` from the application's own row loop. The window never learns which item the prompt belongs to.
 
 ### Read-only text screens
 
@@ -227,7 +227,7 @@ opts = ConsoleWindowOpts(
 )
 win = ConsoleWindow(opts=opts)
 spin = OptionSpinner(stack=stack, nav_keys=opts.nav_keys)  # accept them in add_key()
-spin.add_key('prev', '← - previous', genre='action', keys=[curses.KEY_LEFT])
+spin.add_key('prev', '⬅ - previous', genre='action', keys=[curses.KEY_LEFT])
 ```
 
 A taken key is withdrawn from navigation dispatch for that window only: it no longer scrolls, it is no longer advertised as navigation, and it takes the normal `handled_keys`/`relax_handled_keys` path on return. Text editing is unchanged — dialogs and widgets still use LEFT/RIGHT/HOME/END for the caret.  Because ownership lives in `ConsoleWindowOpts`, two windows in one process can have different bindings; `NAVIGATION_KEYS` itself is never mutated. Taking every vertical key is allowed (and logged as "reduced navigation"), since the application is then responsible for its own scrolling.
@@ -271,10 +271,10 @@ The first successful construction latches the mode for the whole process.  Mixin
 
 ### Symbols on terminals that cannot draw them
 
-The UI is built around non-ASCII symbols (`│`, `⮞`, `█`, `←`, `→`, `·`, box drawing). A terminal that cannot encode them does not fail loudly: it paints a box, or nothing, and the row quietly loses its meaning. `console-window` therefore keeps every symbol in one registry, in two spellings, and degrades by itself:
+The UI is built around non-ASCII symbols (`│`, `➤`, `█`, `⬅`, `➡`, `·`, box drawing). A terminal that cannot encode them does not fail loudly: it paints a box, or nothing, and the row quietly loses its meaning. `console-window` therefore keeps every symbol in one registry, in two spellings, and degrades by itself:
 
 * **No code change.** A window detects the terminal when it is constructed — a non-UTF-8 output encoding or `TERM=dumb` selects the ASCII spellings — and text handed to `add_header()` / `add_body()` / `draw()` / `status()` / `flash()` is transliterated before it is measured, so widths and the run-length attribute counts stay correct.
-* **Only registered symbols are rewritten.** `Grüße` stays `Grüße`: the substitution table contains the catalog's characters, never arbitrary text, so letters, digits and unregistered code points pass through byte for byte. A registered typographic mark does follow the mode, which is the point of it — an em dash inside file content becomes `--` on an ASCII terminal rather than a box. Set `CONSOLE_WINDOW_GLYPH_AUDIT=1` to log each decorative code point you use but
+* **Only registered symbols are rewritten.** `Grüße` stays `Grüße`: the substitution table contains the catalog's characters, never arbitrary text, so letters, digits and unregistered code points pass through byte for byte. A registered typographic mark does follow the mode, which is the point of it — an em dash inside file content becomes `--` on an ASCII terminal rather than a box. The eight spellings this library used to draw (`⮞`, `←`, `→`, `↑`, `↓`, `○`, `□`, `■`) are upgraded to their replacements (`➤`, `⬅`, `➡`, `⬆`, `⬇`, `◯`, `◻`, `◼`) in **both** modes, so text written against an older release renders from the font that has it — inside content as well. Registering an old code point yourself keeps it. Set `CONSOLE_WINDOW_GLYPH_AUDIT=1` to log each decorative code point you use but
   did not register, with the exact `register()` call to add.
 
 * **A catalog to choose from.** The registry carries about eighty named symbols, grouped as UI marks, frames, arrows, triangles, filled/hollow shape pairs, blocks and bars, marks, math, currency and typography. Every one is a single cell wide and is covered by the default monospace font on Debian, Ubuntu and Fedora (DejaVu Sans Mono), so it is safe to use without a patched font: no emoji, no icon fonts. `Glyphs.catalog()` returns the set in the active spelling and `Glyphs.catalog_rows(width)` packs it into display rows; the theme picker page prints all of them, so that page doubles as the font check. A character has exactly one fallback even when two names draw it (`cursor_block` and `swatch` are the same block).
@@ -343,6 +343,13 @@ Deprecated APIs remain supported **indefinitely**. A deprecation is a request to
 - **`Appearance.resolve_appearance()` returns one theme name**, not `(theme, colors)`. Apply it with `Theme.set_active()`; `mono` is the color-off state.
 - **`dark-mono` / `light-mono` are now `dark` / `light`.** The old names are still accepted as aliases by `--theme`, remembered preferences and `Theme.resolve()`, but `Theme.list_all()` lists only the canonical names.
 - **`mono` is a theme.** It installs only the terminal-default background and uses `Appearance.MONO_ROLES` for the semantic roles. It is terminal-global like any other theme install, because curses owns one color-pair table per terminal.
+
+**The built-in symbols are the heavier, font-safe forms.** The library moved the symbols it draws itself to the heavier variant wherever one exists in the default monospace font:
+
+- **The resolved-choice marker is `➤` (U+27A4), not `⮞` (U+2B9E).** U+2B9E is absent from DejaVu Sans Mono — the default on Debian, Ubuntu and Fedora — so the marker was drawn by whichever fallback font had it, which can be wider than one cell. `Glyphs.get('choice')`, `get_choice_lines()` and `InlineConfirmation` follow the new form; the ASCII fallback is still `>`. An application that hardcoded `⮞` should use `➤`, or register `⮞` itself to keep the old look.
+- **The arrows are the black forms.** `⬅`/`➡` replace `←`/`→` (including the help legend's labels for taken keys) and `⬆`/`⬇` replace `↑`/`↓`. The light code points are no longer registered, so text containing them is not transliterated; `CONSOLE_WINDOW_GLYPH_AUDIT=1` reports them.
+- **The hollow shapes are the heavier pair.** `◯` replaces `○`, and `◻`/`◼` replace `□`/`■`. The hollow triangles `△▽◁▷` keep their light form: Unicode has no heavy outline triangle.
+- **Old spellings are upgraded in both modes.** `⮞`, `←`, `→`, `↑`, `↓`, `○`, `□` and `■` are rewritten to `➤`, `⬅`, `➡`, `⬆`, `⬇`, `◯`, `◻` and `◼` before the text is measured, in Unicode mode as well as ASCII. An unmodified application therefore picks up the font-safe shapes; registering one of the old code points (`register('choice', '⮞', '>')`) keeps it instead.
 
 ---
 

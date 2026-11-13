@@ -29,7 +29,7 @@ def test_rows_are_ascii_in_ascii_mode():
     win = _window(ascii=True)
     try:
         screen_of(win).add_header('header \u2500 with \u2502 art')
-        screen_of(win).add_body('body \u2b9e and \u2192')
+        screen_of(win).add_body('body \u27a4 and \u27a1')
         rows = win.head.texts + win.body.texts
         assert rows
         assert all(row.isascii() for row in rows)
@@ -40,8 +40,8 @@ def test_rows_are_ascii_in_ascii_mode():
 def test_rows_keep_their_unicode_in_unicode_mode():
     win = _window(ascii=False)
     try:
-        screen_of(win).add_body('body \u2b9e and \u2192')
-        assert any('\u2b9e' in row for row in win.body.texts)
+        screen_of(win).add_body('body \u27a4 and \u27a1')
+        assert any('\u27a4' in row for row in win.body.texts)
     finally:
         win.stop_curses()
 
@@ -59,7 +59,7 @@ def test_resumed_segments_are_transliterated_before_they_are_measured():
     win = _window(ascii=True)
     try:
         screen_of(win).add_body('x' * 70)
-        screen_of(win).add_body('\u2b9e tail', resume=True)
+        screen_of(win).add_body('\u27a4 tail', resume=True)
         assert win.body.texts[0].isascii()
     finally:
         win.stop_curses()

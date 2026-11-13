@@ -58,6 +58,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     'AUDIT_ENV',
     'BUILTIN_GLYPHS',
+    'DEPRECATED_GLYPHS',
     'GLYPHS_ENV',
     'Glyph',
     'Glyphs',
@@ -133,7 +134,7 @@ class Glyph:
 #: (DejaVu Sans Mono) actually covers -- no emoji, nothing from a patched font.
 #: A code point has exactly one fallback even when two names draw it
 #: (``cursor_block`` and ``swatch`` are the same block); an application that
-#: registers a code point itself takes it over (see :func:`_compile_table`).
+#: registers a code point itself takes it over (see :func:`_compile_tables`).
 BUILTIN_GLYPHS: dict[str, Glyph] = {
     # --- the library's own UI marks -----------------------------------------
     'cursor': Glyph('\u2502', '|'),          # narrow text cursor in widgets
@@ -141,13 +142,18 @@ BUILTIN_GLYPHS: dict[str, Glyph] = {
     # One cell in both spellings: the choice list indents the other rows by one
     # cell plus a space, so a two-character marker would knock the column out
     # of alignment exactly where the terminal is already struggling.
-    'choice': Glyph('\u2b9e', '>'),          # "this choice is the current value"
+    # U+27A4, not the equilateral U+2B9E this used to be: DejaVu Sans Mono has
+    # no glyph for U+2B9E, so the marker came from a fallback font that can be
+    # wider than one cell.  Both spellings stay one cell wide.
+    'choice': Glyph('\u27a4', '>'),          # "this choice is the current value"
     'scroll_prev': Glyph('\u25c0', '<'),     # dialog horizontal scroll, left
     'scroll_next': Glyph('\u25b6', '>'),     # dialog horizontal scroll, right
     'alert_up': Glyph('\u25b2', '^'),        # alert "more above"
     'alert_down': Glyph('\u25bc', 'v'),      # alert "more below"
-    'nav_prev': Glyph('\u2190', '<-'),       # help legend, "left arrow"
-    'nav_next': Glyph('\u2192', '->'),       # help legend, "right arrow"
+    # The heavy (black) arrows: the light `←`/`→` look anaemic beside the solid
+    # triangles the same UI uses, and these are in the same font.
+    'nav_prev': Glyph('\u2b05', '<-'),       # help legend, "left arrow"
+    'nav_next': Glyph('\u27a1', '->'),       # help legend, "right arrow"
     'bullet': Glyph('\u00b7', '.'),          # help-list bullet
     'swatch': Glyph('\u2588', '#'),          # theme color swatch
 
@@ -170,8 +176,8 @@ BUILTIN_GLYPHS: dict[str, Glyph] = {
     'frame_v_double': Glyph('\u2551', '|'),
 
     # --- arrows -------------------------------------------------------------
-    'arrow_up': Glyph('\u2191', '^'),
-    'arrow_down': Glyph('\u2193', 'v'),
+    'arrow_up': Glyph('\u2b06', '^'),
+    'arrow_down': Glyph('\u2b07', 'v'),
     'arrow_double_left': Glyph('\u21d0', '<='),
     'arrow_double_right': Glyph('\u21d2', '=>'),
     'arrow_double_up': Glyph('\u21d1', '^^'),
@@ -187,11 +193,11 @@ BUILTIN_GLYPHS: dict[str, Glyph] = {
 
     # --- shapes: filled and hollow pairs ------------------------------------
     'circle_filled': Glyph('\u25cf', '@'),
-    'circle_hollow': Glyph('\u25cb', 'o'),
+    'circle_hollow': Glyph('\u25ef', 'o'),   # large circle: reads heavier
     'diamond_filled': Glyph('\u25c6', '#'),
     'diamond_hollow': Glyph('\u25c7', '<>'),
-    'square_filled': Glyph('\u25a0', '#'),
-    'square_hollow': Glyph('\u25a1', '[]'),
+    'square_filled': Glyph('\u25fc', '#'),   # medium pair: a matched weight
+    'square_hollow': Glyph('\u25fb', '[]'),
     'star_filled': Glyph('\u2605', '*'),
     'star_hollow': Glyph('\u2606', '+'),
 
@@ -254,6 +260,23 @@ BUILTIN_PROBE: tuple[str, ...] = (
 #: this width; a narrower terminal wraps into more rows rather than truncating.
 CATALOG_PER_ROW = 27
 
+#: Spellings this library used to draw, mapped to the code point that replaced
+#: them.  Text written against an older release is upgraded in *both* modes, so
+#: it renders from the same font instead of a fallback.  An application that
+#: registers one of these code points itself keeps it (see
+#: :func:`_compile_tables`), which is the escape hatch for an app that liked the
+#: old shape.
+DEPRECATED_GLYPHS: dict[str, str] = {
+    '\u2b9e': '\u27a4',   # choice: U+2B9E is not in DejaVu Sans Mono
+    '\u2190': '\u2b05',   # nav_prev
+    '\u2192': '\u27a1',   # nav_next
+    '\u2191': '\u2b06',   # arrow_up
+    '\u2193': '\u2b07',   # arrow_down
+    '\u25cb': '\u25ef',   # circle_hollow
+    '\u25a1': '\u25fb',   # square_hollow
+    '\u25a0': '\u25fc',   # square_filled
+}
+
 _registry: dict[str, Glyph] = {}
 _probe: list[str] = []
 _ascii_mode = False
@@ -263,13 +286,22 @@ _ascii_mode = False
 #: ``--ascii`` the user asked for.
 _decided = False
 _table: re.Pattern[str] | None = None
+_upgrade_table: re.Pattern[str] | None = None
+_compiled = False
 _map: dict[str, str] = {}
+_upgrade: dict[str, str] = {}
 _audited: set[str] = set()
+
+
+def _invalidate() -> None:
+    """Forget the compiled patterns; the registry changed under them."""
+    global _compiled  # pylint: disable=global-statement
+    _compiled = False
 
 
 def _reset_state() -> None:
     """Restore the built-in table and the Unicode mode (used by :func:`reset`)."""
-    global _ascii_mode, _decided, _table  # pylint: disable=global-statement
+    global _ascii_mode, _decided, _table, _upgrade_table  # pylint: disable=global-statement
     _registry.clear()
     _registry.update(BUILTIN_GLYPHS)
     _probe.clear()
@@ -277,8 +309,11 @@ def _reset_state() -> None:
     _ascii_mode = False
     _decided = False
     _table = None
+    _upgrade_table = None
     _map.clear()
+    _upgrade.clear()
     _audited.clear()
+    _invalidate()
 
 
 def register(
@@ -293,13 +328,12 @@ def register(
     *ascii_text* must be plain ASCII (it may be empty).  ``probe=True`` adds the
     glyph to the font check, where the user sees the real Unicode form.
     """
-    global _table  # pylint: disable=global-statement
     if not isinstance(name, str) or not name:
         raise TypeError(f'glyph name must be a non-empty str, got {name!r}')
     _registry[name] = Glyph(unicode_text, ascii_text)
     if probe:
         _add_probe(name)
-    _table = None
+    _invalidate()
 
 
 def register_many(
@@ -454,16 +488,37 @@ def _spellings(text: str) -> list[str]:
     return forms
 
 
-def _compile_table() -> re.Pattern[str] | None:
-    """Build (and cache) the longest-match substitution pattern."""
-    global _table  # pylint: disable=global-statement
-    if _table is not None:
-        return _table
+def _compile(mapping: Mapping[str, str]) -> re.Pattern[str] | None:
+    """Compile one longest-match substitution pattern, or None when empty."""
+    if not mapping:
+        return None
+    # Alternation is leftmost-first, so sorting longest-first is what lets a
+    # multi-character glyph win over the single characters it contains.
+    alternation = '|'.join(
+        re.escape(form) for form in sorted(mapping, key=len, reverse=True)
+    )
+    return re.compile(alternation)
+
+
+def _compile_tables() -> tuple[re.Pattern[str] | None, re.Pattern[str] | None]:
+    """Build (and cache) the substitution patterns for both modes.
+
+    Returns ``(ascii_table, upgrade_table)``.  The first replaces every
+    registered glyph with its ASCII spelling.  The second rewrites the spellings
+    this library used to draw to the code points that replaced them, so text
+    written against an older release renders from the same font in Unicode mode
+    too.  Both are built together because one registration can invalidate
+    either.
+    """
+    global _compiled, _table, _upgrade_table  # pylint: disable=global-statement
+    if _compiled:
+        return _table, _upgrade_table
     # Rebuild from scratch.  A registration invalidates the cache, and an app
     # that claims a built-in's code point (under the same name or a new one)
     # must get its own fallback; keeping the old entry would silently ignore
     # the override for the rest of the process.
     _map.clear()
+    _upgrade.clear()
     for glyph in _registry.values():
         if glyph.unicode.isascii():
             continue
@@ -471,13 +526,23 @@ def _compile_table() -> re.Pattern[str] | None:
             if form.isascii():
                 continue
             _map[form] = glyph.ascii
-    if not _map:
-        return None
-    alternation = '|'.join(
-        re.escape(form) for form in sorted(_map, key=len, reverse=True)
-    )
-    _table = re.compile(alternation)
-    return _table
+    by_unicode = {glyph.unicode: glyph for glyph in _registry.values()}
+    for old, new in DEPRECATED_GLYPHS.items():
+        target = by_unicode.get(new)
+        # Skip when the replacement is gone, or when the app registered the old
+        # code point itself -- `register('choice', '\u2b9e', '>')` is the
+        # documented way to keep the old marker.
+        if target is None or old in by_unicode:
+            continue
+        for form in _spellings(old):
+            if form.isascii():
+                continue
+            _upgrade[form] = target.unicode
+            _map.setdefault(form, target.ascii)
+    _table = _compile(_map)
+    _upgrade_table = _compile(_upgrade)
+    _compiled = True
+    return _table, _upgrade_table
 
 
 def _audit_enabled() -> bool:
@@ -509,21 +574,29 @@ def _audit(text: str) -> None:
 
 
 def transliterate(text: str) -> str:
-    """Replace registered Unicode glyphs with their ASCII forms.
+    """Rewrite symbols the terminal cannot draw, and deprecated spellings.
 
-    Every other code point is left alone, so content (a hostname, a UTF-8 file
-    body, a non-English value) is never rewritten.  In Unicode mode this is the
-    identity function and returns *text* itself.
+    In ASCII mode every registered glyph becomes its ASCII spelling.  In *both*
+    modes a spelling this library used to draw is upgraded to the code point
+    that replaced it, so application text written against an older release
+    renders from the same font instead of a fallback.  Those eight spellings are
+    therefore rewritten even inside content; every other code point -- letters,
+    digits, unregistered symbols -- passes through untouched, which is what
+    keeps a pager showing ``Grüße`` byte-identical in both modes.
     """
-    if not text or not _ascii_mode or text.isascii():
+    if not text or text.isascii():
         return text
-    table = _compile_table()
-    if table is None:
+    ascii_table, upgrade_table = _compile_tables()
+    if _ascii_mode:
+        if ascii_table is None:
+            return text
+        result = ascii_table.sub(lambda match: _map[match.group(0)], text)
+        if _audit_enabled():
+            _audit(result)
+        return result
+    if upgrade_table is None:
         return text
-    result = table.sub(lambda match: _map[match.group(0)], text)
-    if _audit_enabled():
-        _audit(result)
-    return result
+    return upgrade_table.sub(lambda match: _upgrade[match.group(0)], text)
 
 
 @dataclass(frozen=True)
