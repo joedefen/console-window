@@ -117,10 +117,10 @@ ignore = ["E501", "E701", "E731"]
 max-complexity = 12
 
 [tool.ruff.lint.per-file-ignores]
-# Tests and the interactive demo are not part of the typed public API, so
+# Tests and the interactive demos are not part of the typed public API, so
 # annotation rules do not apply there.
 "tests/**" = ["ANN"]
-"SampleApp.py" = ["ANN"]
+"demos/**" = ["ANN"]
 
 # ----------------------------------------------------------------------
 # MYPY TYPE CHECKING

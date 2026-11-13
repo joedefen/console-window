@@ -36,6 +36,14 @@ This project follows [Semantic Versioning](https://semver.org/).
   font check.
 
 ### Changed
+- The demo family replaces the single `demo-buffet.py` sample.  Sixteen
+  lettered demos, `a-basic` through `p-key-debug`, teach one learning objective
+  each: A–C are complete single-file programs and D–P are short deltas on
+  `demos/demo_kit.py`.  `demos/features.py` is the machine-readable owner map,
+  `docs/DEMO-APPS.md` is the rendered curriculum and reverse index, and
+  `./demos/run-demo features` prints the map.  A library feature added or
+  changed from now on updates its owning demo, the map, and a changelog bullet
+  shaped like `- **...** — see demo: h-messages.`.
 - The help body lists only options whose scope includes the help screen, and it
   omits the `Type keys to alter choice:` heading when nothing applies.  The
   built-in actions stay in the navigation block.  `show_help_body()` takes just
@@ -118,6 +126,10 @@ This project follows [Semantic Versioning](https://semver.org/).
   invalidates it, so a fallback changed at runtime is the one actually used.
 
 ### Removed
+- `demos/demo-buffet.py` and its 393-line `tests/test_sample_app.py` harness.
+  Every feature it demonstrated has a focused home in the lettered family, and
+  `tests/test_demos.py` now drives each demo headlessly and enforces the
+  feature-ownership manifest.
 - `_filter_screens()` and `_skipped_by_filter()` are replaced by
   `options_for_screen()`, and the unreachable `_reject_key_conflicts()` is
   deleted: a later registration always subtracts its overlap from an earlier

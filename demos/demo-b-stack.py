@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Two Screens and a ScreenStack, without OptionSpinner.
+"""B — Two pages.
+
+Owns: screen-stack, per-screen-state, ctrl-c-key
+Base: a-basic
+Run:  ./demos/run-demo b-stack
 
 ONE shows prime ranks 100-200; TWO shows 300-400.  ``2`` pushes TWO and ESC
 pops back to ONE.  Each Screen owns its content and its scroll position, so
@@ -15,6 +19,7 @@ keeps the first page's place without the app copying any state around.
 
 from __future__ import annotations
 
+import argparse
 import curses as cs
 from types import SimpleNamespace
 
@@ -25,6 +30,7 @@ from console_window import (
     ConsoleWindowOpts,
     Screen,
     ScreenStack,
+    cli,
 )
 
 # prompt() only checks the clock between getch() calls, and getch() blocks for
@@ -33,6 +39,7 @@ ConsoleWindow.timeout_ms = 100
 
 COLUMN_HEADER = f'{"rank":>6}  {"prime":>8}  spelled'
 ALTER_INTERVAL = 10
+QUIT_KEYS = (0x3, ord('q'), ord('Q'))
 
 
 def row_line(row: dict, iteration: int, interval: int) -> str:
@@ -88,6 +95,7 @@ class ScreenPagerApp:
                  singleton: bool = True) -> None:
         self.opts = SimpleNamespace()
         self.iteration = 0
+        self.running = True
         win_opts = ConsoleWindowOpts(
             head_line=True,
             # Ctrl-C arrives as an ordinary key so it can be handled by hand.
@@ -104,10 +112,15 @@ class ScreenPagerApp:
                                               [self.one, self.two])
 
         self.win.set_handled_keys({0x3, ord('q'), ord('Q'), ord('2'), 27})
-        self.running = True
+
+    def draw_once(self) -> Screen:
+        screen = self.stack.get_curr_obj()
+        screen.clear()
+        screen.draw_screen()
+        return screen
 
     def handle_key(self, key: int) -> None:
-        if key in (0x3, ord('q'), ord('Q')):
+        if key in QUIT_KEYS:
             self.running = False
         elif key == ord('2') and self.stack.is_curr('ONE'):
             # push() takes the Screen itself, so the app never handles numbers.
@@ -131,8 +144,16 @@ class ScreenPagerApp:
             self.win.stop_curses()
 
 
-def main(backend: object | None = None, singleton: bool = True) -> None:
-    ScreenPagerApp(backend=backend, singleton=singleton).main_loop()
+def build_app(backend: object | None = None,
+              singleton: bool = True) -> ScreenPagerApp:
+    return ScreenPagerApp(backend=backend, singleton=singleton)
+
+
+def main() -> None:
+    parser = cli.add_display_arguments(argparse.ArgumentParser(prog='demo-b-stack'))
+    args = parser.parse_args()
+    cli.apply_display_arguments(args, prog='demo-b-stack')
+    build_app().main_loop()
 
 
 if __name__ == '__main__':

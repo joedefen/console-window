@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """Run a sample app by its short name.
 
-The demos live next to this script as ``demo-<name>.py``.  The short name is
-the file's base name with the leading ``demo-`` and trailing ``.py`` removed,
-so both of these launch ``demos/demo-buffet.py``::
+The demos live next to this script as ``demo-<letter>-<name>.py``.  The short
+name is the file's base name with the leading ``demo-`` and trailing ``.py``
+removed, so both of these launch ``demos/demo-a-basic.py``::
 
-    ./demos/run-demo buffet
-    ./run-demo buffet                 # with demos/ on PATH, from demos/
+    ./demos/run-demo a-basic
+    ./run-demo a-basic                # with demos/ on PATH, from demos/
+
+``./demos/run-demo features`` prints the feature-to-demo owner map from
+``features.py``.  The full family and its curriculum are described in
+``docs/DEMO-APPS.md``.
 
 Any remaining arguments are handed to the sample's own command line, and the
 project root is put on ``sys.path`` first so ``console_window`` imports from

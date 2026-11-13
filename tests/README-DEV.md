@@ -16,7 +16,7 @@ assume the repository root, which is where the gate has to be run.
 | [`bless`](../bless) | The release gate, emitted verbatim from [`../../blessd/bless`](../../blessd/bless) by that repo's `build.py`. It holds no copy of this project's identity, and it is never edited here. |
 | [`blessd/docs/release-strategy.md`](../../blessd/docs/release-strategy.md) | The release strategy every project shares: the branch model, the stages, the rehearsal, the credentials. This file documents only what is particular to `console-window`. |
 | [`tests/inspect_dist.py`](inspect_dist.py) | The distribution inspector. `bless` refuses to upload a wheel and sdist it has not inspected with this file. |
-| [`runner`](../runner), [`SampleApp.py`](../SampleApp.py) | The non-invasive way to run the sample app from the working tree (`./runner`, or `.venv/bin/python ./runner`): it executes `SampleApp` as `__main__` against the tree and does not touch `~/.local/bin`. Neither is part of the installed package. |
+| [`runner`](../runner), [`demos/`](../demos) | The non-invasive way to run the demo family from the working tree (`./runner`, or `.venv/bin/python ./runner`): it shows the lettered menu from `demos/demos.ini`, and `./demos/run-demo a-basic` runs one demo against the tree. Neither is part of the installed package. |
 | [`.gitignore`](../.gitignore) | Keeps gate artifacts (`build/`, `dist/`, `.coverage*`, caches, `*.whl`, `*.tar.gz`) out of `git status`, because the gate refuses a dirty tree. |
 
 The version lives in exactly one place. `pyproject.toml` declares

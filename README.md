@@ -22,7 +22,7 @@ The package abstracts away the complexities of managing curses pads, dynamic scr
 9. **Inline confirmation is unusually complete.** Tiered matching (exact, then case-insensitive, then abbreviation), an auto-calculated minimum abbreviation length, and six modes including identity matching and free text.
 10. **Real, dogfooded apps.** The API is validated by several downstream projects (listed below), not by theory.
 11. **Headless, testable core.** The layout math and a headless render backend let the whole engine be exercised without a TTY.
-12. **Display-cell correctness.** A small standard-library width engine accounts for wide CJK/emoji and zero-width combining marks, so layout and highlighting stay correct across the body, header, dialogs and the emoji-heavy sample app.
+12. **Display-cell correctness.** A small standard-library width engine accounts for wide CJK/emoji and zero-width combining marks, so layout and highlighting stay correct across the body, header, dialogs and the demos that exercise wide and combining text.
 
 
 ## Installation
@@ -33,25 +33,27 @@ Install the package via `pip`:
 pip install console-window
 ```
 
-## Running the Sample App (from source)
+## Running the Demos (from source)
 
-For development, run the bundled sample app directly against your working tree — no install or build step required:
-
-```bash
-./runner
-```
-
-(`runner` executes `SampleApp` as `__main__`, so live edits are picked up immediately. In the project's `.venv`, use `.venv/bin/python ./runner`; the equivalent one-off is `python3 SampleApp.py`. The runner is non-invasive: it runs the source without installing anything and does not touch `~/.local/bin`.)
-
-The sample takes the same display switches as any app built on the library:
+For development, the demos run directly against your working tree — no install or build step required:
 
 ```bash
-NO_COLOR=1 ./runner          # same as ./runner --theme mono
-./runner --theme mono
-./runner --theme nord
+./runner                     # the lettered menu from demos/demos.ini
+./demos/run-demo a-basic     # one demo, by short name
+./demos/run-demo features    # the feature -> demo owner map
 ```
 
-`mono` is a real theme, not a separate color flag. It uses the terminal's own foreground and background plus a bold/reverse attribute hierarchy, so it follows a light or dark terminal automatically. `NO_COLOR` selects it for a run when no explicit `--theme` is given, and `t` on the `THEMES` screen can switch back to a palette without restarting.
+A, B and C are complete single-file programs; D–P are short deltas on `demos/demo_kit.py`. The full curriculum, feature ownership and change rule are in [`docs/DEMO-APPS.md`](docs/DEMO-APPS.md).
+
+Every demo takes the same display switches:
+
+```bash
+./demos/run-demo a-basic --ascii
+./demos/run-demo j-themes --theme nord
+NO_COLOR=1 ./demos/run-demo j-themes   # same as --theme mono
+```
+
+`mono` is a real theme, not a separate color flag. It uses the terminal's own foreground and background plus a bold/reverse attribute hierarchy, so it follows a light or dark terminal automatically. `NO_COLOR` selects it for a run when no explicit `--theme` is given.
 
 ## Core Features (The "Secret Sauce")
 
@@ -68,37 +70,37 @@ The wrapper handles several advanced terminal interaction patterns automatically
   * **Dynamic Options Management (`OptionSpinner`):** The companion class simplifies creation of application settings, allowing users to **toggle options** or input strings using single keypresses (e.g., `p` to toggle pick mode).
   * **Blocking Popups:** Includes fully implemented, blocking pop-up methods for user input (`.answer()`) and alerts (`.alert()`), handling the necessary temporary screen takeover and cursor management.
 
-## Worked Example: `SampleApp.py`
+## Worked Example: the lettered demos
 
-The canonical example is the bundled sample app:
+The canonical examples are the demos in [`demos/`](demos). They form a
+curriculum, not one app with every feature:
 
-**<https://github.com/joedefen/console-window/blob/main/SampleApp.py>**
+* **A — [`a-basic`](demos/demo-a-basic.py)** is one `Screen`, one table, and
+  the four-call loop. Navigation scrolls the body; live data changes one row
+  each pass.
+* **B — [`b-stack`](demos/demo-b-stack.py)** adds a second page and a
+  `ScreenStack`; each screen keeps its own content and scroll position.
+* **C — [`c-options`](demos/demo-c-options.py)** adds an `OptionSpinner`, a
+  validated prompt, scoped keys and a generated help screen.
 
-It is a read-only `/etc/passwd` browser, and it is deliberately more than a list: it exercises the whole `Screen` paradigm the library is built around — one window, a `ScreenStack` of screens, and key bindings scoped per screen. What it demonstrates:
-
-* **`ScreenStack` + four screens** (`MAIN`, `HELP`, `HISTORY`, `THEMES`) pushed and popped with `?`, `h`, `t` and `ESC`/`ENTER`, dispatched through `ScreenStack.perform_actions()`.
-* **Convention-based actions** — each key maps to an `<attr>_ACTION` method on the current screen (`filter_ACTION`, `select_ACTION`, `help_screen_ACTION`, …), so there is no central `if key == ...` tower.
-* **Scoped, self-subtracting keys** — `t` opens the theme screen on `MAIN` but cycles themes on `THEMES`/`HELP`; the narrower binding subtracts its screen from the wider one automatically.
-* **Per-line `Context` metadata** — rows carry `Context(genre='item')`, read back with `get_picked_context()`, and decorative rows (`Context(genre='DECOR')`) are skipped by navigation.
-* **`IncrementalSearchBar`** — `/` filters the list as you type, using `passthrough_mode` to hand keys to the bar.
-* **In-place prompts** — `SPACE` asks you to confirm with `y` before "processing" the picked row through `begin_prompt()` / `handle_prompt_key()`, and `N` edits a note in the header band with the buffered text mode. Both use `PromptLine` underneath; completion callbacks run after passthrough is restored, so they can report with `status()`.
-* **Themes** — a `THEMES` screen of color samples backed by `Theme.list_all()` / `get_current()` / `set()`.
-  * The active theme is now per-window state: `ConsoleWindowOpts(theme=...)` seeds `window.theme`, `window.set_theme()` switches it (and re-initializes the terminal's color pairs, which curses keeps per terminal rather than per window), and `Theme.set()` remains the process-wide switch.
-  * Theme names are semantic: asking for `nord` on an 8-color terminal installs the closest supported representation rather than raising, and startup, `set_theme()` and `Theme.set()` all share `Theme.install()`.
-  * The theme list ends with `mono`: it is a real theme whose only installed pair is the terminal-default background. Selecting it turns semantic color off and the swatches switch from color pairs to the bold/reverse attribute hierarchy; selecting a palette turns color back on. The library synchronizes that switch in `Theme.set_active()`, so the picker needs no application override and the header, swatches and installed pairs always agree.
-  * `dark-mono` and `light-mono` were renamed to `dark` and `light`; the old names remain accepted as aliases for `--theme` and remembered preferences, but they are not listed in the picker.
-* **Dialogs** — `a` calls `answer()` for text input, `l` calls `alert()`, and `n` drives `answer()` from an `OptionSpinner` option (`add_key(..., prompt=...)`).  Pass `check_ans=` to that option to validate the reply (a regex the whole answer must match, or a function returning `None` or an error description); a rejected answer re-opens the dialog with the bad text and the description on the footer (`answer(hint=...)`), so the application only ever sees a value it accepted.  `answer()` returns `None` only when the user aborts; if the terminal cannot fit the dialog it raises `TerminalTooSmallError` with the required and actual sizes.
-* **`status()` and `flash()`** — `status()` is a non-modal one-line message on the separator row; `flash()` is a modal box that clears the screen. The demo uses `status()` for "Processed", "Cancelled" and note-saved feedback.
-* **`BasicTextScreen`** — the HISTORY screen is rebuilt each draw from a `BasicTextScreen` via `set_text()` (headers plus `(text, attr)` lines), and resolves its window at draw time because the screens are constructed before the `ConsoleWindow`.
-* **Token-based headers** — `HeaderLine` (`text`, `bracket_key`, `key`, `extend`) rendered with `add_header_line()`, rather than string markup. Both header helpers accept `line_attr`, an attribute OR'd into every span, so a whole header can be dimmed (`curses.A_DIM`) without losing its per-span styling.
-* **`Ctrl-C` as an application key** — `ctrl_c_terminates=False`, with `0x3` in the spinner's built-in `quit` keys. This works only while no live window in the process has requested terminating Ctrl-C: once any window uses the default (`ctrl_c_terminates=True`), terminating Ctrl-C is latched for as long as a window depends on it. The handler that was installed before the first window is captured and restored when the last window stops, and `reset_ctrl_c()` does the same deliberately for an embedding application that manages SIGINT itself.
-* **Full-repaint recovery** — `r` toggles `render(redraw=True)`, the path that repaints after terminal corruption.
-* **Multi-row picking** — `p` sets `pick_size` (1–3) via `set_pick_mode(True, size)`.
-* **Large-body stress** — `z` appends 2000 non-pickable filler rows to exercise long bodies and the scroll indicator. No option is needed for them: the pads stay viewport-sized, memory and `clear()` cost do not grow with the row count, and the default `max_rows` ceiling is far above 2000.
+D through P each add one focused lesson on the shared kit: picking, search,
+in-place prompts, dialogs, messages, headers, themes, glyphs, read-only text,
+navigation ownership, suspend/resume, large bodies, and width/debug aids.
+[`docs/DEMO-APPS.md`](docs/DEMO-APPS.md) lists all sixteen, the feature each
+one owns, and the rule that a library feature change names its demo in the
+changelog.
 
 ### Running it
 
-See [Running the Sample App (from source)](#running-the-sample-app-from-source) above. The sample app is interactive, so it needs a real terminal (any POSIX box). It is a repo-level script and is **not** part of the installed package: after `pip install console-window` you write your own `main()` — start from the sample app above, or from the shape below.
+```bash
+./runner                 # menu
+./demos/run-demo a-basic # one demo
+```
+
+The demos are interactive and need a real terminal (any POSIX box). They are
+repo-level scripts, **not** part of the installed package: after
+`pip install console-window` you write your own `main()` — start from A, B or C,
+or from the shape below.
 
 ### The shape of every app
 
