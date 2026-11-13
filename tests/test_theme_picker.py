@@ -13,6 +13,7 @@ from console_window import (
     Theme,
 )
 from console_window.backend import HeadlessBackend
+from console_window.glyphs import catalog_items, catalog_rows, set_ascii
 
 
 class _Store:
@@ -196,9 +197,15 @@ _SWATCH_ROLES = (
 
 
 def _swatch_attrs(win):
-    """The first attribute run of each role row, keyed by its label."""
+    """The first attribute run of each role row, keyed by its label.
+
+    The swatch block is everything before the blank line that introduces the
+    symbol samples, so the rows below it are not role rows.
+    """
     attrs = {}
     for text, runs in zip(win.body.texts, win.body.text_attrs, strict=False):
+        if not text:
+            break
         if runs:
             attrs[text.split()[0]] = runs[0][0]
     return attrs
@@ -325,7 +332,9 @@ def test_replace_mode_shows_only_the_apps_rows():
             },
         )
         picker(app).clear_and_draw()
-        assert [row.split()[0] for row in win.body.texts] == ['FAILED', 'OK']
+        rows = win.body.texts
+        swatches = rows[:rows.index('')]  # the symbol block starts after a blank
+        assert [row.split()[0] for row in swatches] == ['FAILED', 'OK']
     finally:
         win.stop_curses()
 
@@ -375,8 +384,11 @@ def test_a_host_can_override_the_swatch_rows_hook():
                 return [(Theme.DANGER, 'FAILED', 'Boot failed')]
 
         _OnlyDanger(app).clear_and_draw()
-        assert len(win.body.texts) == 1
-        assert win.body.texts[0].startswith('FAILED')
+        rows = win.body.texts
+        assert rows[0].startswith('FAILED')
+        # ...and the symbol block still follows the swatches.
+        assert rows[1] == ''
+        assert rows[2].startswith('Symbols (')
     finally:
         win.stop_curses()
 
@@ -387,3 +399,32 @@ def test_the_factory_validates_captions_eagerly():
             _BaseScreen,
             captions={'chartreuse': ('NOPE', None)},
         )
+
+
+def test_the_picker_shows_every_symbol_in_the_catalog():
+    win = _window()
+    try:
+        app = SimpleNamespace(win=win, opts=SimpleNamespace(theme='default'))
+        Theme.create_picker_screen(_BaseScreen)(app).clear_and_draw()
+        body = win.body.texts
+        samples = catalog_items()
+        assert f'Symbols ({len(samples)}, Unicode):' in body
+        rows = catalog_rows(win.get_pad_width())
+        assert rows and all(row in body for row in rows)
+        # Every symbol appears once, in catalog order, across the rows.
+        assert ' '.join(samples) in ' '.join(body)
+    finally:
+        win.stop_curses()
+
+
+def test_the_symbol_rows_follow_the_ascii_switch():
+    set_ascii(True)
+    win = _window()
+    try:
+        app = SimpleNamespace(win=win, opts=SimpleNamespace(theme='default'))
+        Theme.create_picker_screen(_BaseScreen)(app).clear_and_draw()
+        body = win.body.texts
+        assert f'Symbols ({len(catalog_items())}, plain ASCII):' in body
+        assert all(row.isascii() for row in body)
+    finally:
+        win.stop_curses()

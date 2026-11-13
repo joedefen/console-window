@@ -95,6 +95,27 @@ def _draw_swatch_rows(screen: _SwatchWindow, rows: list[tuple[int, str, str]],
     if note:
         add_body(note, attr=curses.A_DIM)
 
+
+def _draw_symbol_samples(screen: _SwatchWindow) -> None:
+    """Show every registered symbol, so the font can be judged.
+
+    The theme page is where a user already goes when the display looks wrong,
+    so the full catalog belongs here: a character the terminal cannot draw
+    shows up as a box in one place instead of in the middle of an application
+    screen.  The rows are measured, not counted, because an ASCII fallback can
+    be wider than one cell and the set must never be truncated.
+    """
+    samples = glyphs.catalog_items()
+    if not samples:
+        return
+    getter = getattr(screen.win, 'get_pad_width', None)
+    width = getter() if callable(getter) else 78
+    mode = 'plain ASCII' if glyphs.is_ascii() else 'Unicode'
+    screen.add_body('')
+    screen.add_body(f'Symbols ({len(samples)}, {mode}):', attr=curses.A_DIM)
+    for row in glyphs.catalog_rows(width):
+        screen.add_body(row)
+
 # --- palette model -----------------------------------------------------------
 # Standard xterm palette model.  0..15 are the ANSI/base colors, 16..231 the
 # 6x6x6 color cube with the levels below, and 232..255 the grayscale ramp
@@ -714,8 +735,9 @@ class Theme:
         """Build a theme-picker screen class on top of *base_class*.
 
         The generated screen renders the current theme, a set of labeled color
-        swatches, and an action (``spin_theme_ACTION``) that cycles themes.  The
-        host application is expected to expose ``win``, and may expose
+        swatches, every registered symbol (the glyph catalog, so the page doubles
+        as the font check), and an action (``spin_theme_ACTION``) that cycles
+        themes.  The host application is expected to expose ``win``, and may expose
         ``opts.theme``: when present, that option is treated as the selected
         theme, so an ordinary cycle binding and the built-in action stay in sync.
         The theme is applied to ``app.win`` itself (``ConsoleWindow.set_theme``),
@@ -785,6 +807,7 @@ class Theme:
                     self.swatch_attr,
                     note,
                 )
+                _draw_symbol_samples(self)
 
             def theme_label(self, theme_name: str | None) -> str:
                 """Header label for the theme the window is on.

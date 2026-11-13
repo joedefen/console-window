@@ -271,12 +271,13 @@ The first successful construction latches the mode for the whole process.  Mixin
 
 ### Symbols on terminals that cannot draw them
 
-The UI is built around a handful of non-ASCII symbols (`│`, `⮞`, `█`, `←`, `→`, `·`, box drawing). A terminal that cannot encode them does not fail loudly: it paints a box, or nothing, and the row quietly loses its meaning. `console-window` therefore keeps every decorative symbol in one registry, in two spellings, and degrades by itself:
+The UI is built around non-ASCII symbols (`│`, `⮞`, `█`, `←`, `→`, `·`, box drawing). A terminal that cannot encode them does not fail loudly: it paints a box, or nothing, and the row quietly loses its meaning. `console-window` therefore keeps every symbol in one registry, in two spellings, and degrades by itself:
 
 * **No code change.** A window detects the terminal when it is constructed — a non-UTF-8 output encoding or `TERM=dumb` selects the ASCII spellings — and text handed to `add_header()` / `add_body()` / `draw()` / `status()` / `flash()` is transliterated before it is measured, so widths and the run-length attribute counts stay correct.
-* **Only decoration is rewritten.** `Grüße` stays `Grüße`: the substitution table contains registered glyphs, never arbitrary text. Set `CONSOLE_WINDOW_GLYPH_AUDIT=1` to log each decorative code point you use but
+* **Only registered symbols are rewritten.** `Grüße` stays `Grüße`: the substitution table contains the catalog's characters, never arbitrary text, so letters, digits and unregistered code points pass through byte for byte. A registered typographic mark does follow the mode, which is the point of it — an em dash inside file content becomes `--` on an ASCII terminal rather than a box. Set `CONSOLE_WINDOW_GLYPH_AUDIT=1` to log each decorative code point you use but
   did not register, with the exact `register()` call to add.
 
+* **A catalog to choose from.** The registry carries about eighty named symbols, grouped as UI marks, frames, arrows, triangles, filled/hollow shape pairs, blocks and bars, marks, math, currency and typography. Every one is a single cell wide and is covered by the default monospace font on Debian, Ubuntu and Fedora (DejaVu Sans Mono), so it is safe to use without a patched font: no emoji, no icon fonts. `Glyphs.catalog()` returns the set in the active spelling and `Glyphs.catalog_rows(width)` packs it into display rows; the theme picker page prints all of them, so that page doubles as the font check. A character has exactly one fallback even when two names draw it (`cursor_block` and `swatch` are the same block).
 * **App vocabulary.** Register what only your app draws:
 
   ```python

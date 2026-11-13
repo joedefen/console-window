@@ -7,6 +7,11 @@ not fail loudly -- the terminal paints a box, or nothing -- and the row silently
 loses its meaning.  Keeping the symbols in one table matters because the
 failure is invisible.
 
+The table an application draws from is :data:`BUILTIN_GLYPHS`: about eighty
+symbols grouped by family, every one of them a single cell wide and covered by
+the default monospace font on Debian, Ubuntu and Fedora.  :func:`catalog_items`
+and :func:`catalog_rows` are how a screen lists them; the theme page does.
+
 What can and cannot be checked
 ------------------------------
 Whether a terminal can *encode* UTF-8 is observable: the output stream's
@@ -28,11 +33,11 @@ the app passes to the window).  An app that upgrades this library and changes
 nothing gets every *known* decorative code point downgraded as the window
 draws; an app that registers its own vocabulary gets its own fallbacks.
 
-Substitution only ever rewrites code points that are registered as decoration:
-a pager showing ``GRUB_CMDLINE_LINUX="Grüße"`` is byte-identical in both modes,
-because ``ü`` is not in the table.  Set ``CONSOLE_WINDOW_GLYPH_AUDIT=1`` to log
-each unseen decorative code point together with the :func:`register` call that
-would teach the library about it.
+Substitution only ever rewrites code points that are in the table: a pager
+showing ``GRUB_CMDLINE_LINUX="Grüße"`` is byte-identical in both modes, because
+``ü`` is not registered.  Set ``CONSOLE_WINDOW_GLYPH_AUDIT=1`` to log each unseen
+decorative code point together with the :func:`register` call that would teach
+the library about it.
 """
 
 from __future__ import annotations
@@ -46,6 +51,8 @@ import unicodedata
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 
+from .textwidth import string_width
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -56,6 +63,8 @@ __all__ = [
     'Glyphs',
     'TerminalReport',
     'apply_policy',
+    'catalog_items',
+    'catalog_rows',
     'ensure_policy',
     'get',
     'is_ascii',
@@ -116,9 +125,17 @@ class Glyph:
             )
 
 
-#: Glyphs this library draws itself.  An app that changes nothing gets these
-#: downgraded automatically when the terminal cannot show them.
+#: Glyphs this library draws itself, and the catalog an application draws from.
+#:
+#: The catalog is the answer to "what may I use?": every entry is one cell wide
+#: in both spellings and has a plain ASCII fallback, and the set is confined to
+#: characters that the default monospace font on Debian, Ubuntu and Fedora
+#: (DejaVu Sans Mono) actually covers -- no emoji, nothing from a patched font.
+#: A code point has exactly one fallback even when two names draw it
+#: (``cursor_block`` and ``swatch`` are the same block); an application that
+#: registers a code point itself takes it over (see :func:`_compile_table`).
 BUILTIN_GLYPHS: dict[str, Glyph] = {
+    # --- the library's own UI marks -----------------------------------------
     'cursor': Glyph('\u2502', '|'),          # narrow text cursor in widgets
     'cursor_block': Glyph('\u2588', '#'),    # block cursor / caret
     # One cell in both spellings: the choice list indents the other rows by one
@@ -133,6 +150,8 @@ BUILTIN_GLYPHS: dict[str, Glyph] = {
     'nav_next': Glyph('\u2192', '->'),       # help legend, "right arrow"
     'bullet': Glyph('\u00b7', '.'),          # help-list bullet
     'swatch': Glyph('\u2588', '#'),          # theme color swatch
+
+    # --- frames -------------------------------------------------------------
     # The message-box frame.  `curses.textpad.rectangle()` already draws with
     # ACS line art, but a message box painted by hand needs its own fallback;
     # registering the corners keeps the ASCII mode invariant ("every painted
@@ -143,13 +162,97 @@ BUILTIN_GLYPHS: dict[str, Glyph] = {
     'box_v': Glyph('\u2502', '|'),           # also reused by widgets' cursor
     'box_bl': Glyph('\u2514', '+'),
     'box_br': Glyph('\u2518', '+'),
+    'frame_rounded_tl': Glyph('\u256d', '+'),
+    'frame_rounded_tr': Glyph('\u256e', '+'),
+    'frame_rounded_bl': Glyph('\u2570', '+'),
+    'frame_rounded_br': Glyph('\u256f', '+'),
+    'frame_h_double': Glyph('\u2550', '='),
+    'frame_v_double': Glyph('\u2551', '|'),
+
+    # --- arrows -------------------------------------------------------------
+    'arrow_up': Glyph('\u2191', '^'),
+    'arrow_down': Glyph('\u2193', 'v'),
+    'arrow_double_left': Glyph('\u21d0', '<='),
+    'arrow_double_right': Glyph('\u21d2', '=>'),
+    'arrow_double_up': Glyph('\u21d1', '^^'),
+    'arrow_double_down': Glyph('\u21d3', 'vv'),
+
+    # --- triangles: hollow and small, in both horizontal directions ---------
+    'tri_right_hollow': Glyph('\u25b7', '>'),
+    'tri_left_hollow': Glyph('\u25c1', '<'),
+    'tri_up_hollow': Glyph('\u25b3', '^'),
+    'tri_down_hollow': Glyph('\u25bd', 'v'),
+    'tri_right_small': Glyph('\u25b8', '>'),
+    'tri_left_small': Glyph('\u25c2', '<'),
+
+    # --- shapes: filled and hollow pairs ------------------------------------
+    'circle_filled': Glyph('\u25cf', '@'),
+    'circle_hollow': Glyph('\u25cb', 'o'),
+    'diamond_filled': Glyph('\u25c6', '#'),
+    'diamond_hollow': Glyph('\u25c7', '<>'),
+    'square_filled': Glyph('\u25a0', '#'),
+    'square_hollow': Glyph('\u25a1', '[]'),
+    'star_filled': Glyph('\u2605', '*'),
+    'star_hollow': Glyph('\u2606', '+'),
+
+    # --- blocks and bars: textures, half blocks, sparkline columns ----------
+    'block_light': Glyph('\u2591', '.'),
+    'block_medium': Glyph('\u2592', ':'),
+    'block_dark': Glyph('\u2593', '#'),
+    'block_upper': Glyph('\u2580', '"'),
+    'block_left': Glyph('\u258c', '['),
+    'block_right': Glyph('\u2590', ']'),
+    'block_quadrant': Glyph('\u259a', '%'),
+    'bar_1': Glyph('\u2581', '1'),
+    'bar_2': Glyph('\u2582', '2'),
+    'bar_3': Glyph('\u2583', '3'),
+    'bar_4': Glyph('\u2584', '4'),
+    'bar_5': Glyph('\u2585', '5'),
+    'bar_6': Glyph('\u2586', '6'),
+    'bar_7': Glyph('\u2587', '7'),
+
+    # --- marks and status symbols -------------------------------------------
+    'check': Glyph('\u2713', 'v'),
+    'check_heavy': Glyph('\u2714', 'v'),
+    'cross': Glyph('\u2717', 'x'),
+    'cross_heavy': Glyph('\u2718', 'x'),
+    'ballot_box': Glyph('\u2610', '[ ]'),
+    'ballot_check': Glyph('\u2611', '[v]'),
+    'ballot_cross': Glyph('\u2612', '[x]'),
+    'warn': Glyph('\u26a0', '!'),
+    'sun': Glyph('\u2600', '*'),
+    'cloud': Glyph('\u2601', '~'),
+
+    # --- math ---------------------------------------------------------------
+    'plus_minus': Glyph('\u00b1', '+-'),
+    'times': Glyph('\u00d7', 'x'),
+    'not_equal': Glyph('\u2260', '!='),
+    'less_equal': Glyph('\u2264', '<='),
+    'greater_equal': Glyph('\u2265', '>='),
+    'approx': Glyph('\u2248', '~'),
+    'infinity': Glyph('\u221e', 'inf'),
+
+    # --- currency -----------------------------------------------------------
+    'euro': Glyph('\u20ac', 'E'),
+    'pound': Glyph('\u00a3', 'L'),
+    'yen': Glyph('\u00a5', 'Y'),
+
+    # --- typography ---------------------------------------------------------
+    'en_dash': Glyph('\u2013', '-'),
+    'em_dash': Glyph('\u2014', '--'),
+    'ellipsis': Glyph('\u2026', '...'),
 }
 
 #: Glyph names the font check prints, in reading order, when an app registers
 #: none of its own.  These are the built-ins a user is most likely to notice.
+#: The theme page shows the whole catalog, so this line stays short.
 BUILTIN_PROBE: tuple[str, ...] = (
     'nav_prev', 'nav_next', 'choice', 'cursor', 'cursor_block', 'bullet',
 )
+
+#: Symbols per sample row on the theme page.  The full catalog is three rows at
+#: this width; a narrower terminal wraps into more rows rather than truncating.
+CATALOG_PER_ROW = 27
 
 _registry: dict[str, Glyph] = {}
 _probe: list[str] = []
@@ -293,6 +396,48 @@ def probe_text() -> str:
     return ' '.join(shown)
 
 
+def catalog_items() -> list[str]:
+    """Every registered glyph, once, in registration order, in the active set.
+
+    This is the list an application consults when it needs a symbol: the
+    built-ins come first and the application's own registrations follow.  Two
+    names may draw the same character (``cursor_block`` and ``swatch``); the
+    character is listed once.
+    """
+    seen: set[str] = set()
+    items: list[str] = []
+    for glyph in _registry.values():
+        if glyph.unicode in seen:
+            continue
+        seen.add(glyph.unicode)
+        items.append(glyph.ascii if _ascii_mode else glyph.unicode)
+    return items
+
+
+def catalog_rows(width: int, per_row: int = CATALOG_PER_ROW) -> list[str]:
+    """Pack the catalog into space-separated rows no wider than *width* cells.
+
+    A fallback can be more than one cell (``->``, ``[x]``, ``...``), so rows are
+    measured rather than counted: a narrow terminal wraps into more rows instead
+    of overflowing or truncating the set.  The rows are display text; the
+    caller adds them to a screen.
+    """
+    rows: list[str] = []
+    row: list[str] = []
+    used = 0
+    for item in catalog_items():
+        item_width = string_width(item)
+        needed = item_width if not row else item_width + 1
+        if row and (len(row) >= per_row or used + needed > width):
+            rows.append(' '.join(row))
+            row, used, needed = [], 0, item_width
+        row.append(item)
+        used += needed
+    if row:
+        rows.append(' '.join(row))
+    return rows
+
+
 def _spellings(text: str) -> list[str]:
     """Every form of *text* an app might have typed, most specific first.
 
@@ -314,13 +459,18 @@ def _compile_table() -> re.Pattern[str] | None:
     global _table  # pylint: disable=global-statement
     if _table is not None:
         return _table
+    # Rebuild from scratch.  A registration invalidates the cache, and an app
+    # that claims a built-in's code point (under the same name or a new one)
+    # must get its own fallback; keeping the old entry would silently ignore
+    # the override for the rest of the process.
+    _map.clear()
     for glyph in _registry.values():
         if glyph.unicode.isascii():
             continue
         for form in _spellings(glyph.unicode):
             if form.isascii():
                 continue
-            _map.setdefault(form, glyph.ascii)
+            _map[form] = glyph.ascii
     if not _map:
         return None
     alternation = '|'.join(
@@ -556,6 +706,8 @@ class Glyphs:
     is_ascii = staticmethod(is_ascii)
     set_ascii = staticmethod(set_ascii)
     probe_text = staticmethod(probe_text)
+    catalog = staticmethod(catalog_items)
+    catalog_rows = staticmethod(catalog_rows)
     transliterate = staticmethod(transliterate)
     terminal_report = staticmethod(terminal_report)
     apply_policy = staticmethod(apply_policy)

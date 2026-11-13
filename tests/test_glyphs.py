@@ -6,6 +6,8 @@ from console_window.glyphs import (
     BUILTIN_GLYPHS,
     Glyph,
     Glyphs,
+    catalog_items,
+    catalog_rows,
     get,
     is_ascii,
     probe_text,
@@ -13,8 +15,10 @@ from console_window.glyphs import (
     register_many,
     reset,
     set_ascii,
+    transliterate,
     unicode_of,
 )
+from console_window.textwidth import string_width
 
 
 def test_every_builtin_has_a_unicode_form_and_a_plain_ascii_fallback():
@@ -63,12 +67,12 @@ def test_an_empty_ascii_form_is_allowed():
 
 
 def test_register_many_accepts_glyphs_and_pairs():
-    register_many({'tick': Glyph('\u2713', 'OK'), 'cross': ('\u2717', 'X')})
+    register_many({'tick': Glyph('\u2713', 'OK'), 'nix': ('\u2717', 'X')})
     assert get('tick') == '\u2713'
-    assert get('cross') == '\u2717'
+    assert get('nix') == '\u2717'
     set_ascii(True)
     assert get('tick') == 'OK'
-    assert get('cross') == 'X'
+    assert get('nix') == 'X'
 
 
 def test_register_many_rejects_a_bad_spec():
@@ -117,5 +121,65 @@ def test_facade_delegates_to_the_module_functions():
     assert Glyphs.is_ascii() is True
     assert Glyphs.get('bullet') == '.'
     assert Glyphs.unicode_of('bullet') == '\u00b7'
+    assert Glyphs.catalog() == catalog_items()
+    assert Glyphs.catalog_rows(79) == catalog_rows(79)
     Glyphs.set_ascii(False)
     assert Glyphs.get('bullet') == '\u00b7'
+
+
+def test_the_builtin_catalog_is_eighty_glyphs():
+    assert len(BUILTIN_GLYPHS) == 80
+
+
+def test_every_builtin_is_one_cell_wide():
+    # A two-cell symbol would push the rest of its row out of alignment on the
+    # very terminal that is already struggling to draw it.
+    for name, glyph in BUILTIN_GLYPHS.items():
+        assert string_width(glyph.unicode) == 1, name
+
+
+def test_one_codepoint_has_one_fallback():
+    # The catalog lists a character once, so two names for it must agree;
+    # otherwise which fallback wins would depend on registration order.
+    fallbacks = {}
+    for name, glyph in BUILTIN_GLYPHS.items():
+        assert fallbacks.setdefault(glyph.unicode, glyph.ascii) == glyph.ascii, name
+
+
+def test_the_catalog_lists_each_character_once():
+    items = catalog_items()
+    assert len(items) == 78
+    assert len(set(items)) == 78
+
+
+def test_the_catalog_follows_the_active_spelling():
+    assert catalog_items()[0] == BUILTIN_GLYPHS['cursor'].unicode
+    set_ascii(True)
+    assert catalog_items()[0] == BUILTIN_GLYPHS['cursor'].ascii
+
+
+def test_catalog_rows_are_three_measured_rows_at_eighty_columns():
+    rows = catalog_rows(79)
+    assert len(rows) == 3
+    assert all(string_width(row) <= 79 for row in rows)
+
+
+def test_catalog_rows_wrap_rather_than_overflow_a_narrow_terminal():
+    rows = catalog_rows(20)
+    assert len(rows) > 3
+    assert all(string_width(row) <= 20 for row in rows)
+
+
+def test_an_app_registration_takes_over_a_builtin_code_point():
+    # The application is allowed to say what its own use of a symbol means, so
+    # claiming a built-in character under a new name wins.
+    register('alert', '\u26a0', '(!)')
+    set_ascii(True)
+    assert transliterate('\u26a0') == '(!)'
+
+
+def test_re_registering_a_builtin_takes_effect_after_the_table_is_built():
+    set_ascii(True)
+    assert transliterate('\u2713') == 'v'
+    register('check', '\u2713', 'OK')
+    assert transliterate('\u2713') == 'OK'

@@ -26,6 +26,14 @@ This project follows [Semantic Versioning](https://semver.org/).
   truncation, so drawing on a narrow terminal cannot shrink it.  Later screens
   and later passes do not change it; `min_cols_rows=` remains the explicit
   override.
+- A curated glyph catalog of 80 named symbols: UI marks, frames, arrows,
+  triangles, filled/hollow shape pairs, blocks and bars, marks, math, currency
+  and typography.  Every entry is one cell wide, has a plain ASCII fallback, and
+  is covered by DejaVu Sans Mono (the default monospace font on Debian, Ubuntu
+  and Fedora), so the set needs no patched font.  `Glyphs.catalog()` lists the
+  characters in the active spelling, `Glyphs.catalog_rows(width)` packs them into
+  measured display rows, and the theme picker page prints the whole catalog as a
+  font check.
 
 ### Changed
 - The help body lists only options whose scope includes the help screen, and it
@@ -41,6 +49,10 @@ This project follows [Semantic Versioning](https://semver.org/).
   back above the minimum is noticed without a resize key.  `answer()` uses the
   same effective minimum and refreshes its geometry on each retry.
   `min_cols_rows` is validated as a pair of positive integers.
+- An application's registration now wins over a built-in for the same code
+  point, whether it re-registers the built-in's name or claims the character
+  under a new one.  Previously a built-in kept the fallback it was registered
+  with first, and the override was silently ignored.
 - **Breaking:** content and the pick/scroll state moved from `ConsoleWindow`
   onto `Screen`, and `draw()` is deleted, leaving one drawing model.  The
   `win.add_header()`, `win.add_body()`, `win.add_fancy_header()`,
@@ -87,6 +99,8 @@ This project follows [Semantic Versioning](https://semver.org/).
 - Plain `Screen.add_header()` rows now contribute to the widest-header
   measurement used for the one-time minimum and for demo-indicator padding;
   previously only fancy/structured headers did.
+- The glyph substitution table is rebuilt from scratch when a registration
+  invalidates it, so a fallback changed at runtime is the one actually used.
 
 ### Removed
 - `_filter_screens()` and `_skipped_by_filter()` are replaced by

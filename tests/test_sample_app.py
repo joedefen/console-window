@@ -341,6 +341,8 @@ def test_the_picker_header_names_the_mono_theme_and_its_swatches_follow():
         attrs = {}
         for text, runs in zip(app.win.body.texts, app.win.body.text_attrs,
                               strict=False):
+            if not text:
+                break  # the swatch block ends at the blank line
             if runs:
                 attrs[text.split()[0]] = runs[0][0]
         assert attrs['SUCCESS'] == Appearance.MONO_ROLES[Theme.SUCCESS]
