@@ -20,6 +20,12 @@ This project follows [Semantic Versioning](https://semver.org/).
 - `OptionSpinner.options_for_screen(screen)` is the single definition of which
   options apply on a screen; `ScreenStack` numbers its screens so the help body
   can use it.
+- A one-time minimum-size fit.  The default floor is `(20, 5)`; after the first
+  screen is painted, the floor grows to `min(60, widest_header + 3)` columns and
+  `header_rows + 4 + separator` rows.  The measurement happens before header
+  truncation, so drawing on a narrow terminal cannot shrink it.  Later screens
+  and later passes do not change it; `min_cols_rows=` remains the explicit
+  override.
 
 ### Changed
 - The help body lists only options whose scope includes the help screen, and it
@@ -30,6 +36,11 @@ This project follows [Semantic Versioning](https://semver.org/).
   an implicit (scope-less) registration raises and names the built-in action.
   A deliberate per-screen override, such as `ESC` clearing a filter on `MAIN`,
   still works.
+- The minimum size is enforced at the start of every `prompt()`, not only when
+  `KEY_RESIZE` arrives, and the notice polls the terminal dimensions so growing
+  back above the minimum is noticed without a resize key.  `answer()` uses the
+  same effective minimum and refreshes its geometry on each retry.
+  `min_cols_rows` is validated as a pair of positive integers.
 - **Breaking:** content and the pick/scroll state moved from `ConsoleWindow`
   onto `Screen`, and `draw()` is deleted, leaving one drawing model.  The
   `win.add_header()`, `win.add_body()`, `win.add_fancy_header()`,
@@ -68,6 +79,14 @@ This project follows [Semantic Versioning](https://semver.org/).
   column as `page:` above it. A key the application took still disappears from
   its chunk, and `NAV_KEY_LINES`, `get_nav_key_lines()` and
   `get_nav_keys_blurb()` keep their tuple-of-lines shape.
+
+### Fixed
+- The separator rule and scroll indicator never write the terminal's
+  bottom-right cell; both reserve the last column as the pads already do.  This
+  makes a four-row screen with a full header safe.
+- Plain `Screen.add_header()` rows now contribute to the widest-header
+  measurement used for the one-time minimum and for demo-indicator padding;
+  previously only fancy/structured headers did.
 
 ### Removed
 - `_filter_screens()` and `_skipped_by_filter()` are replaced by

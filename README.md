@@ -18,7 +18,7 @@ The package abstracts away the complexities of managing curses pads, dynamic scr
 5. **Non-pickable rows are first-class.** Decorative separator and header lines are skipped by navigation and page movement, so they do not produce "dead" cursor stops; scrolling still reaches them, including a trailing block of them past the last pickable row.
 6. **Scoped, self-subtracting key bindings.** A later, narrower binding (e.g. `ESC` to clear a filter on one screen only) subtracts that screen from an earlier global binding. This is a real router, not a flat key map, and it actively rejects collisions with navigation keys.
 7. **Convention-based dispatch.** Actions map to matching handler methods on screen classes, keeping them free of central `if key == ...` towers.
-8. **Resize resilience.** Rendering retries during terminal resizes, dialogs drain resize events, and the window degrades gracefully below its minimum size instead of crashing.
+8. **Resize resilience.** Rendering retries during terminal resizes, dialogs drain resize events, and the window enforces a minimum size instead of crashing.  The minimum starts at a small floor and is raised once, after the first screen is drawn, to fit that screen's header plus a few body rows.
 9. **Inline confirmation is unusually complete.** Tiered matching (exact, then case-insensitive, then abbreviation), an auto-calculated minimum abbreviation length, and six modes including identity matching and free text.
 10. **Real, dogfooded apps.** The API is validated by several downstream projects (listed below), not by theory.
 11. **Headless, testable core.** The layout math and a headless render backend let the whole engine be exercised without a TTY.
@@ -102,9 +102,7 @@ See [Running the Sample App (from source)](#running-the-sample-app-from-source) 
 
 ### The shape of every app
 
-A `Screen` owns its content and its pick/scroll position; the window owns the
-terminal, the pads and key routing.  The loop is four calls, and rebuilding the
-whole page every pass is the sanctioned style:
+A `Screen` owns its content and its pick/scroll position; the window owns the terminal, the pads and key routing.  The loop is four calls, and rebuilding the whole page every pass is the sanctioned style:
 
 ```python
 from types import SimpleNamespace
@@ -323,42 +321,29 @@ The appearance layer is shared too. `Appearance.semantic_attr(role)` returns the
 
 Deprecated APIs remain supported **indefinitely**. A deprecation is a request to migrate, not a scheduled removal: deprecated functions and parameters keep working, and one is removed only when there is significant value in doing so (for example, the API is actively harmful or blocks a necessary redesign).  Deprecated paths emit a `DeprecationWarning` where practical.
 
+---
+
 ### 3.0.0 Breakages
 
 `3.0.0` is the first release after the 2.x line, so every deliberate break from 2.x is collected here, each with its replacement.  Later 3.x releases are intended to remain upward compatible with this one.
 
 **The Screen owns content.** Content and the pick/scroll state moved from `ConsoleWindow` onto `Screen`, which removes one of the two drawing models:
 
-- **`win.add_header()`, `win.add_body()`, `win.add_fancy_header()`,
-  `win.add_header_line()`, `win.add_prompt_header()` and `win.add_prompt_lines()`
-  are gone.** Call them on the current `Screen` instead (`self.add_body(...)`
-  inside `draw_screen()`).  The window keeps `head`/`body` as read-only views.
-- **`win.draw(y, x, text, ...)` is gone**, with `highlight_picked()` and the
-  deferred `drawn` span store.  There is one drawing model: append rows with
-  `add_*()`; a row's column placement is composed by the application with
-  `textwidth.string_width`/`ljust`/`truncate`.
-- **Content and pick/scroll state are per screen.** `win.pick_pos`,
-  `win.scroll_pos`, `win.pick_mode`, `win.free_scroll` and
-  `win.pick_range` read and write the *current* screen; `pick_range` is no
-  longer stored in `ConsoleWindowOpts`, so two screens can hold different
-  ranges.  `last_pick_pos` and `_pick_clear_pending` are gone with the
-  incremental painter.
-- **The loop is `screen.clear(); screen.draw_screen(); win.render();
-  win.prompt()`.** `Screen.clear()` is what makes the screen current, so it
-  must be the first call.  `ConsoleWindow.clear()` still works and resets the
-  current screen's content, but it no longer wipes the physical screen (the
-  pads repaint themselves every frame).
-- **`head_line=False` now has no side effects.** It no longer paints a rule,
-  a scroll indicator or a status line onto the body's first row, and in scroll
-  mode the pick tracks the top of the viewport (`pick_pos == scroll_pos`).
+- **`win.add_header()`, `win.add_body()`, `win.add_fancy_header()`, `win.add_header_line()`, `win.add_prompt_header()` and `win.add_prompt_lines()` are gone.** Call them on the current `Screen` instead (`self.add_body(...)` inside `draw_screen()`).  The window keeps `head`/`body` as read-only views.
+- **`win.draw(y, x, text, ...)` is gone**, with `highlight_picked()` and the deferred `drawn` span store.  There is one drawing model: append rows with `add_*()`; a row's column placement is composed by the application with `textwidth.string_width`/`ljust`/`truncate`.
+- **Content and pick/scroll state are per screen.** `win.pick_pos`, `win.scroll_pos`, `win.pick_mode`, `win.free_scroll` and `win.pick_range` read and write the *current* screen; `pick_range` is no longer stored in `ConsoleWindowOpts`, so two screens can hold different ranges.  `last_pick_pos` and `_pick_clear_pending` are gone with the incremental painter.
+- **The loop is `screen.clear(); screen.draw_screen(); win.render(); win.prompt()`.** `Screen.clear()` is what makes the screen current, so it must be the first call.  `ConsoleWindow.clear()` still works and resets the current screen's content, but it no longer wipes the physical screen (the pads repaint themselves every frame).
+- **`head_line=False` now has no side effects.** It no longer paints a rule, a scroll indicator or a status line onto the body's first row, and in scroll mode the pick tracks the top of the viewport (`pick_pos == scroll_pos`).
 
-**Appearance and themes.**
+**Appearance and themes.** There are renames for consistency and some simplifications:
 
 - **`appearance` is now `Appearance`.** This matches the rest of the package root (`Theme`, `Glyphs`, `Context`, …).
 - **`--no-color` is gone.** Select the real `mono` theme instead (`--theme mono`), or rely on the `NO_COLOR` environment convention. `cli.resolve_no_color()` and the `no_color=` / `saved_colors=` parameters of `Appearance.resolve_appearance()` were removed with it.
 - **`Appearance.resolve_appearance()` returns one theme name**, not `(theme, colors)`. Apply it with `Theme.set_active()`; `mono` is the color-off state.
 - **`dark-mono` / `light-mono` are now `dark` / `light`.** The old names are still accepted as aliases by `--theme`, remembered preferences and `Theme.resolve()`, but `Theme.list_all()` lists only the canonical names.
 - **`mono` is a theme.** It installs only the terminal-default background and uses `Appearance.MONO_ROLES` for the semantic roles. It is terminal-global like any other theme install, because curses owns one color-pair table per terminal.
+
+---
 
 ## License
 MIT

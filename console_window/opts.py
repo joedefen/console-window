@@ -197,7 +197,7 @@ class ConsoleWindowOpts:
         self.pick_range = kwargs.get('pick_range')  # [start_col, end_col] or None
         self.ctrl_c_terminates = kwargs.get('ctrl_c_terminates', True)
         self.return_if_pos_change = kwargs.get('return_if_pos_change', True)
-        self.min_cols_rows = kwargs.get('min_cols_rows', (70, 20))
+        self.min_cols_rows = kwargs.get('min_cols_rows', (20, 5))
         self.dialog_abort = kwargs.get('dialog_abort', 'ESC')
         self.dialog_return = kwargs.get('dialog_return', 'ENTER')
         self.single_cell_scroll_indicator = kwargs.get('single_cell_scroll_indicator', False)
@@ -215,6 +215,17 @@ class ConsoleWindowOpts:
         self.ascii = _normalize_ascii_flag(kwargs.get('ascii'))
         self.glyphs = _normalize_glyphs(kwargs.get('glyphs'))
         self.glyphs_probe = _normalize_glyphs_probe(kwargs.get('glyphs_probe'))
+
+        # Validate min_cols_rows.  It is a hard floor, not a requested window
+        # size; it is (cols, rows) to match the long-standing tuple order.
+        pair = self.min_cols_rows
+        if (not isinstance(pair, (tuple, list)) or len(pair) != 2
+                or any(isinstance(v, bool) or not isinstance(v, int) or v < 1
+                       for v in pair)):
+            raise ValueError(
+                'min_cols_rows must be a (cols, rows) pair of positive ints, '
+                f'got {pair!r}')
+        self.min_cols_rows = (pair[0], pair[1])
 
         # Validate dialog_abort
         if self.dialog_abort not in [None, 'ESC', 'ESC-ESC']:

@@ -347,6 +347,103 @@ def test_prompt_min_size_abort_returns_esc_when_handled(make):
     assert win.prompt(seconds=0.5) == 27
 
 
+def test_prompt_enforces_the_floor_without_a_resize_key(make):
+    # 4x10 is below the bare floor; the check must happen at prompt() start,
+    # not only when a KEY_RESIZE arrives.
+    win, backend = make(HeadlessBackend(rows=4, cols=10), keys={27},
+                        relax_handled_keys=False)
+    backend.queue_keys(27)
+    assert win.prompt(seconds=0.5) == 27
+
+
+def test_check_min_size_polls_dimensions_without_a_resize_key(make):
+    # The notice must notice that the terminal grew even if the terminal never
+    # delivers KEY_RESIZE: it re-reads the dimensions on every iteration.
+    win, _backend = make(HeadlessBackend(rows=4, cols=10))
+
+    class GrowingScreen:
+        def __init__(self):
+            self.reads = 0
+
+        def getmaxyx(self):
+            self.reads += 1
+            return (4, 10) if self.reads == 1 else (24, 80)
+
+    real = win.scr
+    win.scr = GrowingScreen()
+    try:
+        assert win._check_min_size() is True
+    finally:
+        win.scr = real
+
+
+def test_the_minimum_starts_at_the_bare_floor(make):
+    win, _backend = make()
+    win.render()
+    win.prompt(seconds=0.01)
+    assert win._min_size() == (20, 5)
+
+
+def test_the_first_screen_sets_the_minimum_once(make):
+    win, _backend = make()
+    screen = screen_of(win)
+    screen.add_header('x' * 30)
+    screen.add_header('short')
+    screen.add_body('row')
+    win.render()
+    win.prompt(seconds=0.01)
+    # 30 header cells + 3 wiggle; 2 header rows + 4 body rows + the separator.
+    assert win._min_size() == (33, 7)
+
+    # A later, wider screen is ignored: the fit is a first-impression one-off.
+    screen.clear()
+    screen.add_header('y' * 50)
+    win.render()
+    win.prompt(seconds=0.01)
+    assert win._min_size() == (33, 7)
+
+
+def test_the_fitted_width_is_capped(make):
+    win, _backend = make()
+    screen_of(win).add_header('z' * 100)
+    win.render()
+    win.prompt(seconds=0.01)
+    assert win._min_size() == (60, 6)
+
+
+def test_the_dialog_minimum_follows_the_one_time_fit(make):
+    win, _backend = make()
+    screen_of(win).add_header('q' * 50)
+    win.render()
+    win.prompt(seconds=0.01)
+    assert win._dialog_min_size(5) == (53, 9)
+
+
+def test_the_separator_never_writes_the_bottom_right_cell(make):
+    win, backend = make(HeadlessBackend(rows=4, cols=20))
+    screen = screen_of(win)
+    for row in range(3):
+        screen.add_header(f'HDR {row}')
+    win.render()
+    hlines = backend.screen.calls_named('hline')
+    assert hlines
+    assert hlines[-1][1][3] == 19
+    assert all(args[1] < 19
+               for _name, args, _kwargs in backend.screen.calls_named('addch'))
+
+
+def test_scroll_indicator_span_reserves_the_last_column(make):
+    win, _backend = make()
+    win.cols = 20
+    win.scroll_view_size = 5
+    win.body.texts.extend([''] * 100)
+    bot, cnt = win._scroll_indicator_span(19)
+    assert 0 <= bot
+    assert bot + cnt <= 19
+    bot, cnt = win._scroll_indicator_span(10)
+    assert bot + cnt <= 19
+
+
 # --- render() / render_once(): the drawing half -----------------------------
 
 def test_render_draws_gutter_separator_and_indicator(make):
@@ -537,7 +634,9 @@ def test_answer_raises_when_terminal_too_small(make):
     win, _backend = make(HeadlessBackend(rows=5, cols=10))
     with pytest.raises(TerminalTooSmallError) as excinfo:
         win.answer()
-    assert (excinfo.value.required_cols, excinfo.value.required_rows) == (70, 20)
+    # The dialog itself needs at least 30 columns; the default floor is (20, 5),
+    # and a five-row dialog needs nine rows including its frame.
+    assert (excinfo.value.required_cols, excinfo.value.required_rows) == (30, 9)
     assert (excinfo.value.actual_cols, excinfo.value.actual_rows) == (10, 5)
 
 

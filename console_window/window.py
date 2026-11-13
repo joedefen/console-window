@@ -314,8 +314,9 @@ def _register_atexit() -> None:
 
 
 class TerminalTooSmallError(RuntimeError):
-    # answer() could not present its dialog because the terminal is below
-    # opts.min_cols_rows or the requested box size.  This is deliberately a
+    # answer() could not present its dialog because the terminal is below the
+    # effective minimum (the floor or the one-time first-screen fit) or the
+    # requested box size.  This is deliberately a
     # RuntimeError (not a curses.error) so the dialog's own recovery loop cannot
     # swallow it, and it is distinct from answer() returning None, which means
     # the user aborted (AUDIT.md §3.6).
@@ -522,6 +523,16 @@ class ConsoleWindow:
     # finite interval keeps the modal resize-aware (and lets a headless backend
     # drive the loop) without changing what the user sees.
     alert_poll_ms: int = 250
+    # One-time minimum-size policy.  opts.min_cols_rows is the floor; after the
+    # first rendered screen the floor grows to fit that screen's header plus a
+    # small body.  The width is capped so a long header cannot demand an
+    # unreasonable terminal, and the wiggle room covers the pick gutter, the
+    # scroll indicator and header values that grow later (a pass counter, a
+    # filename).  The values are policy, not options: apps that need a different
+    # floor pass min_cols_rows explicitly.
+    _AUTO_MIN_COLS_CAP: ClassVar[int] = 60
+    _AUTO_MIN_WIGGLE_COLS: ClassVar[int] = 3
+    _AUTO_MIN_BODY_ROWS: ClassVar[int] = 4
     # Populated only in singleton mode (the default).  The old API exposed these
     # as the process-wide screen and active window; they are kept for the apps
     # that relied on that model and remain None in per-instance mode.
@@ -662,6 +673,10 @@ class ConsoleWindow:
         # valid, so the window can be reattached to a screen later.
         self.suspended = False
         self.rows, self.cols = 0, 0
+        # True once a frame has actually been painted; the one-time minimum is
+        # measured from that first frame (see _finalize_min_size).
+        self._has_rendered = False
+        self._auto_min_cols_rows: tuple[int, int] | None = None
         self.body_cols, self.body_rows = self.opts.body_cols, self.opts.body_rows
         self.scroll_view_size = 0  # no. viewable lines of the body
         self.handled_keys = set(self.opts.keys) if isinstance(self.opts.keys, (set, list)) else set()
@@ -1026,10 +1041,55 @@ class ConsoleWindow:
         self._scr_timeout_ms = ms
         self.scr.timeout(ms)
 
-    def _check_min_size(self) -> bool:
-        min_cols, min_rows = self.opts.min_cols_rows
+    def _min_size(self) -> tuple[int, int]:
+        """The effective ``(cols, rows)`` floor: the option plus the one-time fit."""
+        floor_cols, floor_rows = self.opts.min_cols_rows
+        fit: tuple[int, int] | None = getattr(self, '_auto_min_cols_rows', None)
+        if fit is None:
+            return floor_cols, floor_rows
+        return max(floor_cols, fit[0]), max(floor_rows, fit[1])
 
-        while self.rows < min_rows or self.cols < min_cols:
+    def _finalize_min_size(self) -> None:
+        """Fold the first painted screen's shape into the minimum, once.
+
+        The first screen is the application's "first impression": its widest
+        header (measured before truncation, so drawing on a narrow terminal
+        cannot shrink the answer) sets the width, and its header height plus a
+        small body sets the height.  Later screens and later passes are
+        deliberately ignored; the wiggle room and the explicit
+        ``min_cols_rows`` floor cover header values that grow.
+        """
+        if (getattr(self, '_auto_min_cols_rows', None) is not None
+                or not getattr(self, '_has_rendered', False)):
+            return
+        floor_cols, floor_rows = self.opts.min_cols_rows
+        fit_cols = min(self._AUTO_MIN_COLS_CAP,
+                       self.head.max_header_len + self._AUTO_MIN_WIGGLE_COLS)
+        fit_rows = (self.head.row_cnt + self._AUTO_MIN_BODY_ROWS
+                    + self.hor_line_cnt)
+        self._auto_min_cols_rows = (max(floor_cols, fit_cols),
+                                    max(floor_rows, fit_rows))
+
+    def _check_min_size(self) -> bool:
+        """Wait until the terminal meets the effective minimum.
+
+        Dimensions are re-read in the wait loop rather than only on
+        ``KEY_RESIZE``: a terminal can be resized without delivering that key,
+        and a headless backend never does.  The fast path is one ``getmaxyx``.
+        """
+        self._set_screen_dims()
+        min_cols, min_rows = self._min_size()
+        if self.rows >= min_rows and self.cols >= min_cols:
+            return True
+
+        while True:
+            # curses caches LINES/COLS; refresh before re-reading so growing
+            # out of the notice is noticed within one getch() timeout.
+            self._backend.update_lines_cols()
+            self._set_screen_dims()
+            min_cols, min_rows = self._min_size()
+            if self.rows >= min_rows and self.cols >= min_cols:
+                return True
             self.scr.clear()
             msg1 = f"Min size: {min_cols}x{min_rows}"
             msg2 = f"Current: {self.cols}x{self.rows}"
@@ -1040,15 +1100,9 @@ class ConsoleWindow:
                 pass  # Terminal too small even for message
             self.scr.refresh()
 
-            # Wait for key
             key = self.scr.getch()
             if key == 27:  # ESC to abort
                 return False
-            if key == curses.KEY_RESIZE:
-                self._backend.update_lines_cols()
-                self._set_screen_dims()
-
-        return True
 
     def _new_screen(self) -> CursesSurface:
         """Create and initialize a brand-new screen for this window."""
@@ -1418,6 +1472,11 @@ class ConsoleWindow:
                     ns.text_attrs[row].append((attr, len(actual_text)))
                 # Note: context not updated on resume
         else:
+            if ns is self.head:
+                # Measure before truncation: the first screen's header sets the
+                # one-time minimum even when it was drawn on a narrow terminal.
+                ns.max_header_len = max(
+                    ns.max_header_len, textwidth.string_width(text))
             # Truncate to the single "usable width" (get_pad_width), matching
             # the resume branch, not the raw terminal width, which is one column
             # wider and uncapped by the pad.
@@ -1986,6 +2045,9 @@ class ConsoleWindow:
 
         # --- 4. Final Update (Only one physical screen update) ---
         self._backend.doupdate()
+        # The first completed frame is the app's "first impression"; prompt()
+        # uses this flag to take the one-time minimum-size measurement.
+        self._has_rendered = True
 
     def _mark_pads_for_redraw(self) -> None:
         self.scr.redrawwin()
@@ -2013,14 +2075,20 @@ class ConsoleWindow:
         return bool(self.hor_line_cnt) and self.head.view_cnt < self.rows
 
     def _draw_separator_and_indicator(self) -> None:
+        # A one-column terminal has no safe cell to paint, and writing the
+        # bottom-right corner raises curses.error, so reserve the last column
+        # exactly as get_pad_width() does for the pads.
+        if self.cols < 2:
+            return
         # While an in-place prompt is live it is the only thing keys can reach,
         # so an application may ask for the rule to recede behind it.
         rule_attr = (self.prompt_separator_attr
                      if self.prompt_line.active and self.prompt_separator_attr is not None
                      else curses.A_NORMAL)
         sep_row = self.body_base - 1
-        self.scr.hline(sep_row, 0, curses.ACS_HLINE, self.cols, rule_attr)
-        ind_pos = self._scroll_indicator_col()
+        rule_width = self.cols - 1
+        self.scr.hline(sep_row, 0, curses.ACS_HLINE, rule_width, rule_attr)
+        ind_pos = min(self._scroll_indicator_col(), rule_width - 1)
         bot, cnt = self._scroll_indicator_span(ind_pos) if ind_pos >= 0 else (-1, 0)
         # Status first: it must not be able to cover the indicator, and it must
         # still draw when there is no indicator to draw.
@@ -2056,12 +2124,13 @@ class ConsoleWindow:
                         else curses.A_NORMAL)
 
     def _scroll_indicator_span(self, ind_pos: int) -> tuple[int, int]:
-        if self.opts.single_cell_scroll_indicator or not 0 < ind_pos < self.cols-1:
-            return ind_pos, 1
+        limit = max(1, self.cols - 2)  # reserve the bottom-right cell
+        if self.opts.single_cell_scroll_indicator or not 0 < ind_pos < limit:
+            return min(ind_pos, limit), 1
         # Proportional range indicator
         width = self.scroll_view_size/self.body.row_cnt*self.cols
         bot = max(round(ind_pos-width/2), 1)
-        top = min(round(ind_pos+width/2), self.cols-1)
+        top = min(round(ind_pos+width/2), limit)
         return bot, max(top - bot, 1)
 
     def _paint_body(self) -> int:
@@ -2163,6 +2232,9 @@ class ConsoleWindow:
 
         try:
             while True:
+                # Keep geometry current across retries; a resize may have
+                # arrived without refreshing our cached dimensions.
+                self._set_screen_dims()
                 try:
                     success, row0, row9, col0, text_win_width = self._dialog_geometry(height, width)
 
@@ -2243,7 +2315,7 @@ class ConsoleWindow:
         return TerminalTooSmallError(required_rows, required_cols, self.rows, self.cols)
 
     def _dialog_min_size(self, height: int) -> tuple[int, int]:
-        min_cols, min_rows = self.opts.min_cols_rows
+        min_cols, min_rows = self._min_size()
         return max(30, min_cols), max(height + 4, min_rows)
 
     def _dialog_geometry(self, height: int, width: int) -> tuple[bool, int, int, int, int]:
@@ -2272,8 +2344,10 @@ class ConsoleWindow:
         key = self.scr.getch()
         if key == 27:
             return True
-        if key == curses.KEY_RESIZE:
-            self._backend.update_lines_cols()
+        # Poll even when getch() timed out: not every terminal delivers
+        # KEY_RESIZE, and the caller retries with these dimensions.
+        self._backend.update_lines_cols()
+        self._set_screen_dims()
         return False
 
     def _draw_debug_indicator(self, row0: int, col0: int, toggle: bool) -> bool:
@@ -2869,7 +2943,10 @@ class ConsoleWindow:
         if signals.ctrl_c_flag:
             return self._handle_prompt_ctrl_c(key)
         if key == curses.ERR:
-            # Nothing was typed; keep waiting for input.
+            # A timeout is also the polling point for a resize that arrived
+            # without KEY_RESIZE; otherwise keep waiting for input.
+            if self._backend.is_term_resized(self.rows, self.cols):
+                return True, self._handle_prompt_resize()
             return False, None
         return True, self._handle_prompt_resize()
 
@@ -2883,6 +2960,9 @@ class ConsoleWindow:
         return False, None
 
     def _handle_prompt_resize(self) -> int | None:
+        # Sync curses' cached LINES/COLS before reading the window size; an
+        # ERR-driven resize (no KEY_RESIZE) leaves the cache stale otherwise.
+        self._backend.update_lines_cols()
         self._set_screen_dims()
         if not self._check_min_size() and 27 in self.handled_keys:
             # User pressed ESC to abort during size check.
@@ -3054,6 +3134,12 @@ class ConsoleWindow:
         return self._finish_prompt_move(key, pos, was_pos, scroll_adjustment)
 
     def prompt(self, seconds: float = 1.0) -> int | None:
+        # Enforce the minimum before blocking.  The first prompt after the first
+        # render is where the one-time content fit is applied, and every later
+        # call re-checks in case the terminal changed between waits.
+        self._finalize_min_size()
+        if not self._check_min_size():
+            return 27 if 27 in self.handled_keys else None
         begin_mono = time.monotonic()
         while True:
             if time.monotonic() - begin_mono >= seconds:

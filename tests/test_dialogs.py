@@ -104,7 +104,7 @@ def test_answer_restores_previous_timeout_on_esc():
 
 
 def test_answer_raises_when_terminal_too_small():
-    scr = FakeScreen(rows=5, cols=10)  # below opts.min_cols_rows (70, 20)
+    scr = FakeScreen(rows=5, cols=10)  # below the dialog's 30x9 minimum
     win = make_window(scr)
     win._scr_timeout_ms = 999
 
@@ -112,9 +112,9 @@ def test_answer_raises_when_terminal_too_small():
         win.answer()
 
     err = excinfo.value
-    assert (err.required_cols, err.required_rows) == (70, 20)
+    assert (err.required_cols, err.required_rows) == (30, 9)
     assert (err.actual_cols, err.actual_rows) == (10, 5)
-    assert 'need at least 70x20, have 10x5' in str(err)
+    assert 'need at least 30x9, have 10x5' in str(err)
     # No dialog loop started, so the caller's timeout is untouched.
     assert scr.timeouts == []
     assert win._scr_timeout_ms == 999

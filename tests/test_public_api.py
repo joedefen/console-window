@@ -147,4 +147,19 @@ def test_opts_defaults():
     opts = ConsoleWindowOpts()
     assert opts.head_line is True
     assert opts.dialog_return == 'ENTER'
-    assert opts.min_cols_rows == (70, 20)
+    assert opts.min_cols_rows == (20, 5)
+
+
+@pytest.mark.parametrize('bad', [
+    (0, 5),
+    (20, 0),
+    (20,),
+    (20, 5, 6),
+    '20x5',
+    (True, 5),
+    (20, 5.0),
+])
+def test_min_cols_rows_must_be_a_pair_of_positive_ints(bad):
+    from console_window import ConsoleWindowOpts
+    with pytest.raises(ValueError, match='min_cols_rows'):
+        ConsoleWindowOpts(min_cols_rows=bad)
