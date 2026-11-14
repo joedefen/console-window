@@ -466,6 +466,21 @@ def test_render_draws_gutter_separator_and_indicator(make):
     assert win.head.pad.calls_named('noutrefresh')
 
 
+def test_pick_gutter_is_blanked_up_into_the_header_band(make):
+    # The pads are shifted right by the gutter, so the header band's first
+    # column is gutter too: blank it from row 0, or a character an overlay
+    # left there (a help page drawn at column 0) survives every later frame.
+    win, backend = make(pick_mode=True, body_rows=10, head_rows=2)
+    screen_of(win).add_header('HDR')
+    screen_of(win).add_body('body')
+
+    win.render(redraw=True)
+
+    _name, args, _kwargs = backend.screen.calls_named('vline')[-1]
+    assert args[0] == 0, args                # starts at the top row
+    assert args[3] >= win.body_base, args    # covers the body band too
+
+
 def test_scroll_indicator_span_single_cell_branch(make):
     win, _backend = make(single_cell_scroll_indicator=True)
     assert win._scroll_indicator_span(10) == (10, 1)

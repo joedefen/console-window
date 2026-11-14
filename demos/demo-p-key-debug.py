@@ -33,13 +33,13 @@ SAMPLE_WIDTH = 12
 
 
 class WidthScreen(DemoScreen):
-    title = 'keys and widths'
+    title = 'P-keys-and-widths'
 
     def draw_screen(self) -> None:
         self.set_pick_mode(False)
         self.add_fancy_header(
-            f'keys and widths  demo_mode={self.win.opts.demo_mode}  '
-            f'pass {self.app.iteration}  [d]toggle keys  [?]help  [q]uit',
+            f'P-keys-and-widths  demo_mode={self.win.opts.demo_mode}  '
+            f'[d]:toggle keys  [?]:help  [q]uit',
             mode='Underline',
             line_attr=cs.A_DIM,
         )
@@ -61,7 +61,7 @@ class WidthScreen(DemoScreen):
 
 
 class WidthApp(DemoApp):
-    title = 'keys and widths'
+    title = 'P-keys-and-widths'
     screen_class = WidthScreen
     help_paragraphs = (
         'd turns demo_mode on: the window paints the last key it received in '

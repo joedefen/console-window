@@ -3,12 +3,15 @@ Pure-stdlib reproducible test table: primes with derived, human-interesting fiel
 No third-party dependencies. Deterministic output (no RNG needed).
 
 The spelled column can be restyled for a live demo; that mapping is also
-deterministic, driven by an MD5 hash of ``(cycle, rank)``.
+deterministic, driven by an MD5 hash of ``(cycle, rank)``.  Setting
+``thaw_secs`` puts the pass count on the wall clock instead, so the churn moves
+one pass at a time, no faster than the thaw allows.
 """
 
 from __future__ import annotations
 
 import hashlib
+import time
 from typing import ClassVar, Iterator
 
 
@@ -97,6 +100,24 @@ class PrimeRows:
     CASE_STYLES = ("lower", "title", "upper")
     STYLE_COUNT = len(QUOTE_STYLES) * len(CASE_STYLES)
 
+    #: Wall-clock seconds between two churn passes.  ``None`` (the default)
+    #: leaves the pass count to the caller's ``iteration``, so
+    #: :meth:`altered_spelled` stays a pure function of its arguments.  A number
+    #: makes the class keep the count itself: the styles hold still and then
+    #: move one pass at a time, at most once per *thaw_secs*.  A demo that
+    #: wants a calm table while it is being edited sets it once, at module
+    #: level::
+    #:
+    #:     PrimeRows.thaw_secs = 5.0
+    thaw_secs: ClassVar[float | None] = None
+    #: The class's own pass count, used while :attr:`thaw_secs` is set; ``-1``
+    #: until the first thaw.  Read it to display the data's clock.  An app that
+    #: shows its own loop count (demo B's ``loop n``) keeps its own counter:
+    #: that number counts passes of the loop, not passes of the churn.
+    pass_count: ClassVar[int] = -1
+    #: ``time.monotonic()`` of the last pass; ``None`` until the clock starts.
+    _thaw_at: ClassVar[float | None] = None
+
     @staticmethod
     def pseudo_random_map(value: int, bound: int = 9) -> int:
         """Map any integer to a well-mixed value in ``range(bound)`` (MD5)."""
@@ -123,19 +144,52 @@ class PrimeRows:
         return quote + text + quote
 
     @classmethod
-    def altered_spelled(cls, spelled: str, rank: int, iteration: int,
-                        interval: int) -> str:
-        """Return *spelled* with the style this row has in *iteration*'s cycle.
+    def _thawed_pass(cls, thaw_secs: float) -> int:
+        """The class's pass count, advanced by one at most every *thaw_secs*.
+
+        The first call only starts the clock, so the base text is shown until
+        the first thaw.  Every row in one draw reads the same count, so a thaw
+        moves exactly the rows one loop pass would have moved -- one
+        ``interval``-th of the table -- and nothing in between.
+        """
+        if thaw_secs <= 0:
+            raise ValueError("thaw_secs must be positive")
+        now = time.monotonic()
+        if cls._thaw_at is None:
+            cls._thaw_at = now
+        elif now - cls._thaw_at >= thaw_secs:
+            cls._thaw_at = now
+            cls.pass_count += 1
+        return cls.pass_count
+
+    @classmethod
+    def altered_spelled(cls, spelled: str, rank: int,
+                        iteration: int | None = None,
+                        interval: int = 10) -> str:
+        """Return *spelled* with the style this row has in *iteration*'s pass.
 
         A row is reassigned once per ``interval`` passes, at phase
-        ``rank % interval``.  The style is hashed from ``(cycle, rank)``, so it
+        ``rank % interval``.  The style is hashed from ``(pass, rank)``, so it
         persists until the row's next reassignment instead of flickering for a
-        single pass.  Before the row's first reassignment the base text comes
+        single pass.  Before a row's first reassignment the base text comes
         back unchanged.
+
+        The pass count is the caller's *iteration* -- the loop's own counter --
+        unless :attr:`thaw_secs` is set.  Then the class keeps the count
+        (:attr:`pass_count`) and advances it by one at most every
+        ``thaw_secs``: *iteration* is ignored, so a demo opts in with one line
+        and its call sites do not change, and each thaw does what one loop pass
+        would have done.  ``interval`` defaults to ten, the family's spacing.
         """
         if interval <= 0:
             raise ValueError("interval must be positive")
-        cycle, phase = divmod(iteration, interval)
+        if cls.thaw_secs is None:
+            if iteration is None:
+                raise ValueError("pass an iteration, or set thaw_secs")
+            pass_no = iteration
+        else:
+            pass_no = cls._thawed_pass(cls.thaw_secs)
+        cycle, phase = divmod(pass_no, interval)
         if phase < rank % interval:
             cycle -= 1
         if cycle < 0:
@@ -184,8 +238,6 @@ class PrimeRows:
 # Demo
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    import time
-
     prime_rows = PrimeRows()
     t0 = time.perf_counter()
     rows = list(prime_rows.generate_rows(1, 10_000))

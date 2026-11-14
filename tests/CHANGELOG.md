@@ -5,6 +5,18 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## [3.0.0]
 
+### Demos
+
+The single `demo-buffet.py` smorgasbord is retired.  The demos are now a family
+of feature-focused programs: sixteen lettered demos, `a-basic` through
+`p-key-debug`, one learning objective each, which share `demos/demo_kit.py`,
+are indexed by `demos/features.py`, and run with `./demos/run-demo <name>`.
+The curriculum, the conventions, the feature-to-demo map, the reverse index and
+the demos' test posture are documented in
+[docs/DEMO-APPS.md](../docs/DEMO-APPS.md); that document and the `demos/` tree
+are the source of truth for the demos, and this changelog does not restate
+them.
+
 ### Added
 - `OptionSpinner` registers `quit` (`q`, `^C`) and `escape` (`ESC`, `^J`,
   `ENTER`) before the application registers anything; override the key sets with
@@ -44,60 +56,6 @@ This project follows [Semantic Versioning](https://semver.org/).
   **Regex filter** — see demo: e-search.
 
 ### Changed
-- The demo family replaces the single `demo-buffet.py` sample.  Sixteen
-  lettered demos, `a-basic` through `p-key-debug`, teach one learning objective
-  each: A–C are complete single-file programs and D–P are short deltas on
-  `demos/demo_kit.py`.  `demos/features.py` is the machine-readable owner map,
-  `docs/DEMO-APPS.md` is the rendered curriculum and reverse index, and
-  `./demos/run-demo features` prints the map.  A library feature added or
-  changed from now on updates its owning demo, the map, and a changelog bullet
-  shaped like `- **...** — see demo: h-messages.`.
-- Every demo after B now carries the full shape, and `demo_kit.DemoApp` builds
-  it by default: a `ScreenStack`, an `OptionSpinner` with `? - help` already
-  bound, and a `DemoHelpScreen` whose `Instructions` band is the app's
-  `help_paragraphs` (with `help_display_notes` for the glyph font check).  A
-  demo's keys are `add_key(..., genre='action', comments=...)` registrations,
-  so one registration supplies dispatch, the help row and its prose; H, I, N,
-  O and P are re-based on C and document their own keys this way, and C is the
-  complete file to copy.  A bound key missing from the help page, or a header
-  advertising a key that is not bound, is a review convention rather than a
-  test; A and B remain the degenerate showcases.
-  **Demo boilerplate** — see demo: n-suspend.
-- Demo N's header and hand-back now say what `e` does.  The title is one
-  hyphenated word, so the whole of `pause-and-run` is the header's bold label;
-  the keys read `e:run`, `?:help` and `quit` (a colon keeps a key from abutting
-  the word it introduces), and the meaningless `pass` counter is gone.  `e` runs
-  a self-contained shell program that clears the screen, echoes the command
-  (`+ ls -l /bin/*sh | head -n 8`), runs that bounded listing, then waits at
-  `===>  Return to screen?` until ENTER -- previously a `less` with an empty
-  stdin (or `-F`) returned before anything could be seen.
-  **External-program pause** — see demo: n-suspend.
-- Demo D's pick is now a block of rows attached to the picked row, and the
-  page demonstrates grouping instead of a size option. The title is one
-  hyphenated word, so all of `pick-a-row` is the header's bold label; the keys
-  read `check`, `?:help` and `quit`. `rank % 3` gives each prime 0-2 `abut=-1`
-  detail rows, so blocks differ in height: scrolling keeps a block together
-  while only the primary row is highlighted and visited. Detail rows start
-  under the `spelled` column. A `DECOR` group header (`rank // 5`) opens the
-  body and every group of five, and ends both navigation runs and blocks. A
-  new untitled left column carries a `✓` that `c` toggles on the picked row.
-  **Pick blocks and groups** — see demo: d-pick.
-- Demo E filters with a regex and clears with `c`.  The title is one hyphenated
-  word (`filter-as-you-type`), the meaningless `pass` counter and the
-  `[/]filter` wording are gone, and the pattern is drawn at the right end of
-  the title line after `/`, so the keys to its left never shift while it grows.
-  The pattern is compiled the way vappman's filter is: words, dashes and spaces
-  are matched as words in order, anything else is compiled as written.  A regex
-  is invalid while it is being typed, so a pattern that does not compile yet
-  leaves the last valid filter on the table and reverses only the `/`
-  (`as_header_line(invalid=True)`), and ENTER is ignored until the pattern
-  compiles; the help page explains both.  `c` is an `OptionSpinner` action that
-  clears the pattern and the table together; the one-off `\` key is gone (the
-  `temp_handled_keys()` API is unchanged and stays documented in the README),
-  and ESC both cancels composition back to the starting pattern and, when idle,
-  clears through the screen-local escape action.  The demo also owns
-  `IncrementalSearchBar.reset()`.
-  **Regex filter** — see demo: e-search.
 - The help screen is three bands: the `NavKeys:` legend, a body headed
   `Keys for '<screen>':` for the screen the help was pushed from, and an
   `---------- Instructions ----------` block whose paragraphs are drawn in the
@@ -210,6 +168,12 @@ This project follows [Semantic Versioning](https://semver.org/).
 - The separator rule and scroll indicator never write the terminal's
   bottom-right cell; both reserve the last column as the pads already do.  This
   makes a four-row screen with a full header safe.
+- In pick mode the head and body pads are shifted right by the gutter's one
+  cell, so the whole left column is blanked from the top row down on every
+  frame.  Blanking only the body band left the header band's first column as
+  whatever the previous frame had put there -- a help page laid out at column
+  0, a dialog box -- and that character survived every later redraw (a stray
+  `N` beside the title of a demo that had visited its help page).
 - Plain `Screen.add_header()` rows now contribute to the widest-header
   measurement used for the one-time minimum and for demo-indicator padding;
   previously only fancy/structured headers did.
@@ -228,10 +192,10 @@ This project follows [Semantic Versioning](https://semver.org/).
   so there is no size to configure. `set_pick_mode(on)` takes only the on/off
   flag.
   **Derived pick span** — see demo: d-pick.
-- `demos/demo-buffet.py` and its 393-line `tests/test_sample_app.py` harness.
-  Every feature it demonstrated has a focused home in the lettered family, and
-  `tests/test_demos.py` drove each demo headlessly and enforced the
-  feature-ownership manifest until it too was removed.
+- `demos/demo-buffet.py` and its 393-line `tests/test_sample_app.py` harness;
+  every feature it demonstrated has a focused home in the lettered family (see
+  the demos statement at the top of this entry and
+  [docs/DEMO-APPS.md](../docs/DEMO-APPS.md)).
 - `_filter_screens()` and `_skipped_by_filter()` are replaced by
   `options_for_screen()`, and the unreachable `_reject_key_conflicts()` is
   deleted: a later registration always subtracts its overlap from an earlier

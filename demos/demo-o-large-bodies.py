@@ -30,14 +30,14 @@ LARGE_BODY_ROWS = 2000
 
 
 class LargeScreen(DemoScreen):
-    title = 'large bodies'
+    title = 'O-large-bodies'
 
     def draw_screen(self) -> None:
         self.set_pick_mode(False)
         self.add_fancy_header(
-            f'large bodies  rows={len(self.app.rows)}  '
+            f'O-large-bodies  rows={len(self.app.rows)}  '
             f'max_rows={self.win.opts.max_rows}  '
-            f'dropped={self.win.rows_dropped}  [r]edraw  [?]help  [q]uit',
+            f'dropped={self.win.rows_dropped}  [r]edraw  [?]:help  [q]uit',
             mode='Underline',
         )
         self.add_header(
@@ -54,7 +54,7 @@ class LargeScreen(DemoScreen):
 
 
 class LargeApp(DemoApp):
-    title = 'large bodies'
+    title = 'O-large-bodies'
     row_range = (1, LARGE_BODY_ROWS)
     screen_class = LargeScreen
     win_options: ClassVar[dict[str, object]] = {

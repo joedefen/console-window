@@ -28,14 +28,13 @@ DEMO_PROBE = ('tick', 'cursor', 'choice', 'scroll_prev', 'scroll_next')
 
 
 class GlyphScreen(DemoScreen):
-    title = 'glyphs'
+    title = 'K-glyphs'
 
     def draw_screen(self) -> None:
         self.set_pick_mode(False)
         mode = 'ASCII' if self.win.ascii_mode else 'Unicode'
         self.add_fancy_header(
-            f'glyphs  mode={mode}  pass {self.app.iteration}  '
-            f'[?]help  [q]uit',
+            f'K-glyphs  mode={mode}  [?]:help  [q]uit',
             mode='Underline',
         )
         self.add_header(f'font check: {Glyphs.probe_text()}')
@@ -45,7 +44,7 @@ class GlyphScreen(DemoScreen):
             self.add_body(line)
 
 class GlyphApp(DemoApp):
-    title = 'glyphs'
+    title = 'K-glyphs'
     screen_class = GlyphScreen
     win_options: ClassVar[dict[str, object]] = {
         'glyphs': DEMO_GLYPHS,

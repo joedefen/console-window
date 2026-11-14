@@ -26,22 +26,24 @@ from console_window import HeaderLine, Span
 
 
 class HeaderScreen(DemoScreen):
-    title = 'headers'
+    title = 'I-headers'
 
     def draw_screen(self) -> None:
         self.set_pick_mode(False)
 
-        # Row 1: explicit tokens, emitted verbatim (brackets are literal).
+        # Row 1: an explicit label token plus tokens emitted verbatim (brackets
+        # are literal).
         tokens = HeaderLine()
-        tokens.text('  ').bracket_key('q').text('uit  ')
-        tokens.bracket_key('j').text('/').bracket_key('k').text(' move  ')
-        tokens.bracket_key('?').text('help')
+        tokens.label('I-headers').text('  ')
+        tokens.bracket_key('q').text('uit  ')
+        tokens.bracket_key('j').text('/').bracket_key('k').text(':move  ')
+        tokens.bracket_key('?').text(':help')
         self.add_header_line(tokens, mode='Underline')
 
         # Row 2: the same spelling through the fancy path: brackets are markup,
         # and the mode controls how the roles are emphasized.
         self.add_fancy_header(
-            '  [q]uit  [j]/[k] move  [?]help',
+            '  [q]uit  [j]/[k]:move  [?]:help',
             mode='Underline',
             line_attr=cs.A_DIM,
         )
@@ -61,7 +63,7 @@ class HeaderScreen(DemoScreen):
 
 
 class HeaderApp(DemoApp):
-    title = 'headers'
+    title = 'I-headers'
     screen_class = HeaderScreen
     help_paragraphs = (
         'Row 1 is a HeaderLine: the brackets are literal text, and the key role '

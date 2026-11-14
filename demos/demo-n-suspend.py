@@ -42,16 +42,17 @@ read _ 2>/dev/null < /dev/tty || read _
 
 
 class SuspendScreen(DemoScreen):
-    title = 'pause-and-run'
+    title = 'N-pause-and-run'
 
     def draw_screen(self) -> None:
         self.set_pick_mode(False)
-        # The fancy header bolds its first word as the title.  "pause-and-run"
-        # is one hyphenated word, so the whole title is bold; the colon keeps a
-        # key from abutting the word it introduces (e:run, ?:help), while
-        # [q]uit stays bracketed because the key is part of that word.
+        # The fancy header bolds its first word as the title.  "N-pause-and-run"
+        # is one hyphenated word, so the whole title is bold.  A key that is its
+        # hint's first letter is written once, inside the word ([q]uit draws
+        # "quit"); any other key is divided from its hint by a colon
+        # ([e]:run, [?]:help).
         self.add_fancy_header(
-            'pause-and-run  [e]:run  [?]:help  [q]uit',
+            'N-pause-and-run  [e]:run  [?]:help  [q]uit',
             mode='Underline',
         )
         self.add_header('NOTE: content and scroll position survive the hand-back',
@@ -65,7 +66,7 @@ class SuspendScreen(DemoScreen):
 
 
 class SuspendApp(DemoApp):
-    title = 'pause-and-run'
+    title = 'N-pause-and-run'
     screen_class = SuspendScreen
     help_paragraphs = (
         'e suspends curses and gives the whole terminal to an ordinary shell '

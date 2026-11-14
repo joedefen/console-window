@@ -47,7 +47,7 @@ class PagerScreen(Screen):
         # The header band: a title line, then the column header.  head_line=True
         # draws the rule between the header rows and the body.
         self.add_fancy_header(
-            f'prime rows 100-200 | q: quit | pass {self.app.iteration}',
+            f'A-prime-rows-100-200 | q: quit | loop {self.app.iteration}',
             mode='Underline',
             line_attr=cs.A_DIM,
         )

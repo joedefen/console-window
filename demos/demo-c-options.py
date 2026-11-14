@@ -94,8 +94,8 @@ class MainScreen(Screen):
         self.set_pick_mode(False)
 
         line = HeaderLine()
-        line.text(f'{self.app.opts.range} {self.app.opts.order}  '
-                  f'pass {self.app.iteration}  ')
+        line.label('C-options').text('  ')
+        line.text(f'{self.app.opts.range} {self.app.opts.order}  ')
         line.bracket_key('r').text('ange  ')
         line.bracket_key('o').text('rder  ')
         line.bracket_key('?').text(':help  ')

@@ -6,9 +6,12 @@ Owns: begin-prompt, single-key-prompt, text-prompt, prompt-placement,
 Base: d-pick
 Run:  ./demos/run-demo f-prompts
 
-``y`` asks a single-key question under the picked row (``mode='y'``); ``N``
-opens a buffered text prompt in the header band (``mode='text'`` with a seed).
-The prompt is drawn by ``add_prompt_lines()`` / ``add_prompt_header()``, and the
+``y`` asks a single-key question under the picked row (``mode='y'``) and marks
+that row confirmed, as if its arithmetic had been checked by hand; ``t`` asks a
+buffered text question in the header band (``mode='text'`` with a seed) and
+renames the spelled column.  The placement follows the question: a row's answer
+is read under that row, and a column title is read above the table.  The
+prompts are drawn by ``add_prompt_lines()`` / ``add_prompt_header()``, and the
 completion callbacks run after passthrough is restored, so they can report with
 ``status()`` safely.
 
@@ -23,49 +26,58 @@ import curses as cs
 from typing import ClassVar
 
 from demo_kit import (
-    COLUMN_HEADER,
     DemoApp,
     DemoScreen,
     row_line,
     run_main,
 )
+from PrimeRows import PrimeRows
 
 from console_window import Context
 
+#: The kit's pager restyles a sliver of rows on every pass; one pass every five
+#: seconds keeps the table calm while a prompt is open.
+PrimeRows.thaw_secs = 5.0
+
 
 class PromptScreen(DemoScreen):
-    title = 'ask in place'
+    title = 'F-ask-in-place'
     pick_enabled = True
 
     def draw_screen(self) -> None:
         self.set_pick_mode(True)
         self.draw_header()
-        self.add_header(COLUMN_HEADER, attr=cs.A_BOLD)
+        # The spelled column's title is the app's, so the header has to be
+        # rebuilt each pass rather than taken from the kit's constant.
+        self.add_header(
+            f'{"rank":>6}  {"prime":>8}  {self.app.column_title}',
+            attr=cs.A_BOLD,
+        )
 
         for row in self.app.rows:
             rank = row['rank']
-            marker = ' ✓ processed' if rank in self.app.processed else ''
-            if rank in self.app.notes:
-                marker += f'  note={self.app.notes[rank]!r}'
+            marker = ' ✓ confirmed' if rank in self.app.confirmed else ''
             self.add_body(
                 row_line(row, self.app.iteration) + marker,
                 context=Context(genre='item', item=row),
             )
             # The single-key question belongs to the row it asks about; the
             # window marks both prompt rows as transient/non-pickable.
-            if self.app.win.prompt_active and self.app.prompt_rank == rank:
+            if self.app.win.prompt_active and self.app.confirm_rank == rank:
                 self.add_prompt_lines(attr=cs.A_BOLD, hint_attr=cs.A_DIM)
 
     def draw_header(self) -> None:
+        # A key that is its hint's first letter is written once, inside the
+        # word ([t]itle draws "title"); one that is not is divided from its
+        # hint by a colon ([y]:confirm, [?]:help).
         self.add_fancy_header(
-            f'ask in place  pass {self.app.iteration}  '
-            f'[y]confirm  [N]note  [?]help  [q]uit',
+            'F-ask-in-place  [y]:confirm  [t]itle  [?]:help  [q]uit',
             mode='Underline',
             line_attr=cs.A_DIM,
         )
-        # A buffered note is a screen-wide question, so it lives in the header
-        # band instead of under one row.
-        if self.app.win.prompt_active and self.app.note_rank is not None:
+        # A column title is a question about the whole table, so its prompt
+        # lives in the header band instead of under one row.
+        if self.app.win.prompt_active and self.app.title_prompt:
             self.add_prompt_header()
 
     def confirm_ACTION(self) -> None:
@@ -73,84 +85,83 @@ class PromptScreen(DemoScreen):
         if not ctx:
             return
         rank = ctx.item['rank']
-        self.app.prompt_rank = rank
+        self.app.confirm_rank = rank
 
         def confirm(_answer: str) -> None:
-            self.app.prompt_rank = None
-            self.app.processed.add(rank)
-            self.win.status(f'Processed rank {rank}', timeout=1.5)
+            self.app.confirm_rank = None
+            self.app.confirmed.add(rank)
+            self.win.status(f'Confirmed rank {rank}', timeout=1.5)
 
         def cancel() -> None:
-            self.app.prompt_rank = None
-            self.win.status('Cancelled', timeout=1.0)
+            self.app.confirm_rank = None
+            self.win.status('Not confirmed', timeout=1.0)
 
         self.win.begin_prompt(
-            f'    Process rank {rank}?',
+            f'    Confirm rank {rank}?',
             mode='y',
-            hint='Marks the row as processed',
+            hint='Marks the row as checked by hand',
             on_confirm=confirm,
             on_cancel=cancel,
         )
 
-    def note_ACTION(self) -> None:
-        ctx = self.win.get_picked_context()
-        if not ctx:
-            self.win.status('Pick a row first', level='warn', timeout=2.0)
-            return
-        rank = ctx.item['rank']
-        self.app.note_rank = rank
+    def title_ACTION(self) -> None:
+        """``t``: rename the spelled column from the header band."""
+        self.app.title_prompt = True
 
         def save(answer: str) -> None:
-            self.app.note_rank = None
-            self.app.notes[rank] = answer
-            self.win.status(f'Note saved for rank {rank}', level='warn',
-                            timeout=2.0)
+            self.app.title_prompt = False
+            self.app.column_title = answer.strip() or 'spelled'
+            self.win.status(f'Column title: {self.app.column_title}',
+                            timeout=1.5)
 
         def cancel() -> None:
-            self.app.note_rank = None
-            self.win.status('Note cancelled', timeout=1.5)
+            self.app.title_prompt = False
+            self.win.status('Title unchanged', timeout=1.0)
 
         self.win.begin_prompt(
-            f'Note for rank {rank}',
-            hint='ENTER to save, ESC to cancel',
+            'Spelled column title',
+            hint='ENTER to apply, ESC to cancel',
             mode='text',
-            seed=self.app.notes.get(rank, ''),
+            seed=self.app.column_title,
             on_confirm=save,
             on_cancel=cancel,
         )
 
 
 class PromptApp(DemoApp):
-    title = 'ask in place'
+    title = 'F-ask-in-place'
     screen_class = PromptScreen
     win_options: ClassVar[dict[str, object]] = {'pick_attr': cs.A_REVERSE}
     help_paragraphs = (
         'y asks a single-key question directly under the picked row, so the '
-        'answer is read next to the thing it is about.  The two prompt rows are '
-        'transient: the window marks them non-pickable and j/k skips them.',
-        'N asks a buffered text question in the header band, because the note is '
-        'about the screen rather than one row.  ENTER saves and ESC cancels, '
-        'and the callbacks run after passthrough is restored, so they can write '
-        'a status line safely.  While a prompt is live it owns every key; the '
-        'shared ladder routes them to handle_prompt_key() until it is done.',
+        'answer is read next to the thing it is about; it marks that row '
+        'confirmed, as if its arithmetic had been checked by hand.  The prompt '
+        'rows are transient: the window marks them non-pickable and j/k skips '
+        'them.',
+        't asks a buffered text question in the header band, because the column '
+        'title is about the whole table rather than one row; ENTER applies it '
+        'and ESC cancels.  The callbacks run after passthrough is restored, so '
+        'they can write a status line safely.  While a prompt is live it owns '
+        'every key; the shared ladder routes them to handle_prompt_key() until '
+        'it is done.',
     )
 
     def build_spinner(self):
         spin = self.new_spinner()
         spin.add_key('confirm', 'y - confirm the picked row', keys=[ord('y')],
                      genre='action',
-                     comments='Asks y/ESC under the row; marks it processed.')
-        spin.add_key('note', 'N - note the picked row', keys=[ord('N')],
-                     genre='action',
-                     comments='A text prompt in the header; ENTER saves, '
-                              'ESC cancels.')
+                     comments='Asks y/ESC under the row; marks it confirmed.')
+        spin.add_key('title', 't - retitle the spelled column',
+                     keys=[ord('t')], genre='action',
+                     comments='A text prompt in the header band; ENTER '
+                              'applies it, ESC cancels.')
         return spin
 
     def after_build(self) -> None:
-        self.processed: set[int] = set()
-        self.notes: dict[int, str] = {}
-        self.prompt_rank: int | None = None
-        self.note_rank: int | None = None
+        self.confirmed: set[int] = set()
+        self.column_title = 'spelled'
+        self.confirm_rank: int | None = None
+        self.title_prompt = False
 
 
 def build_app(backend: object | None = None,

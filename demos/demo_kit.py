@@ -83,7 +83,7 @@ class DemoScreen(Screen):
     def draw_header(self) -> None:
         title = self.title or self.app.title
         self.add_fancy_header(
-            f'{title}  pass {self.app.iteration}  {self.hint}[q]uit',
+            f'{title}  {self.hint}[q]uit',
             mode='Underline',
             line_attr=cs.A_DIM,
         )

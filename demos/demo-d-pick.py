@@ -54,7 +54,7 @@ DETAIL_INDENT = ' ' * (CHECK_COL + COLUMN_HEADER.index('spelled'))
 
 
 class PickScreen(DemoScreen):
-    title = 'pick-a-row'
+    title = 'D-pick-a-row'
 
     def draw_screen(self) -> None:
         self.set_pick_mode(True)
@@ -63,8 +63,10 @@ class PickScreen(DemoScreen):
         self.set_pick_range(*PICK_COLUMNS)
 
         # One hyphenated word, so the whole title is the fancy header's bold
-        # label; a colon keeps a key from abutting the word it introduces.
-        self.add_fancy_header('pick-a-row  [c]heck  [?]:help  [q]uit',
+        # label.  A key that is its hint's first letter is written inside the
+        # word ([c]heck draws "check"); a colon divides any other key from its
+        # hint ([?]:help).
+        self.add_fancy_header('D-pick-a-row  [c]heck  [?]:help  [q]uit',
                               mode='Underline')
         # The check column is blank in the header: every row's mark sits under
         # a cell of its own, so the titles keep their columns.
@@ -94,7 +96,7 @@ class PickScreen(DemoScreen):
 
 
 class PickApp(DemoApp):
-    title = 'pick-a-row'
+    title = 'D-pick-a-row'
     win_options: ClassVar[dict[str, object]] = {'pick_attr': cs.A_REVERSE}
     help_paragraphs = (
         'rank % 3 decides how many secondary rows a prime has (0, 1 or 2), so '

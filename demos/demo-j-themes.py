@@ -44,14 +44,14 @@ class DemoThemeStore(ThemeStore):
 
 
 class ThemeMainScreen(DemoScreen):
-    title = 'themes'
+    title = 'J-themes'
     SEMANTIC_ROLES = (Theme.SUCCESS, Theme.INFO, Theme.WARNING, Theme.EMPHASIS)
 
     def draw_screen(self) -> None:
         self.set_pick_mode(False)
         self.add_fancy_header(
-            f'themes  theme={Theme.theme_of(self.win)}  pass '
-            f'{self.app.iteration}  [t]heme screen  [?]help  [q]uit',
+            f'J-themes  theme={Theme.theme_of(self.win)}  [t]heme screen  '
+            f'[?]:help  [q]uit',
             mode='Underline',
             line_attr=cs.A_DIM,
         )
@@ -66,7 +66,7 @@ class ThemeMainScreen(DemoScreen):
 
 
 class ThemeApp(DemoApp):
-    title = 'themes'
+    title = 'J-themes'
     help_paragraphs = (
         'The theme list ends with mono.  It uses the terminal colors and a '
         'bold/reverse attribute hierarchy; a palette turns color back on.',

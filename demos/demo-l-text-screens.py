@@ -45,13 +45,12 @@ class HelpTextScreen(DemoHelpScreen):
 
 
 class TextMainScreen(DemoScreen):
-    title = 'read-only screens'
+    title = 'L-read-only-screens'
 
     def draw_screen(self) -> None:
         self.set_pick_mode(False)
         self.add_fancy_header(
-            f'read-only screens  pass {self.app.iteration}  '
-            f'[i]nfo  [?]help  [q]uit',
+            'L-read-only-screens  [i]nfo  [?]:help  [q]uit',
             mode='Underline',
             line_attr=cs.A_DIM,
         )
@@ -65,7 +64,7 @@ class TextMainScreen(DemoScreen):
 
 
 class TextApp(DemoApp):
-    title = 'read-only screens'
+    title = 'L-read-only-screens'
 
     def build_screens(self):
         self.main = TextMainScreen(self)

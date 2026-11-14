@@ -66,7 +66,7 @@ class PrimeTableScreen(Screen):
 
         self.add_fancy_header(
             f'{self.name}  prime ranks {self.start_rank}-{self.end_rank}  '
-            f'pass {self.app.iteration}  {self.hint}[q]uit',
+            f'loop {self.app.iteration}  {self.hint}[q]uit',
             mode='Underline',
             line_attr=cs.A_DIM,
         )
@@ -77,14 +77,14 @@ class PrimeTableScreen(Screen):
 
 
 class OneScreen(PrimeTableScreen):
-    name = 'ONE'
+    name = 'B-one'
     start_rank = 100
     end_rank = 200
     hint = '[2]:TWO  '
 
 
 class TwoScreen(PrimeTableScreen):
-    name = 'TWO'
+    name = 'B-two'
     start_rank = 300
     end_rank = 400
     hint = 'ESC:ONE  '

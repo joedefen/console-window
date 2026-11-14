@@ -2094,7 +2094,13 @@ class ConsoleWindow:
         self.body.pad.redrawwin()
 
     def _draw_pick_gutter(self) -> None:
-        self.scr.vline(self.body_base, 0, ' ', self.scroll_view_size)
+        # The head and body pads are shifted right by the gutter's single cell,
+        # so the whole left column belongs to the gutter and must be blanked
+        # from row 0.  Blanking only the body band leaves the header band's
+        # first column as whatever the last frame put there -- a help page
+        # drawn at column 0, or a dialog -- and that character then survives
+        # every later frame (a stray 'N' beside the title).
+        self.scr.vline(0, 0, ' ', self.body_base + self.scroll_view_size)
         if self.pick_pos >= 0:
             pos = self.pick_pos - self.scroll_pos + self.body_base
             # While free-scrolling through trailing/leading DECOR the picked row

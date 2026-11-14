@@ -35,7 +35,7 @@ PAGE_SIZE = 25
 
 
 class OwnKeysScreen(DemoScreen):
-    title = 'own the navigation keys'
+    title = 'M-own-the-navigation-keys'
 
     def __init__(self, app: OwnKeysApp) -> None:
         super().__init__(app)
@@ -48,9 +48,8 @@ class OwnKeysScreen(DemoScreen):
     def draw_screen(self) -> None:
         self.set_pick_mode(False)
         self.add_fancy_header(
-            f'own the navigation keys  page {self.page + 1}/{self.page_count}  '
-            f'pass {self.app.iteration}  '
-            f'LEFT:prev RIGHT:next [?]help [q]uit',
+            f'M-own-the-navigation-keys  page {self.page + 1}/{self.page_count}  '
+            f'LEFT:prev RIGHT:next [?]:help [q]uit',
             mode='Underline',
             line_attr=cs.A_DIM,
         )
@@ -71,7 +70,7 @@ class OwnKeysScreen(DemoScreen):
                         timeout=1.0)
 
 class OwnKeysApp(DemoApp):
-    title = 'own the navigation keys'
+    title = 'M-own-the-navigation-keys'
     win_options: ClassVar[dict[str, object]] = {
         'taken_nav_keys': {
             cs.KEY_LEFT: 'prev page',
