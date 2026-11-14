@@ -10,6 +10,10 @@ handles Left/Right/Home/End/Backspace/Delete.  ``l`` opens ``alert()`` as a
 modal, scrollable message box.  ``i`` starts an ``InlineConfirmation`` on the
 screen itself, so the question is rendered by the demo and the widget only
 classifies the keys.
+
+The three keys are spinner actions like any other, so the help page lists them.
+``handle_key()`` adds one thing the shared ladder cannot know: an inline
+confirmation owns keys before the spinner does.
 """
 
 from __future__ import annotations
@@ -36,7 +40,7 @@ class DialogScreen(DemoScreen):
         self.set_pick_mode(True)
         self.add_fancy_header(
             f'dialogs  pass {self.app.iteration}  '
-            f'[a]answer  [l]alert  [i]inline  [q]uit',
+            f'[a]answer  [l]alert  [i]inline  [?]help  [q]uit',
             mode='Underline',
             line_attr=cs.A_DIM,
         )
@@ -77,10 +81,33 @@ class DialogScreen(DemoScreen):
 
 class DialogApp(DemoApp):
     title = 'dialogs'
+    screen_class = DialogScreen
     win_options: ClassVar[dict[str, object]] = {'pick_attr': cs.A_REVERSE}
+    help_paragraphs = (
+        'answer() and alert() are blocking: the window takes the screen, runs '
+        'its own key loop, and returns the reply (or None when the dialog is '
+        'aborted).  ESC is the abort key, so both dialogs leave the picked row '
+        'and the listing alone.',
+        'InlineConfirmation is the non-blocking alternative.  The demo renders '
+        'the question and its hint itself, and the widget only classifies the '
+        'keys; while it is active it owns them, which is the one mode the '
+        'shared key ladder cannot know about.',
+    )
 
-    def build_screens(self):
-        return [DialogScreen(self)]
+    def build_spinner(self):
+        spin = self.new_spinner()
+        spin.add_key('answer', 'a - answer dialog', keys=[ord('a')],
+                     genre='action',
+                     comments='Blocking text dialog; ENTER submits, ESC '
+                              'cancels.')
+        spin.add_key('alert', 'l - alert dialog', keys=[ord('l')],
+                     genre='action',
+                     comments='Modal message box about the picked row.')
+        spin.add_key('inline', 'i - inline confirmation', keys=[ord('i')],
+                     genre='action',
+                     comments='The app draws the question; the widget '
+                              'classifies the keys.')
+        return spin
 
     def after_build(self) -> None:
         self.inline = InlineConfirmation()
@@ -96,18 +123,7 @@ class DialogApp(DemoApp):
                 self.inline.cancel()
                 self.win.status('Cancelled', timeout=1.0)
             return
-        if key in (ord('q'), ord('Q'), 0x3):
-            self.running = False
-        elif key == ord('a'):
-            self.main.answer_ACTION()
-        elif key == ord('l'):
-            self.main.alert_ACTION()
-        elif key == ord('i'):
-            self.main.inline_ACTION()
-
-    @property
-    def main(self) -> DialogScreen:
-        return self.stack.get_curr_obj()
+        super().handle_key(key)
 
 
 def build_app(backend: object | None = None,

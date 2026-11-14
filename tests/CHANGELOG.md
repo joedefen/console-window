@@ -34,6 +34,14 @@ This project follows [Semantic Versioning](https://semver.org/).
   characters in the active spelling, `Glyphs.catalog_rows(width)` packs them into
   measured display rows, and the theme picker page prints the whole catalog as a
   font check.
+- `IncrementalSearchBar.reset(initial_text='')` leaves search mode with the
+  given text and runs no callback, so a clear action can drop a pattern without
+  pretending to cancel an edit.
+- `IncrementalSearchBar.as_header_line(..., invalid=False)` emits the prefix as
+  its own search-role span, so a caller can reverse-video just the `/` while
+  the pattern being typed does not compile.  The pattern text stays plain and
+  the rest of the line is unchanged.
+  **Regex filter** — see demo: e-search.
 
 ### Changed
 - The demo family replaces the single `demo-buffet.py` sample.  Sixteen
@@ -44,10 +52,79 @@ This project follows [Semantic Versioning](https://semver.org/).
   `./demos/run-demo features` prints the map.  A library feature added or
   changed from now on updates its owning demo, the map, and a changelog bullet
   shaped like `- **...** — see demo: h-messages.`.
-- The help body lists only options whose scope includes the help screen, and it
-  omits the `Type keys to alter choice:` heading when nothing applies.  The
-  built-in actions stay in the navigation block.  `show_help_body()` takes just
-  the screen; its `screen_filter=` argument is gone.
+- Every demo after B now carries the full shape, and `demo_kit.DemoApp` builds
+  it by default: a `ScreenStack`, an `OptionSpinner` with `? - help` already
+  bound, and a `DemoHelpScreen` whose `Instructions` band is the app's
+  `help_paragraphs` (with `help_display_notes` for the glyph font check).  A
+  demo's keys are `add_key(..., genre='action', comments=...)` registrations,
+  so one registration supplies dispatch, the help row and its prose; H, I, N,
+  O and P are re-based on C and document their own keys this way, and C is the
+  complete file to copy.  A bound key missing from the help page, or a header
+  advertising a key that is not bound, is a review convention rather than a
+  test; A and B remain the degenerate showcases.
+  **Demo boilerplate** — see demo: n-suspend.
+- Demo N's header and hand-back now say what `e` does.  The title is one
+  hyphenated word, so the whole of `pause-and-run` is the header's bold label;
+  the keys read `e:run`, `?:help` and `quit` (a colon keeps a key from abutting
+  the word it introduces), and the meaningless `pass` counter is gone.  `e` runs
+  a self-contained shell program that clears the screen, echoes the command
+  (`+ ls -l /bin/*sh | head -n 8`), runs that bounded listing, then waits at
+  `===>  Return to screen?` until ENTER -- previously a `less` with an empty
+  stdin (or `-F`) returned before anything could be seen.
+  **External-program pause** — see demo: n-suspend.
+- Demo D's pick is now a block of rows attached to the picked row, and the
+  page demonstrates grouping instead of a size option. The title is one
+  hyphenated word, so all of `pick-a-row` is the header's bold label; the keys
+  read `check`, `?:help` and `quit`. `rank % 3` gives each prime 0-2 `abut=-1`
+  detail rows, so blocks differ in height: scrolling keeps a block together
+  while only the primary row is highlighted and visited. Detail rows start
+  under the `spelled` column. A `DECOR` group header (`rank // 5`) opens the
+  body and every group of five, and ends both navigation runs and blocks. A
+  new untitled left column carries a `✓` that `c` toggles on the picked row.
+  **Pick blocks and groups** — see demo: d-pick.
+- Demo E filters with a regex and clears with `c`.  The title is one hyphenated
+  word (`filter-as-you-type`), the meaningless `pass` counter and the
+  `[/]filter` wording are gone, and the pattern is drawn at the right end of
+  the title line after `/`, so the keys to its left never shift while it grows.
+  The pattern is compiled the way vappman's filter is: words, dashes and spaces
+  are matched as words in order, anything else is compiled as written.  A regex
+  is invalid while it is being typed, so a pattern that does not compile yet
+  leaves the last valid filter on the table and reverses only the `/`
+  (`as_header_line(invalid=True)`), and ENTER is ignored until the pattern
+  compiles; the help page explains both.  `c` is an `OptionSpinner` action that
+  clears the pattern and the table together; the one-off `\` key is gone (the
+  `temp_handled_keys()` API is unchanged and stays documented in the README),
+  and ESC both cancels composition back to the starting pattern and, when idle,
+  clears through the screen-local escape action.  The demo also owns
+  `IncrementalSearchBar.reset()`.
+  **Regex filter** — see demo: e-search.
+- The help screen is three bands: the `NavKeys:` legend, a body headed
+  `Keys for '<screen>':` for the screen the help was pushed from, and an
+  `---------- Instructions ----------` block whose paragraphs are drawn in the
+  normal attribute as ` ◆ `-bulleted prose with a three-cell hanging indent.
+  **Help layout** — see demo: c-options.
+- The help body describes the pushed screen: it lists that screen's options --
+  global or scoped to it -- and its `cycle`/`prompt` keys stay live on the help
+  screen, so a value can be changed without leaving it.  Actions are listed but
+  inactive there, and the built-in `quit`/`escape` stay in the nav block.  The
+  heading is omitted when nothing applies; with nothing pushed the body shows
+  the complete option list under `All keys:`.  `show_help_body()` takes just the
+  screen; its `screen_filter=` argument is gone.
+  **Help keys** — see demo: c-options.
+- The help body is laid out for the width the window has when it draws, and
+  nothing is left for the window to truncate silently.  The value column is
+  measured per draw from the options that screen lists -- an action's
+  description sets no column, because nothing follows it -- and a row that
+  would overflow wraps: values break between entries and continue under the
+  value column, a single value too long for a row is ellipsized, and comments
+  wrap under the same column, falling back to a two-cell indent when the column
+  leaves too little room for prose.  The heading wraps too.  When the column
+  leaves fewer than eight cells to wrap values in, the body degrades in two
+  steps: the four-cell dot gap first, then a flat layout with the description
+  on its own row and its values beneath it, indented two cells.
+  `OptionSpinner.align` and `.margin` are gone; a resize re-flows on the next
+  draw.
+  **Help wrapping** — see demo: c-options.
 - Registering an option on a built-in key now requires an explicit `scope=`;
   an implicit (scope-less) registration raises and names the built-in action.
   A deliberate per-screen override, such as `ESC` clearing a filter on `MAIN`,
@@ -116,6 +193,20 @@ This project follows [Semantic Versioning](https://semver.org/).
   `get_nav_keys_blurb()` keep their tuple-of-lines shape.
 
 ### Fixed
+- A pick's block is the picked row plus the rows attached to it by `abut` (a
+  detail row's `abut=-1`, a transient parent's children) instead of a fixed
+  `pick_size`; a separator or the next group's header ends the block, which
+  scrolling keeps visible together.  Only the picked row is highlighted.  The
+  pick is never rounded to a block boundary, so it stays on the row it was
+  moved to.
+  **Pick block over abut** — see demo: d-pick.
+- `0`/HOME and `$`/END select the first and last *pickable* row in pick mode,
+  instead of targeting row 0 and the last body row: with a leading group header
+  or a trailing detail row those targets are not pickable, and the old code
+  left the pick behind while the view scrolled (so the next `j` jumped back to
+  a middle row). `H`/`M`/`L` snap to the nearest pickable row for the same
+  reason.
+  **Home/End select a row** — see demo: d-pick.
 - The separator rule and scroll indicator never write the terminal's
   bottom-right cell; both reserve the last column as the pads already do.  This
   makes a four-row screen with a full header safe.
@@ -126,10 +217,21 @@ This project follows [Semantic Versioning](https://semver.org/).
   invalidates it, so a fallback changed at runtime is the one actually used.
 
 ### Removed
+- `tests/test_demos.py` and every behaviour assertion about `demos/` (screens,
+  headers, keys, help pages, feature ownership, appendix rendering).  The demos
+  are showcase programs, not library code: changing one must not require
+  changing the project.  `tests/test_demo_syntax.py` remains as the only gate
+  (each `demos/*.py` compiles and imports against the public API in a
+  subprocess), and `[tool.coverage.run]` omits `demos/`.
+- `pick_size` is gone from `ConsoleWindow`, `ConsoleWindowOpts` and
+  `set_pick_mode()`: a multi-row pick is the group of rows attached by `abut`,
+  so there is no size to configure. `set_pick_mode(on)` takes only the on/off
+  flag.
+  **Derived pick span** — see demo: d-pick.
 - `demos/demo-buffet.py` and its 393-line `tests/test_sample_app.py` harness.
   Every feature it demonstrated has a focused home in the lettered family, and
-  `tests/test_demos.py` now drives each demo headlessly and enforces the
-  feature-ownership manifest.
+  `tests/test_demos.py` drove each demo headlessly and enforced the
+  feature-ownership manifest until it too was removed.
 - `_filter_screens()` and `_skipped_by_filter()` are replaced by
   `options_for_screen()`, and the unreachable `_reject_key_conflicts()` is
   deleted: a later registration always subtracts its overlap from an earlier
@@ -236,8 +338,9 @@ This project follows [Semantic Versioning](https://semver.org/).
   the installed theme names as choices and seeds the first window's theme.
 - `console_window.help`: `theme_paragraph()` and `glyph_paragraph()`, plus
   `Screen.extra_help_paragraphs()` and `BasicHelpScreen.draw_notes()` /
-  `show_display_notes = True`, which wrap and dim the result.  The flag is off
-  by default so an existing help screen keeps its exact output.
+  `show_display_notes = True`, which add the `Instructions` separator and
+  render the result as bulleted prose.  The flag is off by default so an
+  existing help screen keeps its exact output.
 - `Theme.create_picker_screen(base, cycle_key=None, store=None, note=None)`: the
   hint line names the key actually bound to `spin_theme` (discovered from the
   spinner, default `t`), `store.save()` remembers the choice after each cycle

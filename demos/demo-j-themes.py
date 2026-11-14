@@ -22,20 +22,9 @@ from __future__ import annotations
 import argparse
 import curses as cs
 
-from demo_kit import (
-    DemoApp,
-    DemoHelpScreen,
-    DemoScreen,
-    row_line,
-)
+from demo_kit import DemoApp, DemoScreen, row_line
 
-from console_window import (
-    Appearance,
-    OptionSpinner,
-    Theme,
-    ThemeStore,
-    cli,
-)
+from console_window import Appearance, Theme, ThemeStore, cli
 
 MAIN_ST = 0
 THEMES_ST = 1
@@ -75,21 +64,14 @@ class ThemeMainScreen(DemoScreen):
     def theme_screen_ACTION(self) -> None:
         self.app.stack.push(self.app.themes, self.pick_pos)
 
-    def help_screen_ACTION(self) -> None:
-        self.app.stack.push(self.app.help, self.pick_pos)
-
-
-class ThemeHelpScreen(DemoHelpScreen):
-    def extra_help_paragraphs(self):
-        return (
-            'The theme list ends with mono.  It uses the terminal colors and a '
-            'bold/reverse attribute hierarchy; a palette turns color back on.',
-            'The picker remembers the last choice through its ThemeStore.',
-        )
-
 
 class ThemeApp(DemoApp):
     title = 'themes'
+    help_paragraphs = (
+        'The theme list ends with mono.  It uses the terminal colors and a '
+        'bold/reverse attribute hierarchy; a palette turns color back on.',
+        'The picker remembers the last choice through its ThemeStore.',
+    )
 
     def __init__(self, backend: object | None = None,
                  singleton: bool = True,
@@ -106,19 +88,16 @@ class ThemeApp(DemoApp):
             captions={Theme.SUCCESS: ('DONE', 'Rows already processed')},
         )
         self.themes = picker_class(self)
-        self.help = ThemeHelpScreen(self)
+        self.help = self.help_class(self)
         return [self.main, self.themes, self.help]
 
     def build_spinner(self):
-        spin = OptionSpinner(stack=self.stack,
-                             quit_keys=(ord('q'), ord('Q'), 0x3))
+        spin = self.new_spinner()
         # The factory's own action cycles the theme and calls store.save(), so
         # the choice is remembered without a second implementation here.
         spin.add_key('spin_theme', 't - cycle theme', keys=[ord('t')],
                      genre='action', scope={THEMES_ST})
         spin.add_key('theme_screen', 't - theme screen', keys=[ord('t')],
-                     genre='action', scope={MAIN_ST})
-        spin.add_key('help_screen', '? - help', keys=[ord('?')],
                      genre='action', scope={MAIN_ST})
         return spin
 
@@ -131,16 +110,6 @@ class ThemeApp(DemoApp):
         """Make a cycle choice live on this window."""
         self.opts.theme = Theme.resolve(choice)
         self.win.set_theme(self.opts.theme)
-
-    def handle_key(self, key: int) -> None:
-        if self.win.prompt_active:
-            self.win.handle_prompt_key(key)
-            return
-        if self.spin is not None and key in self.spin.keys:
-            self.spin.do_key(key, self.win)
-            return
-        if key in (ord('q'), ord('Q'), 0x3):
-            self.running = False
 
 
 def build_app(backend: object | None = None,

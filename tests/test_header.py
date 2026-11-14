@@ -102,6 +102,21 @@ def test_search_bar_header_line_active_has_cursor_and_no_search_span():
     assert all(span.role != SEARCH for span in line)
 
 
+def test_search_bar_header_line_invalid_reverses_only_the_prefix():
+    bar = IncrementalSearchBar()
+    bar.start('ab(')
+    line = bar.as_header_line(prefix='/', invalid=True)
+    assert line.spans[0] == Span('/', SEARCH)
+    assert line.spans[1].role == PLAIN
+    assert line.spans[1].text == ' ab(█'
+    assert str(line) == '/ ab(█'
+
+
+def test_search_bar_header_line_invalid_without_text_is_still_empty():
+    bar = IncrementalSearchBar()
+    assert not bar.as_header_line(prefix='/', invalid=True)
+
+
 def test_get_display_string_keeps_prefix_spacer():
     # The legacy string API keeps its spacer (pinned by test_widgets); the token
     # path (as_header_line) is the one that has no such need.

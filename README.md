@@ -67,7 +67,7 @@ The wrapper handles several advanced terminal interaction patterns automatically
     * When using pick mode, scrolling automatically tracks the highlighted element to keep it visible in `.pick_pos`.
     * To use that value, you must separately be able to associate `.pick_pos` to its value by, say, keeping an array of values for every added line to the `body`. 
   * **Intuitive Navigation:** Provides built-in handling for common navigation keys (`j`/`k`, `UP`/`DOWN`, Page Up/Down, `H`/`M`/`L` for home/middle/last viewable line, etc.).
-  * **Dynamic Options Management (`OptionSpinner`):** The companion class simplifies creation of application settings, allowing users to **toggle options** or input strings using single keypresses (e.g., `p` to toggle pick mode).
+  * **Dynamic Options Management (`OptionSpinner`):** The companion class simplifies creation of application settings, allowing users to **cycle values** or input strings using single keypresses (e.g., a theme name, or a validated free-text range).
   * **Blocking Popups:** Includes fully implemented, blocking pop-up methods for user input (`.answer()`) and alerts (`.alert()`), handling the necessary temporary screen takeover and cursor management.
 
 ## Worked Example: the lettered demos
@@ -75,17 +75,21 @@ The wrapper handles several advanced terminal interaction patterns automatically
 The canonical examples are the demos in [`demos/`](demos). They form a
 curriculum, not one app with every feature:
 
-* **A — [`a-basic`](demos/demo-a-basic.py)** is one `Screen`, one table, and
-  the four-call loop. Navigation scrolls the body; live data changes one row
-  each pass.
-* **B — [`b-stack`](demos/demo-b-stack.py)** adds a second page and a
-  `ScreenStack`; each screen keeps its own content and scroll position.
-* **C — [`c-options`](demos/demo-c-options.py)** adds an `OptionSpinner`, a
-  validated prompt, scoped keys and a generated help screen.
+* **A — [`a-basic`](demos/demo-a-basic.py)** is the degenerate showcase: one
+  `Screen`, one table, and the four-call loop, with no stack, spinner or help.
+  Navigation scrolls the body; live data changes one row each pass.
+* **B — [`b-stack`](demos/demo-b-stack.py)** is the second degenerate step: two
+  pages on a `ScreenStack`, still with no spinner and no help. Each screen keeps
+  its own content and scroll position.
+* **C — [`c-options`](demos/demo-c-options.py)** is the **boilerplate**: a
+  `ScreenStack`, an `OptionSpinner` and a `BasicHelpScreen`, plus the smallest
+  set of options that still shows every genre. Copy this file to start an app.
 
-D through P each add one focused lesson on the shared kit: picking, search,
-in-place prompts, dialogs, messages, headers, themes, glyphs, read-only text,
-navigation ownership, suspend/resume, large bodies, and width/debug aids.
+D through P each add one focused lesson on top of that shape, and they all keep
+it -- every one has a help page, and its keys are spinner registrations, so the
+help page lists them (a test enforces both): picking, search, in-place prompts,
+dialogs, messages, headers, themes, glyphs, read-only text, navigation
+ownership, suspend/resume, large bodies, and width/debug aids.
 [`docs/DEMO-APPS.md`](docs/DEMO-APPS.md) lists all sixteen, the feature each
 one owns, and the rule that a library feature change names its demo in the
 changelog.
@@ -99,8 +103,8 @@ changelog.
 
 The demos are interactive and need a real terminal (any POSIX box). They are
 repo-level scripts, **not** part of the installed package: after
-`pip install console-window` you write your own `main()` — start from A, B or C,
-or from the shape below.
+`pip install console-window` you write your own `main()` — copy C, the
+boilerplate (stack + spinner + help), or start from the minimal loop below.
 
 ### The shape of every app
 
@@ -246,7 +250,11 @@ spin = OptionSpinner(stack=stack, quit_keys=(ord('q'), ord('Q'), 0x3))
 
 A `ScreenStack` owns at most one spinner: the spinner injects itself as `stack.spinner`, and the stack assigns each screen its `num` and `stack`, so a help screen finds the spinner without scanning the application. Constructing a second spinner on the same stack raises `ValueError`.
 
-The help body lists only the options whose scope includes the help screen, so "shown" and "works" are the same set; an option meant to work on help names it in `scope=`. The built-in actions are excluded, and when nothing applies the `Type keys to alter choice:` heading is omitted. `OptionSpinner.options_for_screen(screen)` is the same definition an application can use when drawing its own help. A registration that would take a built-in key must name its screens explicitly (`scope=...`); an implicit registration raises, so a global option can no longer silently unbind `q`/`^C`/`ESC`.
+The help body describes the screen the help was pushed from. It lists that screen's options -- global ones and those scoped to it -- under a `Keys for '<screen>':` heading. Its `cycle` and `prompt` options keep working while the help is shown, so a value can be changed without backing out; actions are listed for reference but do nothing until you return to their screen. The built-in `quit` and `escape` stay in the `NavKeys:` block. Nothing pushed (a stackless spinner, or a help screen that is the entry screen) means the complete option list under an `All keys:` heading, and when nothing applies the heading is omitted. `OptionSpinner.help_subject(screen)` names the described screen and `options_for_screen(screen)` is the scope test the body applies to it. A registration that would take a built-in key must name its screens explicitly (`scope=...`); an implicit registration raises, so a global option can no longer silently unbind `q`/`^C`/`ESC`.
+
+The body is laid out for the width the window has when it draws, so a narrow terminal shows all of it instead of clipping the right edge. The value column is measured from the rows that screen actually lists -- an action's description sets no column, because nothing follows it -- and a row that would overflow wraps: values break between entries and continue under the column, a single value too long for one row is ellipsized, and comments wrap under the same column (or two cells in from the option, when the column leaves too little room for prose). The heading wraps the same way. When the column itself leaves fewer than eight cells to wrap values in, the layout degrades in two steps: the four-cell dot gap first, then a flat layout with the description on its own row and its values beneath it, indented two cells. A resize re-flows on the next draw.
+
+Any `extra_help_paragraphs()` come last: `BasicHelpScreen` draws an `---------- Instructions ----------` separator and then each paragraph in the normal attribute, introduced by a ` ◆ ` bullet with the wrapped rows indented three cells. `show_display_notes = True` appends the font-check / ASCII-fallback note to the same block.
 
 ### Singleton vs. per-instance windows
 

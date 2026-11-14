@@ -11,23 +11,17 @@ optional headers, and ``set_text()`` replaces them at any time.  The screen is
 read-only; its default ``escape_ACTION`` pops back.
 
 The help screen is a ``BasicHelpScreen`` subclass that adds its own paragraph
-through ``extra_help_paragraphs()``; the base class supplies the wrapping,
-indent and the dim attribute.
+through ``extra_help_paragraphs()``; the base class supplies the ``Instructions``
+separator, the bullet and the hanging-indent wrapping.
 """
 
 from __future__ import annotations
 
 import curses as cs
 
-from demo_kit import DemoApp, DemoScreen, run_main
+from demo_kit import DemoApp, DemoHelpScreen, DemoScreen, run_main
 
-from console_window import (
-    Appearance,
-    BasicHelpScreen,
-    BasicTextScreen,
-    OptionSpinner,
-    Theme,
-)
+from console_window import Appearance, BasicTextScreen, Theme
 
 MAIN_ST = 0
 INFO_ST = 1
@@ -41,15 +35,13 @@ class InfoScreen(BasicTextScreen):
         self.app.running = False
 
 
-class HelpTextScreen(BasicHelpScreen):
-    def extra_help_paragraphs(self):
-        return (
-            'This screen is a BasicHelpScreen subclass.  Its own paragraph is '
-            'wrapped and dimmed by the base class, and ESC pops back.',
-        )
+class HelpTextScreen(DemoHelpScreen):
+    """The app's own prose, added to the shared help page's paragraphs."""
 
-    def quit_ACTION(self) -> None:
-        self.app.running = False
+    def extra_help_paragraphs(self):
+        return (*super().extra_help_paragraphs(),
+                'This screen is a DemoHelpScreen subclass.  Its own paragraph is '
+                'wrapped and bulleted by the base class, and ESC pops back.')
 
 
 class TextMainScreen(DemoScreen):
@@ -71,9 +63,6 @@ class TextMainScreen(DemoScreen):
         self.app.show_info()
         self.app.stack.push(self.app.info, self.pick_pos)
 
-    def help_screen_ACTION(self) -> None:
-        self.app.stack.push(self.app.help, self.pick_pos)
-
 
 class TextApp(DemoApp):
     title = 'read-only screens'
@@ -85,11 +74,8 @@ class TextApp(DemoApp):
         return [self.main, self.info, self.help]
 
     def build_spinner(self):
-        spin = OptionSpinner(stack=self.stack,
-                             quit_keys=(ord('q'), ord('Q'), 0x3))
+        spin = self.new_spinner()
         spin.add_key('info_screen', 'i - info', keys=[ord('i')],
-                     genre='action', scope={MAIN_ST})
-        spin.add_key('help_screen', '? - help', keys=[ord('?')],
                      genre='action', scope={MAIN_ST})
         return spin
 

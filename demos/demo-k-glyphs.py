@@ -21,10 +21,7 @@ from typing import ClassVar
 
 from demo_kit import DemoApp, DemoScreen, run_main
 
-from console_window import BasicHelpScreen, Glyphs, OptionSpinner
-
-MAIN_ST = 0
-HELP_ST = 1
+from console_window import Glyphs
 
 DEMO_GLYPHS = {'tick': ('\u2713', 'OK')}
 DEMO_PROBE = ('tick', 'cursor', 'choice', 'scroll_prev', 'scroll_next')
@@ -47,42 +44,20 @@ class GlyphScreen(DemoScreen):
         for line in Glyphs.catalog_rows(self.win.get_pad_width()):
             self.add_body(line)
 
-    def help_screen_ACTION(self) -> None:
-        self.app.stack.push(self.app.help, self.pick_pos)
-
-
-class GlyphHelpScreen(BasicHelpScreen):
-    show_display_notes = True
-
-    def extra_help_paragraphs(self):
-        return (
-            'Application vocabulary: ConsoleWindowOpts(glyphs=...) registers '
-            "'tick' with its ASCII fallback 'OK'; Glyphs.get('tick') returns "
-            'the spelling for the active mode.',
-        )
-
-    def quit_ACTION(self) -> None:
-        self.app.running = False
-
-
 class GlyphApp(DemoApp):
     title = 'glyphs'
+    screen_class = GlyphScreen
     win_options: ClassVar[dict[str, object]] = {
         'glyphs': DEMO_GLYPHS,
         'glyphs_probe': DEMO_PROBE,
     }
-
-    def build_screens(self):
-        self.main = GlyphScreen(self)
-        self.help = GlyphHelpScreen(self)
-        return [self.main, self.help]
-
-    def build_spinner(self):
-        spin = OptionSpinner(stack=self.stack,
-                             quit_keys=(ord('q'), ord('Q'), 0x3))
-        spin.add_key('help_screen', '? - help', keys=[ord('?')],
-                     genre='action', scope={MAIN_ST})
-        return spin
+    # The font check and the ASCII escape hatch are the app's own display notes.
+    help_display_notes = True
+    help_paragraphs = (
+        'Application vocabulary: ConsoleWindowOpts(glyphs=...) registers '
+        "'tick' with its ASCII fallback 'OK'; Glyphs.get('tick') returns the "
+        'spelling for the active mode.',
+    )
 
 
 def build_app(backend: object | None = None,

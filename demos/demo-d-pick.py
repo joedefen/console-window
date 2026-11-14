@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """D — Pick a row.
 
-Owns: pick-mode, context-metadata, decor-rows, pick-size, abut, pick-range
+Owns: abut, context-metadata, decor-rows, pick-mode, pick-range
 Base: c-options
 Run:  ./demos/run-demo d-pick
 
@@ -9,11 +9,20 @@ Navigation always moved the viewport; pick mode moves a highlight instead and
 leaves the viewport tracking it.  Each prime row carries a ``Context`` so the
 application can read the picked value back with ``get_picked_context()``.
 
-The detail row under each item has ``abut=-1``: it is part of the item's block,
-so the pick jumps over it and the pair scrolls together.  The DECOR separators
-are skipped by navigation for the same reason.  ``p`` cycles the number of
-rows a single pick covers, and the column-range highlight shows the picked
-columns rather than the whole row.
+Rows are kept together by ``abut``: a prime's secondary rows are
+``Context(genre='DECOR', abut=-1)``, so scrolling keeps the block on screen
+while navigation still stops only on the primary row.  The highlight is always
+just the picked row.  ``rank % 3`` decides how many detail rows a prime has
+(0, 1 or 2), so the blocks differ in height.  Every five ranks a ``DECOR``
+group header shows the group number (``rank // 5``); the headers open the body
+and end both navigation runs and the blocks, which is what makes them
+boundaries.  Detail rows start under the ``spelled`` column, so they read as
+fields of the row above rather than a second, misaligned block.
+
+``c`` toggles a check mark in the left column -- the smallest useful thing to
+do with a picked context.  The mark has a column of its own and no title, so
+the column header stays aligned with the rows.  The pick range marks the
+rank/prime fields of the picked row, not the whole row.
 """
 
 from __future__ import annotations
@@ -26,59 +35,88 @@ from demo_kit import (
     DemoApp,
     DemoHelpScreen,
     DemoScreen,
-    row_line,
     run_main,
 )
 
-from console_window import Context, OptionSpinner
+from console_window import Context
 
 MAIN_ST = 0
-PICK_COLUMNS = (0, 22)
+GROUP_SIZE = 5
+#: The mark the ``c`` action toggles, in the untitled column on the left.
+CHECK_MARK = '\u2713'
+#: Width of that column (the mark plus one space), and the rank/prime columns
+#: it shifts right -- the pick range is those columns only.
+CHECK_COL = 2
+PICK_COLUMNS = (CHECK_COL, CHECK_COL + 16)
+#: Detail rows start under the ``spelled`` column, so their fields line up with
+#: the primary row's third column instead of drifting past the highlight.
+DETAIL_INDENT = ' ' * (CHECK_COL + COLUMN_HEADER.index('spelled'))
 
 
 class PickScreen(DemoScreen):
-    title = 'pick a row'
-    pick_enabled = True
+    title = 'pick-a-row'
 
     def draw_screen(self) -> None:
-        # The pick size is one of the option values, so the spinner's cycle
-        # changes both the highlight and what the next j/k moves.
-        self.set_pick_mode(True, self.app.opts.pick_size)
-        # A column-range highlight: only the rank/prime columns are marked.
+        self.set_pick_mode(True)
+        # A column-range highlight: only the rank/prime columns are marked
+        # (the check column stays in the normal attribute, so the mark reads).
         self.set_pick_range(*PICK_COLUMNS)
 
-        self.add_fancy_header(
-            f'pick a row  size={self.app.opts.pick_size}  '
-            f'pass {self.app.iteration}  [p]size  [?]help  [q]uit',
-            mode='Underline',
-            line_attr=cs.A_DIM,
-        )
-        self.add_header(COLUMN_HEADER, attr=cs.A_BOLD)
+        # One hyphenated word, so the whole title is the fancy header's bold
+        # label; a colon keeps a key from abutting the word it introduces.
+        self.add_fancy_header('pick-a-row  [c]heck  [?]:help  [q]uit',
+                              mode='Underline')
+        # The check column is blank in the header: every row's mark sits under
+        # a cell of its own, so the titles keep their columns.
+        self.add_header(' ' * CHECK_COL + COLUMN_HEADER, attr=cs.A_BOLD)
 
         for index, row in enumerate(self.app.rows):
-            if index and index % 5 == 0:
-                # DECOR is non-pickable: j/k/arrows step over the separator.
-                self.add_body('  --- group ---', attr=cs.A_DIM,
+            if index % GROUP_SIZE == 0:
+                # DECOR is non-pickable: j/k/arrows step over the header, and
+                # it ends the previous group's pick block.
+                self.add_body(self.app.group_line(row), attr=cs.A_DIM,
                               context=Context(genre='DECOR'))
             # The pickable row and its value, readable on return.
-            self.add_body(row_line(row, self.app.iteration),
+            self.add_body(self.app.item_line(row),
                           context=Context(genre='item', item=row))
-            # abut=-1 makes this a non-pickable detail row attached to the
-            # item above it; the two move as one block.
-            self.add_body(
-                f'      digits={row["digits"]} sum={row["digit_sum"]} '
-                f'binary={row["binary"]}',
-                attr=cs.A_DIM,
-                context=Context(genre='DECOR', abut=-1),
-            )
+            # abut=-1 keeps each detail attached to the primary row above it:
+            # navigation stops only on the primary row, and scrolling keeps the
+            # block visible, while only the primary row is highlighted.
+            for line in self.app.detail_lines(row):
+                self.add_body(line, attr=cs.A_DIM,
+                              context=Context(genre='DECOR', abut=-1))
 
-    def help_screen_ACTION(self) -> None:
-        self.app.stack.push(self.app.help, self.pick_pos)
+    def check_ACTION(self) -> None:
+        """``c``: toggle the mark on the row the pick is on."""
+        ctx = self.win.get_picked_context()
+        if ctx is not None and ctx.genre == 'item':
+            self.app.toggle_check(ctx.item['rank'])
 
 
 class PickApp(DemoApp):
-    title = 'pick a row'
+    title = 'pick-a-row'
     win_options: ClassVar[dict[str, object]] = {'pick_attr': cs.A_REVERSE}
+    help_paragraphs = (
+        'rank % 3 decides how many secondary rows a prime has (0, 1 or 2), so '
+        'the blocks differ in height.  The secondary rows abut the primary '
+        'row: scrolling keeps the block on screen and j/k still visits only '
+        'the primary row, while the highlight is just the picked row.  Detail '
+        'rows start under the spelled column.',
+        'A DECOR group header shows rank // 5 and opens the body and every '
+        'group of five.  Headers are not pickable, so navigation steps over '
+        'them; 0 and $ select the first and last pickable row rather than the '
+        'first and last line.',
+        'c toggles a check mark on the picked row.  The mark has its own left '
+        'column with no title, so the column header still lines up with the '
+        'rows; the set of checked ranks belongs to the app, not to the '
+        'window, and survives every repaint.',
+    )
+
+    def __init__(self, backend: object | None = None,
+                 singleton: bool = True) -> None:
+        # Checked ranks outlive the per-pass rebuild, like the pick position.
+        self.checked: set[int] = set()
+        super().__init__(backend=backend, singleton=singleton)
 
     def build_screens(self):
         self.main = PickScreen(self)
@@ -86,13 +124,31 @@ class PickApp(DemoApp):
         return [self.main, self.help]
 
     def build_spinner(self):
-        spin = OptionSpinner(stack=self.stack,
-                             quit_keys=(ord('q'), ord('Q'), 0x3))
-        spin.add_key('pick_size', 'p - rows per pick', vals=[1, 2, 3],
-                     keys=[ord('p')], scope={MAIN_ST})
-        spin.add_key('help_screen', '? - help', keys=[ord('?')],
-                     genre='action', scope={MAIN_ST})
+        spin = self.new_spinner()
+        spin.add_key('check', 'c - check the picked row', keys=[ord('c')],
+                     genre='action', scope={MAIN_ST},
+                     comments='Toggles a check mark in the left column.')
         return spin
+
+    def group_line(self, row: dict) -> str:
+        return f'  --- group {row["rank"] // GROUP_SIZE} ---'
+
+    def item_line(self, row: dict) -> str:
+        mark = CHECK_MARK if row['rank'] in self.checked else ' '
+        return f'{mark} ' + self.body_line(row)
+
+    @staticmethod
+    def detail_lines(row: dict) -> tuple[str, ...]:
+        """The ``rank % 3`` secondary rows shown under a prime row."""
+        lines = (
+            f'{DETAIL_INDENT}digits={row["digits"]}  sum={row["digit_sum"]}',
+            f'{DETAIL_INDENT}binary={row["binary"]}  '
+            f'palindrome={"yes" if row["is_palindrome"] else "no"}',
+        )
+        return lines[:row['rank'] % 3]
+
+    def toggle_check(self, rank: int) -> None:
+        self.checked.symmetric_difference_update({rank})
 
 
 def build_app(backend: object | None = None,

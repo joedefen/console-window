@@ -2,7 +2,7 @@
 """I — Header composition.
 
 Owns: header-tokens, header-modes, span-styling
-Base: a-basic
+Base: c-options
 Run:  ./demos/run-demo i-headers
 
 A header can be written in three ways.  ``add_header_line()`` emits explicit
@@ -11,7 +11,9 @@ A header can be written in three ways.  ``add_header_line()`` emits explicit
 as markup.  A raw list of ``Span`` values gives every role to the renderer
 without any parsing at all.
 
-The three header rows here are one multi-row band over the same table.
+The three header rows here are one multi-row band over the same table.  The
+demo has no keys of its own beyond the shared ``?`` and ``q``; the band is the
+whole lesson, so the help page carries the prose instead of adding keys.
 """
 
 from __future__ import annotations
@@ -32,13 +34,14 @@ class HeaderScreen(DemoScreen):
         # Row 1: explicit tokens, emitted verbatim (brackets are literal).
         tokens = HeaderLine()
         tokens.text('  ').bracket_key('q').text('uit  ')
-        tokens.bracket_key('j').text('/').bracket_key('k').text(' move')
+        tokens.bracket_key('j').text('/').bracket_key('k').text(' move  ')
+        tokens.bracket_key('?').text('help')
         self.add_header_line(tokens, mode='Underline')
 
         # Row 2: the same spelling through the fancy path: brackets are markup,
         # and the mode controls how the roles are emphasized.
         self.add_fancy_header(
-            '  [q]uit  [j]/[k] move  SPC:mark',
+            '  [q]uit  [j]/[k] move  [?]help',
             mode='Underline',
             line_attr=cs.A_DIM,
         )
@@ -59,9 +62,17 @@ class HeaderScreen(DemoScreen):
 
 class HeaderApp(DemoApp):
     title = 'headers'
-
-    def build_screens(self):
-        return [HeaderScreen(self)]
+    screen_class = HeaderScreen
+    help_paragraphs = (
+        'Row 1 is a HeaderLine: the brackets are literal text, and the key role '
+        'is attached to the token that follows.  Row 2 is the same line through '
+        'add_fancy_header(), where "[x]" and "KEY:" are markup parsed by the '
+        'window.  Row 3 is a list of Span values: the roles are declared, so '
+        'there is no parsing at all.',
+        'The three rows are one band over one body.  A header row is written by '
+        'the screen on every pass, so the band can change with the data without '
+        'any window-side state.',
+    )
 
 
 def build_app(backend: object | None = None,

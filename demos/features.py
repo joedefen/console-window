@@ -1,10 +1,11 @@
 """The machine-readable feature-to-demo owner map.
 
 One learning objective belongs to exactly one demo.  A feature added or changed
-in the library must update its owning demo and this map; the changelog bullet
-names the demo.  ``tests/test_demos.py`` enforces uniqueness, existence and the
-per-demo ``Owns:`` docstring line, and compares the rendered table below with
-the appendix in ``docs/DEMO-APPS.md``.
+in the library is expected to update its owning demo and this map, and the
+changelog bullet names the demo.  The invariants -- uniqueness, existence and
+the per-demo ``Owns:`` docstring line -- and the rendered appendix in
+``docs/DEMO-APPS.md`` are maintained by hand; the test suite only checks that
+the demos compile and import.
 
 Run ``./demos/run-demo features`` (or ``python demos/features.py``) to print the
 same table at the terminal.
@@ -76,11 +77,11 @@ FEATURES: dict[str, str] = {
     'per-window-theme': 'j-themes',
     'pick-mode': 'd-pick',
     'pick-range': 'd-pick',
-    'pick-size': 'd-pick',
     'prompt-callbacks': 'f-prompts',
     'prompt-placement': 'f-prompts',
     'read-only-screen': 'l-text-screens',
     'redraw-recovery': 'o-large-bodies',
+    'regex-filter': 'e-search',
     'scoped-escape': 'e-search',
     'screen-stack': 'b-stack',
     'scroll-indicator': 'o-large-bodies',
@@ -94,7 +95,6 @@ FEATURES: dict[str, str] = {
     'status-placement': 'h-messages',
     'suspend-resume': 'n-suspend',
     'taken-nav-keys': 'm-own-keys',
-    'temp-handled-keys': 'e-search',
     'text-prompt': 'f-prompts',
     'textwidth': 'p-key-debug',
     'theme-captions': 'j-themes',

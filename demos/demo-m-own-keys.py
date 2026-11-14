@@ -30,8 +30,6 @@ from demo_kit import (
     run_main,
 )
 
-from console_window import OptionSpinner
-
 MAIN_ST = 0
 PAGE_SIZE = 25
 
@@ -72,10 +70,6 @@ class OwnKeysScreen(DemoScreen):
         self.win.status(f'page {self.page + 1}/{self.page_count}',
                         timeout=1.0)
 
-    def help_screen_ACTION(self) -> None:
-        self.app.stack.push(self.app.help, self.pick_pos)
-
-
 class OwnKeysApp(DemoApp):
     title = 'own the navigation keys'
     win_options: ClassVar[dict[str, object]] = {
@@ -93,15 +87,11 @@ class OwnKeysApp(DemoApp):
     def build_spinner(self):
         # The spinner validates against the window's effective navigation set,
         # which no longer contains LEFT/RIGHT.
-        spin = OptionSpinner(stack=self.stack,
-                             nav_keys=self.win.opts.nav_keys,
-                             quit_keys=(ord('q'), ord('Q'), 0x3))
+        spin = self.new_spinner(nav_keys=self.win.opts.nav_keys)
         spin.add_key('prev_page', 'LEFT - previous page',
                      keys=[cs.KEY_LEFT], genre='action', scope={MAIN_ST})
         spin.add_key('next_page', 'RIGHT - next page',
                      keys=[cs.KEY_RIGHT], genre='action', scope={MAIN_ST})
-        spin.add_key('help_screen', '? - help', keys=[ord('?')],
-                     genre='action', scope={MAIN_ST})
         return spin
 
 

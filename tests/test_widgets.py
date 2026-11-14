@@ -161,6 +161,18 @@ def test_searchbar_cancel_restores_start_text():
     assert bar.is_active is False
 
 
+def test_searchbar_reset_forgets_text_and_leaves_search_mode():
+    seen = []
+    bar = IncrementalSearchBar(on_change=seen.append, on_cancel=seen.append)
+    bar.start('abc')
+    bar.reset()
+    assert bar.text == ''
+    assert bar.is_active is False
+    assert bar.get_display_string() == ''
+    # The caller owns the filter state, so reset() calls nothing back.
+    assert seen == []
+
+
 def test_searchbar_on_change_fires():
     seen = []
     bar = IncrementalSearchBar(on_change=lambda t: seen.append(t))

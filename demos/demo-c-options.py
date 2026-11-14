@@ -7,14 +7,24 @@ Base: b-stack
 Run:  ./demos/run-demo c-options
 
 One Screen plus an OptionSpinner: a live rank range and sort order.  The
-spinner owns the two things that change while the app runs, and its help screen
-shows the values that are in scope there.  The range prompt carries
+spinner owns the two things that change while the app runs.  The help screen is
+pushed from MAIN and lists MAIN's keys under ``Keys for 'MainScreen':``;
+``range`` is global and ``order`` is scoped to MAIN alone, and both stay usable
+on the help screen.  The help key is listed too, but an action does nothing
+there.  The body is laid out for the window it is drawn on, so shrinking the
+terminal wraps the values under the column instead of clipping them, and a very
+narrow one stacks them beneath the description.  The range prompt carries
 ``check_ans``, so a malformed range never reaches the screen: the dialog
 re-opens on the rejected text and says what it expects.
 
 Pitch: a fixed page needs no options.  As soon as the page depends on values
 the user edits, reach for OptionSpinner: it binds the keys, runs the prompt,
 and renders the current values in one place.
+
+This is also the file to copy when starting an app.  It is the full shape -- a
+ScreenStack, an OptionSpinner and a BasicHelpScreen -- with the smallest set of
+options that still shows every genre: one cycle, one validated prompt and one
+action.
 """
 
 from __future__ import annotations
@@ -117,9 +127,6 @@ class HelpScreen(BasicHelpScreen):
     def quit_ACTION(self) -> None:
         self.app.running = False
 
-    def escape_ACTION(self) -> None:
-        self.app.stack.pop()
-
 
 class SpinnerPagerApp:
     def __init__(self, backend: object | None = None,
@@ -140,8 +147,10 @@ class SpinnerPagerApp:
         spin = self.spin = OptionSpinner(
             stack=self.stack, quit_keys=(ord('q'), ord('Q'), 0x3))
 
-        # ``range`` is global, so HELP lists it.  ``order`` is scoped to MAIN,
-        # so HELP deliberately does not; that is the scope lesson.
+        # HELP lists the keys of the screen it was pushed from, so ``range``
+        # (global) and ``order`` (scoped to MAIN) both appear under
+        # ``Keys for 'MainScreen':`` and both stay usable there.  The help
+        # action is listed as well, but pressing it on HELP does nothing.
         spin.add_key('range', 'r - rank range',
                      prompt='Prime ranks (min-max):',
                      check_ans=check_range, keys=[ord('r')])

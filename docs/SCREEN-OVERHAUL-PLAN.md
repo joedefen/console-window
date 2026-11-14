@@ -39,14 +39,14 @@ The state is a package-private class and `Screen` **inherits** it, so `screen.pi
 
 ```python
 class _ViewState:                        # package-private; apps never name it
-    __slots__ = ('pick_mode', 'pick_size', 'pick_pos', 'scroll_pos',
+    __slots__ = ('pick_mode', 'pick_pos', 'scroll_pos',
                  'free_scroll', 'pick_range', 'head', 'body', '_opts_seeded')
 
 class Screen(_ViewState):
     ...
 ```
 
-Fields: `pick_mode`, `pick_size`, `pick_pos`, `scroll_pos`, `free_scroll`, `pick_range`,
+Fields: `pick_mode`, `pick_pos`, `scroll_pos`, `free_scroll`, `pick_range`,
 plus the two content namespaces (`head`, `body`, which are `_Content` objects holding
 `texts`/`text_attrs`/`contexts`/`rows_dropped`/pads) and the one-shot `_opts_seeded`
 latch. `last_pick_pos` disappears with D7. `prev_pos` is not view state: it is the row
@@ -71,7 +71,7 @@ Three consequences to implement:
   accepts `screen_objects=None`, so a stack of bare numbers has no Screen to hold state;
   `win._view` starts as a window-owned `_ViewState` for that case.
 - **`opts` is a seed, not an owner.** Screens can be built before the window (D11), so the
-  defaults are static and `_adopt_view()` applies `opts.pick_mode`, `opts.pick_size` and
+  defaults are static and `_adopt_view()` applies `opts.pick_mode` and
   `opts.pick_range` once. That also closes a quiet global:
   [`set_pick_range()`](../console_window/window.py:1077) writes `opts.pick_range` today, so
   two screens cannot hold different ranges; it becomes a view field instead.

@@ -489,6 +489,18 @@ class IncrementalSearchBar:
         self._start_text = initial_text
         self._cursor_pos = len(initial_text)
 
+    def reset(self, initial_text: str = '') -> None:
+        """Leave search mode with *initial_text* in the buffer, silently.
+
+        The counterpart to :meth:`start` for a caller that changes the pattern
+        itself (a clear action, say): no ``on_change`` or ``on_cancel`` callback
+        runs, so the application stays the owner of its filter state.
+        """
+        self._active = False
+        self._text = initial_text
+        self._start_text = initial_text
+        self._cursor_pos = len(initial_text)
+
     def handle_key(self, key: int) -> bool:
         if not self._active:
             return False
@@ -570,17 +582,32 @@ class IncrementalSearchBar:
             return f'{prefix}{self._text}{suffix}'
         return ''
 
-    def as_header_line(self, prefix: str = '/', cursor_char: str | None = None) -> HeaderLine:
+    def as_header_line(self, prefix: str = '/', cursor_char: str | None = None,
+                       invalid: bool = False) -> HeaderLine:
+        """The bar as header spans: the prefix, the pattern and the caret.
+
+        *invalid* styles only the prefix with the search role (reverse video in
+        a fancy header), the caller's cue that the pattern being typed does not
+        compile yet.  The text itself stays plain so it remains readable while
+        it is being fixed.
+        """
         line = HeaderLine()
+        if not self._text and not self._active:
+            return line
         if self._active:
             if cursor_char is None:
                 cursor_char = glyphs.get('cursor_block')
             before = self._text[:self._cursor_pos]
             after = self._text[self._cursor_pos:]
-            line.text(f'{prefix} {before}{cursor_char}{after}')
-        elif self._text:
-            line.search(self._text, prefix=prefix)
-        return line
+            content = f'{before}{cursor_char}{after}'
+        else:
+            content = self._text
+        if invalid:
+            line.search('', prefix=prefix)
+            return line.text(f' {content}' if self._active else content)
+        if self._active:
+            return line.text(f'{prefix} {content}')
+        return line.search(content, prefix=prefix)
 
     @property
     def is_active(self) -> bool:

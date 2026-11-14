@@ -12,8 +12,9 @@ The prompt is drawn by ``add_prompt_lines()`` / ``add_prompt_header()``, and the
 completion callbacks run after passthrough is restored, so they can report with
 ``status()`` safely.
 
-A live prompt owns every key.  The app routes each one through
-``handle_prompt_key()`` until the prompt reports that it is done.
+A live prompt owns every key.  The shared ladder in ``demo_kit.DemoApp`` routes
+each one through ``handle_prompt_key()`` until the prompt reports that it is
+done, so this demo registers its two actions and nothing else.
 """
 
 from __future__ import annotations
@@ -58,7 +59,7 @@ class PromptScreen(DemoScreen):
     def draw_header(self) -> None:
         self.add_fancy_header(
             f'ask in place  pass {self.app.iteration}  '
-            f'[y]confirm  [N]note  [q]uit',
+            f'[y]confirm  [N]note  [?]help  [q]uit',
             mode='Underline',
             line_attr=cs.A_DIM,
         )
@@ -121,32 +122,35 @@ class PromptScreen(DemoScreen):
 
 class PromptApp(DemoApp):
     title = 'ask in place'
+    screen_class = PromptScreen
     win_options: ClassVar[dict[str, object]] = {'pick_attr': cs.A_REVERSE}
+    help_paragraphs = (
+        'y asks a single-key question directly under the picked row, so the '
+        'answer is read next to the thing it is about.  The two prompt rows are '
+        'transient: the window marks them non-pickable and j/k skips them.',
+        'N asks a buffered text question in the header band, because the note is '
+        'about the screen rather than one row.  ENTER saves and ESC cancels, '
+        'and the callbacks run after passthrough is restored, so they can write '
+        'a status line safely.  While a prompt is live it owns every key; the '
+        'shared ladder routes them to handle_prompt_key() until it is done.',
+    )
 
-    def build_screens(self):
-        return [PromptScreen(self)]
+    def build_spinner(self):
+        spin = self.new_spinner()
+        spin.add_key('confirm', 'y - confirm the picked row', keys=[ord('y')],
+                     genre='action',
+                     comments='Asks y/ESC under the row; marks it processed.')
+        spin.add_key('note', 'N - note the picked row', keys=[ord('N')],
+                     genre='action',
+                     comments='A text prompt in the header; ENTER saves, '
+                              'ESC cancels.')
+        return spin
 
     def after_build(self) -> None:
         self.processed: set[int] = set()
         self.notes: dict[int, str] = {}
         self.prompt_rank: int | None = None
         self.note_rank: int | None = None
-
-    def handle_key(self, key: int) -> None:
-        # Contract: a live prompt owns every key until it is done.
-        if self.win.prompt_active:
-            self.win.handle_prompt_key(key)
-            return
-        if key in (ord('q'), ord('Q'), 0x3):
-            self.running = False
-        elif key == ord('y'):
-            self.main.confirm_ACTION()
-        elif key == ord('N'):
-            self.main.note_ACTION()
-
-    @property
-    def main(self) -> PromptScreen:
-        return self.stack.get_curr_obj()
 
 
 def build_app(backend: object | None = None,

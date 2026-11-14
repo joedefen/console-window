@@ -1,13 +1,24 @@
 """Shared machinery for the lettered demo family.
 
-A, B and C are complete standalone programs.  Every later demo (D-P) imports
-this module so its file contains only the feature it teaches; the common app
-shape lives here instead of being copied thirteen times.
+A and B are the degenerate showcases: A is one Screen and the four-call loop with
+no stack, no spinner and no help page; B adds the stack and nothing else.
+Everything from C on has the **full shape** -- a ScreenStack, an OptionSpinner
+and a BasicHelpScreen -- and C is the complete standalone file to copy.  D-P
+import this module so their files contain only the feature they teach.
+
+``DemoApp`` is that full shape: the window and its options, the stack, the
+spinner (with ``? - help`` already bound), the four-call loop, the sample table,
+and the ``prompt -> spinner -> quit`` key ladder.  A demo adds a key with
+``add_key(..., genre='action')``; that one registration gives it dispatch
+(``perform_actions()``), a help row (``descr``) and optional prose under the row
+(``comments``).  Nothing else should bind keys by hand -- a key that is not in
+the spinner is a key the help page cannot list, which is exactly the outage this
+kit exists to prevent.
 
 The kit deliberately contains none of the later features: no pick model, no
 search bar, no prompts, no dialogs, no theme picker.  It carries the window and
 its options, the four-call loop, the sample table, and the small amount of
-stack/spinner glue the later demos share.
+stack/spinner/help glue the later demos share.
 """
 
 from __future__ import annotations
@@ -23,6 +34,7 @@ from console_window import (
     BasicHelpScreen,
     ConsoleWindow,
     ConsoleWindowOpts,
+    OptionSpinner,
     Screen,
     ScreenStack,
     cli,
@@ -84,30 +96,51 @@ class DemoScreen(Screen):
     def body_context(self, row: dict) -> object | None:
         return None
 
+    def help_screen_ACTION(self) -> None:
+        """The shared ``?`` action: push this app's help page."""
+        self.app.stack.push(self.app.help, self.pick_pos)
+
     def quit_ACTION(self) -> None:
         self.app.running = False
 
 
 class DemoHelpScreen(BasicHelpScreen):
-    """A help screen that keeps the demo's quit action.
+    """The help page of the full shape, fed by the app, not by a subclass.
 
-    ``BasicHelpScreen`` supplies the body; this subclass only has to keep the
-    spinner's built-in ``quit`` action working on a screen that is not a table.
+    ``DemoApp`` builds one by default and pushes it from the shared ``?``
+    action.  A demo declares its prose as data (``help_paragraphs`` and
+    ``help_display_notes``) instead of subclassing this screen just to add a
+    paragraph: ``BasicHelpScreen.draw_notes()`` already owns the separator, the
+    bullet, the hanging indent and the wrapping.
     """
 
     title = 'HELP'
+
+    @property
+    def show_display_notes(self) -> bool:
+        return bool(getattr(self.app, 'help_display_notes', False))
+
+    def extra_help_paragraphs(self):
+        return tuple(getattr(self.app, 'help_paragraphs', ()))
 
     def quit_ACTION(self) -> None:
         self.app.running = False
 
 
 class DemoApp:
-    """Common demo app: window, stack, four-call loop, and ``q`` quits."""
+    """The full app shape: window, stack, spinner, help, loop, ``q`` quits."""
 
     title = 'prime rows'
     row_range = HOME_ROWS
     win_options: ClassVar[dict[str, object]] = {}
     screen_class: type[DemoScreen] = DemoScreen
+    help_class: type[DemoHelpScreen] = DemoHelpScreen
+    #: Prose for the third band of the help page (under ``Instructions``).  Use
+    #: it for what a reader cannot infer from the keys: what an action is
+    #: expected to do, what survives, what the demo deliberately omits.
+    help_paragraphs: tuple[str, ...] = ()
+    #: Append the built-in display notes (glyph font check) to the help page.
+    help_display_notes = False
 
     def __init__(self, backend: object | None = None,
                  singleton: bool = True) -> None:
@@ -122,18 +155,29 @@ class DemoApp:
                                  backend=backend, singleton=singleton)
         self.stack = ScreenStack.from_screens(
             self.win, self.opts, self.build_screens())
-        self.spin = self.build_spinner()  # pylint: disable=assignment-from-none
+        self.spin = self.build_spinner()
         self.win.set_handled_keys(self.handled_keys())
         self.after_build()
 
     # --- hooks -------------------------------------------------------------
 
     def build_screens(self) -> list[Screen]:
-        return [self.screen_class(self)]
+        """The main screen and its help page -- the shape every demo shares."""
+        self.main = self.screen_class(self)
+        self.help = self.help_class(self)
+        return [self.main, self.help]
 
-    def build_spinner(self):
-        """Return an OptionSpinner, or None for a demo with no options."""
-        return None
+    def new_spinner(self, **options: object) -> OptionSpinner:
+        """A spinner with the built-ins and the shared ``?`` help action."""
+        spin = OptionSpinner(stack=self.stack,
+                             quit_keys=(ord('q'), ord('Q'), 0x3), **options)
+        spin.add_key('help_screen', '? - help', keys=[ord('?')],
+                     genre='action')
+        return spin
+
+    def build_spinner(self) -> OptionSpinner | None:
+        """Return this demo's spinner; the default already has help bound."""
+        return self.new_spinner()
 
     def handled_keys(self) -> set[int]:
         keys = {ord('q'), ord('Q'), 0x3}
@@ -166,6 +210,12 @@ class DemoApp:
         return self.win.prompt(seconds=0.5)
 
     def handle_key(self, key: int) -> None:
+        """The shared ladder: a live prompt, then the spinner, then quit.
+
+        A demo overrides this only to add a *mode* that owns keys before the
+        spinner (a search bar, an inline confirmation); plain keys belong in the
+        spinner, where the help page can see them.
+        """
         # A live in-place prompt owns every key until it is dealt with.
         if self.win.prompt_active:
             self.win.handle_prompt_key(key)

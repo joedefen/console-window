@@ -242,6 +242,15 @@ _PASSTHROUGH_EDITING_KEYS = frozenset({
     1, 5,  # Ctrl-A, Ctrl-E
 })
 
+# Navigation keys that jump to an absolute row or to a viewport edge rather
+# than stepping through the body.  A jump selects a row, so it snaps to the
+# nearest pickable row instead of scrolling past non-pickable rows the way
+# j/k and the page keys deliberately do.
+_JUMP_TO_PICKABLE_KEYS = frozenset({
+    ord('0'), ord('$'), ord('H'), ord('M'), ord('L'),
+    curses.KEY_HOME, curses.KEY_END,
+})
+
 # Compact demo-mode names for the keys whose plain curses name would be
 # unwieldy or ambiguous in the header indicator.  Printable keys are handled
 # separately (centered with spaces), so this table only covers the rest.
@@ -436,13 +445,11 @@ class _ViewState:
         'pick_mode',
         'pick_pos',
         'pick_range',
-        'pick_size',
         'scroll_pos',
     )
 
     def __init__(self) -> None:
         self.pick_mode = False
-        self.pick_size = 1
         self.pick_pos = 0
         self.scroll_pos = 0
         self.free_scroll = False
@@ -453,10 +460,9 @@ class _ViewState:
         # (and before any opts exist), so the window applies it at adoption.
         self._opts_seeded = False
 
-    def set_pick_mode(self, on: bool = True, pick_size: int = 1) -> None:
+    def set_pick_mode(self, on: bool = True) -> None:
         """Turn the pick highlight on or off for *this* screen."""
         self.pick_mode = bool(on)
-        self.pick_size = max(pick_size, 1)
 
     def set_pick_range(self, start_col: int | None = None,
                        end_col: int | None = None) -> None:
@@ -545,13 +551,13 @@ class ConsoleWindow:
     def __init__(self, opts: ConsoleWindowOpts | None = None, head_line: bool | None = None,
                  head_rows: int | None = None, body_rows: int | None = None,
                  body_cols: int | None = None, keys: set | list | None = None,
-                 pick_mode: bool | None = None, pick_size: int | None = None,
+                 pick_mode: bool | None = None,
                  mod_pick: Callable | None = None, ctrl_c_terminates: bool | None = None,
                  backend: RenderBackend | None = None, singleton: bool = True) -> None:
         # Enforce either opts OR deprecated parameters, not both
         has_opts = opts is not None
         has_deprecated = any(p is not None for p in [head_line, head_rows, body_rows, body_cols,
-                                                       keys, pick_mode, pick_size, mod_pick, ctrl_c_terminates])
+                                                       keys, pick_mode, mod_pick, ctrl_c_terminates])
 
         if has_opts and has_deprecated:
             raise ValueError("Cannot use both 'opts' and deprecated parameters. Use opts only.")
@@ -579,7 +585,7 @@ class ConsoleWindow:
             # removed; stacklevel=2 points at the caller, not this module.
             warnings.warn(
                 'ConsoleWindow(head_line=..., head_rows=..., body_rows=..., '
-                'body_cols=..., keys=..., pick_mode=..., pick_size=..., '
+                'body_cols=..., keys=..., pick_mode=..., '
                 'mod_pick=..., ctrl_c_terminates=...) is deprecated; pass '
                 'ConsoleWindowOpts through opts= instead.',
                 DeprecationWarning,
@@ -592,7 +598,6 @@ class ConsoleWindow:
                 body_cols=body_cols if body_cols is not None else 200,
                 keys=keys,
                 pick_mode=pick_mode if pick_mode is not None else False,
-                pick_size=pick_size if pick_size is not None else 1,
                 mod_pick=mod_pick,
                 ctrl_c_terminates=ctrl_c_terminates if ctrl_c_terminates is not None else True
             )
@@ -784,7 +789,6 @@ class ConsoleWindow:
             content.hint_rows = hint
             content.cols = self.opts.body_cols
         view.pick_mode = bool(self.opts.pick_mode)
-        view.pick_size = max(self.opts.pick_size, 1)
         view.pick_range = self.opts.pick_range
         view._opts_seeded = True  # pylint: disable=protected-access
 
@@ -829,15 +833,6 @@ class ConsoleWindow:
     @pick_mode.setter
     def pick_mode(self, value: bool) -> None:
         self._view.pick_mode = bool(value)
-
-    @property
-    def pick_size(self) -> int:
-        """How many rows the active screen's pick highlight spans."""
-        return self._view.pick_size
-
-    @pick_size.setter
-    def pick_size(self, value: int) -> None:
-        self._view.pick_size = max(int(value), 1)
 
     @property
     def pick_pos(self) -> int:
@@ -1309,9 +1304,9 @@ class ConsoleWindow:
 
         return scr
 
-    def set_pick_mode(self, on: bool = True, pick_size: int = 1) -> None:
+    def set_pick_mode(self, on: bool = True) -> None:
         """Set pick mode on the *current* screen (see ``Screen.set_pick_mode``)."""
-        self._view.set_pick_mode(on, pick_size)
+        self._view.set_pick_mode(on)
 
     def set_pick_range(self, start_col: int | None = None, end_col: int | None = None) -> None:
         """Set the pick column range on the *current* screen.
@@ -1901,10 +1896,10 @@ class ConsoleWindow:
             logger.exception(
                 'curses error while rendering: head.row_cnt=%s head.view_cnt=%s '
                 'hor_line_cnt=%s body.row_cnt=%s scroll_pos=%s max_scroll_pos=%s '
-                'pick_pos=%s pick_mode=%s pick_size=%s rows=%s cols=%s',
+                'pick_pos=%s pick_mode=%s rows=%s cols=%s',
                 self.head.row_cnt, self.head.view_cnt, self.hor_line_cnt,
                 self.body.row_cnt, self.scroll_pos, self.max_scroll_pos,
-                self.pick_pos, self.pick_mode, self.pick_size,
+                self.pick_pos, self.pick_mode,
                 self.rows, self.cols)
             raise
 
@@ -1958,6 +1953,49 @@ class ConsoleWindow:
         max_line = min(self.body.row_cnt - 1, pos + after)
         return (min_line, max_line)
 
+    def _attached(self, row: int, other: int) -> bool:
+        """Whether two adjacent rows belong to the same pick block."""
+        for probe, neighbour in ((row, other), (other, row)):
+            rng = self._abut_range_at(probe)
+            if rng is not None and rng[0] <= neighbour <= rng[1]:
+                return True
+        return False
+
+    def _pick_block(self) -> tuple[int, int]:
+        """The first and last rows kept on screen with the picked row.
+
+        The picked row is joined by the rows attached to it by ``abut``: a
+        detail row's ``abut=-1`` attaches it to the row above, a transient
+        child attaches to its parent, and the attachment chains.  A row that
+        merely happens to be adjacent (a separator, the next group's header)
+        ends the block.  The block is what scrolling keeps visible together;
+        the highlight itself is only the picked row.
+        """
+        if not self.pick_mode or self.body.row_cnt <= 0:
+            return self.pick_pos, self.pick_pos
+        lo = hi = max(0, min(self.pick_pos, self.body.row_cnt - 1))
+        while hi + 1 < self.body.row_cnt and self._attached(hi, hi + 1):
+            hi += 1
+        while lo > 0 and self._attached(lo, lo - 1):
+            lo -= 1
+        return lo, hi
+
+    def _first_pickable(self) -> int:
+        """The row ``0``/HOME selects: the first pickable row, or row 0."""
+        if not self.pick_mode:
+            return 0
+        first = geometry.find_pickable(self._is_pickable, self.body.row_cnt, 0)
+        return 0 if first < 0 else first
+
+    def _last_pickable(self) -> int:
+        """The row ``$``/END selects: the last pickable row, or the last row."""
+        last_row = max(self.body.row_cnt - 1, 0)
+        if not self.pick_mode:
+            return last_row
+        last = geometry.find_pickable(
+            self._is_pickable, self.body.row_cnt, last_row)
+        return last_row if last < 0 else last
+
     def _clamp_pick_pos(self, abut_range: tuple[int, int] | None) -> None:
         self.pick_pos = max(self.pick_pos, 0)
         self.pick_pos = min(self.pick_pos, self.body.row_cnt-1)
@@ -1968,10 +2006,9 @@ class ConsoleWindow:
             self.pick_pos = max(self.pick_pos, min_line)
             self.pick_pos = min(self.pick_pos, max_line)
 
-        if self.pick_pos >= 0:
-            self.pick_pos -= (self.pick_pos % self.pick_size)
-
-        # Ensure pick_pos is on a pickable line (skip DECOR lines)
+        # The pick rests on a pickable row.  There is no rounding to a block
+        # boundary: the block is defined by abut, not by a fixed size, so the
+        # row above the pick (a detail, a group header) never moves it.
         if not self._is_pickable(self.pick_pos):
             self.pick_pos = geometry.find_pickable(
                 self._is_pickable, self.body.row_cnt, self.pick_pos)
@@ -1992,8 +2029,10 @@ class ConsoleWindow:
             # picked line would be above viewport - scroll up to show it
             self.scroll_pos = self.pick_pos
         elif self.pick_pos >= self.scroll_pos + self.scroll_view_size:
-            # picked line would be below viewport bottom - scroll down to show it
-            self.scroll_pos = self.pick_pos - (self.scroll_view_size - self.pick_size)
+            # The picked block would run past the viewport bottom: scroll down
+            # to show its last attached row, not just the picked row.
+            _lo, hi = self._pick_block()
+            self.scroll_pos = hi - self.scroll_view_size + 1
         # Note: We allow scroll_pos < pick_pos to show DECOR lines above the picked item
 
         # Final clamping
@@ -2146,8 +2185,10 @@ class ConsoleWindow:
             pos = self.scroll_pos + row
             if pos < 0 or pos >= self.body.row_cnt or pos >= len(self.body.texts):
                 continue
-            picked = (self.pick_mode
-                      and self.pick_pos <= pos < self.pick_pos + self.pick_size)
+            # Only the picked row is highlighted.  Rows attached to it by abut
+            # stay on screen with it (see _pick_block), but are not painted as
+            # picked: an app usually wants the cursor on the primary line.
+            picked = self.pick_mode and pos == self.pick_pos
             self._paint_row(pad, row, pos, picked=picked)
         return view
 
@@ -3017,23 +3058,26 @@ class ConsoleWindow:
         if key in self.opts.taken_nav_keys:
             return None
         pos = self.pick_pos if self.pick_mode else self.scroll_pos
-        delta = self.pick_size if self.pick_mode else 1
         half = self.scroll_view_size // 2
+        # 0/HOME and $/END name a *row to select*, so in pick mode they target
+        # a pickable row: the first or last one, not row 0 and the last row
+        # (which in a list with leading headers or trailing details are not
+        # pickable, and used to leave the pick behind while the view scrolled).
         moves: dict[int, Callable[[], int]] = {
-            ord('k'): lambda: pos - delta,
-            curses.KEY_UP: lambda: pos - delta,
-            ord('j'): lambda: pos + delta,
-            curses.KEY_DOWN: lambda: pos + delta,
+            ord('k'): lambda: pos - 1,
+            curses.KEY_UP: lambda: pos - 1,
+            ord('j'): lambda: pos + 1,
+            curses.KEY_DOWN: lambda: pos + 1,
             _CTRL_PAGE_UP: lambda: pos - self.scroll_view_size,
             curses.KEY_PPAGE: lambda: pos - self.scroll_view_size,
             _CTRL_HALF_UP: lambda: pos - half,
             _CTRL_HALF_DOWN: lambda: pos + half,
             _CTRL_PAGE_DOWN: lambda: pos + self.scroll_view_size,
             curses.KEY_NPAGE: lambda: pos + self.scroll_view_size,
-            ord('0'): lambda: 0,
-            curses.KEY_HOME: lambda: 0,
-            ord('$'): lambda: self.body.row_cnt - 1,
-            curses.KEY_END: lambda: self.body.row_cnt - 1,
+            ord('0'): self._first_pickable,
+            curses.KEY_HOME: self._first_pickable,
+            ord('$'): self._last_pickable,
+            curses.KEY_END: self._last_pickable,
             ord('H'): lambda: self.scroll_pos,
             ord('M'): lambda: self.scroll_pos + half,
             ord('L'): lambda: self.scroll_pos + self.scroll_view_size - 1,
@@ -3072,14 +3116,25 @@ class ConsoleWindow:
             probe += direction
         return 0
 
-    def _resolve_prompt_move(self, target: int, was_pos: int) -> tuple[int, int]:
+    def _resolve_prompt_move(self, target: int, was_pos: int,
+                             snap_nearest: bool = False) -> tuple[int, int]:
         """Apply pickability rules to a requested move.
+
+        ``snap_nearest`` is for the jump keys (``0``, ``$``, ``H``, ``M``,
+        ``L``): they select a row, so a target that is not pickable lands on
+        the nearest pickable row in either direction.  Step keys keep the
+        DECOR-scroll behaviour below.
 
         Returns the row the pick should land on and the scroll adjustment to
         apply when a DECOR block made the requested move impossible.
         """
         if not self.pick_mode or target == was_pos:
             return target, 0
+        if snap_nearest and not self._is_pickable(target):
+            found = geometry.find_pickable(
+                self._is_pickable, self.body.row_cnt, target)
+            if found >= 0:
+                return found, 0
         direction = 1 if target > was_pos else -1
         pos, exhausted = self._skip_to_pickable(target, direction)
         if not exhausted:
@@ -3129,7 +3184,8 @@ class ConsoleWindow:
         target = self._navigation_target(key)
         if target is None:
             target = was_pos
-        pos, scroll_adjustment = self._resolve_prompt_move(target, was_pos)
+        pos, scroll_adjustment = self._resolve_prompt_move(
+            target, was_pos, snap_nearest=key in _JUMP_TO_PICKABLE_KEYS)
         self._apply_prompt_move(pos, was_pos, scroll_adjustment)
         return self._finish_prompt_move(key, pos, was_pos, scroll_adjustment)
 

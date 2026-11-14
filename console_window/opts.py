@@ -112,7 +112,7 @@ class ConsoleWindowOpts:
                  'ctrl_c_terminates', 'demo_mode', 'dialog_abort', 'dialog_return',
                  'glyphs', 'glyphs_probe', 'head_line', 'head_rows', 'keys',
                  'max_rows', 'min_cols_rows', 'mod_pick', 'nav_keys', 'pick_attr',
-                 'pick_mode', 'pick_range', 'pick_size', 'relax_handled_keys',
+                 'pick_mode', 'pick_range', 'relax_handled_keys',
                  'return_if_pos_change', 'single_cell_scroll_indicator',
                  'strip_attrs_in_pick_mode', 'taken_nav_keys', 'theme']
 
@@ -148,7 +148,6 @@ class ConsoleWindowOpts:
     pick_attr: int
     pick_mode: bool
     pick_range: list[int] | None
-    pick_size: int
     relax_handled_keys: bool
     return_if_pos_change: bool
     single_cell_scroll_indicator: bool
@@ -191,7 +190,6 @@ class ConsoleWindowOpts:
                 'window has reduced (custom) navigation'
             )
         self.pick_mode = kwargs.get('pick_mode', False)
-        self.pick_size = kwargs.get('pick_size', 1)
         self.mod_pick = kwargs.get('mod_pick')
         self.pick_attr = kwargs.get('pick_attr', curses.A_REVERSE)
         self.pick_range = kwargs.get('pick_range')  # [start_col, end_col] or None

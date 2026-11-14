@@ -2,7 +2,7 @@
 """O — Large bodies and limits.
 
 Owns: large-body, scroll-indicator, max-rows, min-size, redraw-recovery
-Base: a-basic
+Base: c-options
 Run:  ./demos/run-demo o-large-bodies
 
 Two thousand rows are added every pass, but the pads stay viewport-sized: the
@@ -37,7 +37,7 @@ class LargeScreen(DemoScreen):
         self.add_fancy_header(
             f'large bodies  rows={len(self.app.rows)}  '
             f'max_rows={self.win.opts.max_rows}  '
-            f'dropped={self.win.rows_dropped}  [r]edraw  [q]uit',
+            f'dropped={self.win.rows_dropped}  [r]edraw  [?]help  [q]uit',
             mode='Underline',
         )
         self.add_header(
@@ -48,24 +48,38 @@ class LargeScreen(DemoScreen):
         for row in self.app.rows:
             self.add_body(self.app.body_line(row))
 
+    def redraw_ACTION(self) -> None:
+        self.win.render(redraw=True)
+        self.win.status('full repaint complete', timeout=1.5)
+
 
 class LargeApp(DemoApp):
     title = 'large bodies'
     row_range = (1, LARGE_BODY_ROWS)
+    screen_class = LargeScreen
     win_options: ClassVar[dict[str, object]] = {
         'max_rows': LARGE_BODY_ROWS + 500,
         'min_cols_rows': (40, 8),
     }
+    help_paragraphs = (
+        'Every pass adds 2,000 body rows, yet the pads stay sized to the '
+        'viewport: the rows live in the model and the pads are blit buffers, so '
+        'neither memory nor clear() grows with the row count.  The scroll '
+        'indicator appears because the body is taller than the viewport.',
+        'max_rows is the one ceiling; a row added past it is dropped and counted '
+        'in rows_dropped instead of raising.  A terminal smaller than '
+        'min_cols_rows is refused by a dialog with TerminalTooSmallError, and r '
+        'forces a full repaint, which is the recovery path for a corrupted '
+        'display.',
+    )
 
-    def build_screens(self):
-        return [LargeScreen(self)]
-
-    def handle_key(self, key: int) -> None:
-        if key in (ord('q'), ord('Q'), 0x3):
-            self.running = False
-        elif key == ord('r'):
-            self.win.render(redraw=True)
-            self.win.status('full repaint complete', timeout=1.5)
+    def build_spinner(self):
+        spin = self.new_spinner()
+        spin.add_key('redraw', 'r - full repaint', keys=[ord('r')],
+                     genre='action',
+                     comments='render(redraw=True): the normal pass repaints '
+                              'only the viewport.')
+        return spin
 
 
 def build_app(backend: object | None = None,

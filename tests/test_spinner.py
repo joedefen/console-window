@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from console_window import OptionSpinner
+from console_window import OptionSpinner, glyphs
 from console_window.keys import NAVIGATION_KEYS
 
 
@@ -373,35 +373,81 @@ def test_normalize_unknown_attr_returns_none():
 def test_help_body_renders_placeholder_for_unset_option():
     spin = OptionSpinner()
     spin.add_key('mode', 'm - mode', vals=['a', 'b'], keys=[ord('m')])
-    ns = spin.attr_to_option['mode']
     del spin.default_obj.mode
-    win = FakeBodyWindow()
-    spin._write_option_body(win, ns)
-    texts = [text for text, _attr, _resume in win.calls]
+    screen = FakeBodyScreen()
+
+    spin.show_help_body(screen)
+
+    texts = [text for text, _attr, _resume in screen.calls]
     assert any('unset' in text for text in texts)
     assert not any('None' in text for text in texts)
 
 
-class FakeBodyScreen(FakeBodyWindow):
-    """A body sink that also knows its own stack number."""
+class FakeWidthWindow:
+    """A window that knows only how wide its body pad is."""
 
-    def __init__(self, num=None):
+    def __init__(self, width):
+        self.width = width
+
+    def get_pad_width(self):
+        return self.width
+
+
+class FakeBodyScreen(FakeBodyWindow):
+    """A body sink that reports its stack number and, optionally, its width."""
+
+    def __init__(self, num=None, width=None):
         super().__init__()
         self.num = num
+        self.win = FakeWidthWindow(width) if width is not None else None
 
 
-def test_help_body_lists_only_options_for_the_screens_number():
-    spin = OptionSpinner(stack=make_stack())
+def _pushed_stack():
+    """A stack whose current screen 1 was pushed from screen 0."""
+    stack = make_stack()
+    help_obj = stack.screen_objects[1]
+    help_obj.num = 1
+    help_obj.stack = stack
+    help_obj.is_help_screen = True
+    stack.curr = SimpleNamespace(num=1, name='SCR1', prev_pos=-1)
+    stack.stack = [SimpleNamespace(num=0, name='SCR0', prev_pos=0)]
+    return stack
+
+
+def test_help_body_lists_the_pushed_screens_keys():
+    spin = OptionSpinner(stack=_pushed_stack())
     spin.add_key('everywhere', 'e - everywhere', vals=['a'], keys=[ord('e')])
-    spin.add_key('main_only', 'm - main', vals=['a'], keys=[ord('m')], scope={0})
+    spin.add_key('main_only', 'm - only on main', vals=['a'], keys=[ord('m')],
+                 scope={0})
+    spin.add_key('help_only', 'h - only on help', vals=['a'], keys=[ord('h')],
+                 scope={1})
+    spin.add_key('go_main', 'g - action on main', genre='action',
+                 keys=[ord('g')], scope={0})
 
     help_screen = FakeBodyScreen(num=1)
     spin.show_help_body(help_screen)
     texts = [text for text, _attr, _resume in help_screen.calls]
 
-    assert any('Type keys to alter choice' in text for text in texts)
+    assert "Keys for 'SCR0':" in texts
     assert any('everywhere' in text for text in texts)
-    assert not any('main_only' in text for text in texts)
+    assert any('only on main' in text for text in texts)
+    assert any('action on main' in text for text in texts)
+    assert not any('only on help' in text for text in texts)
+
+
+def test_help_body_lists_every_option_when_nothing_was_pushed():
+    spin = OptionSpinner(stack=make_stack())
+    spin.add_key('everywhere', 'e - everywhere', vals=['a'], keys=[ord('e')])
+    spin.add_key('main_only', 'm - only on main', vals=['a'], keys=[ord('m')],
+                 scope={0})
+
+    help_screen = FakeBodyScreen(num=1)
+    spin.show_help_body(help_screen)
+    texts = [text for text, _attr, _resume in help_screen.calls]
+
+    assert 'All keys:' in texts
+    assert any('everywhere' in text for text in texts)
+    assert any('only on main' in text for text in texts)
 
 
 def test_help_body_without_a_stack_lists_every_option():
@@ -412,6 +458,7 @@ def test_help_body_without_a_stack_lists_every_option():
     spin.show_help_body(screen)
     texts = [text for text, _attr, _resume in screen.calls]
 
+    assert 'All keys:' in texts
     assert any('mode' in text for text in texts)
 
 
@@ -422,6 +469,152 @@ def test_help_body_with_nothing_to_list_draws_no_heading():
     spin.show_help_body(screen)
 
     assert screen.calls == []
+
+
+def _help_texts(screen):
+    return [text for text, _attr, _resume in screen.calls]
+
+
+def _dots(count):
+    return glyphs.get('bullet') * count
+
+
+def _two_options():
+    """One wide action and one short option carrying a long value run."""
+    spin = OptionSpinner()
+    spin.add_key('act', 'a - a long action here', genre='action', keys=[ord('a')])
+    spin.add_key('val', 'v - value', vals=['x' * 10, 'y' * 10], keys=[ord('v')])
+    return spin
+
+
+def test_help_body_aligns_values_under_the_widest_description():
+    spin = OptionSpinner()
+    spin.add_key('order', 'o - order', vals=['up', 'down'], keys=[ord('o')])
+    screen = FakeBodyScreen(width=80)
+
+    spin.show_help_body(screen)
+
+    texts = _help_texts(screen)
+    assert texts[0] == 'All keys:'
+    assert texts[1] == f'o - order{_dots(4)}  '
+
+
+def test_the_column_ignores_options_this_screen_does_not_list():
+    spin = OptionSpinner(stack=_pushed_stack())
+    spin.add_key('order', 'o - order', vals=['up', 'down'], keys=[ord('o')])
+    spin.add_key('wide', 'w - ' + 'a very long description ' * 2, vals=['a'],
+                 keys=[ord('w')], scope={1})
+    screen = FakeBodyScreen(num=1, width=80)
+
+    spin.show_help_body(screen)
+
+    assert _help_texts(screen)[1] == f'o - order{_dots(4)}  '
+
+
+def test_an_actions_description_does_not_set_the_value_column():
+    # At 40 cells the value run fits only when the column measures the options
+    # that carry values: an action's description is followed by nothing.
+    screen = FakeBodyScreen(width=40)
+
+    _two_options().show_help_body(screen)
+
+    texts = _help_texts(screen)
+    assert texts[0] == 'All keys:'
+    assert texts[1] == 'a - a long action here'
+    assert texts[2] == f'v - value{_dots(4)}  '
+    assert texts[3:] == ['xxxxxxxxxx', ' ', 'yyyyyyyyyy']
+
+
+def test_values_wrap_between_entries_under_the_column():
+    screen = FakeBodyScreen(width=30)
+
+    _two_options().show_help_body(screen)
+
+    texts = _help_texts(screen)
+    assert texts[1] == 'a - a long action here'
+    assert texts[2] == f'v - value{_dots(4)}  '
+    assert texts[3] == 'xxxxxxxxxx'
+    # The continuation row starts at the value column, not at the margin.
+    assert texts[4] == ' ' * 15
+    assert texts[5] == 'yyyyyyyyyy'
+
+
+def test_a_narrow_help_body_stacks_the_values_under_the_description():
+    # 22 cells leave less than the eight a wrapped value row needs, so the
+    # option goes flat instead of hanging one value per line under a column.
+    screen = FakeBodyScreen(width=22)
+
+    _two_options().show_help_body(screen)
+
+    texts = _help_texts(screen)
+    assert texts[0] == 'All keys:'
+    assert texts[1] == 'a - a long action here'
+    assert texts[2:5] == ['v - value', '  ', 'xxxxxxxxxx']
+    assert texts[5] == '  '
+    assert texts[6] == 'yyyyyyyyyy'
+
+
+def test_a_single_value_too_wide_for_a_row_is_ellipsized():
+    spin = OptionSpinner()
+    spin.add_key('val', 'v - value', vals=['x' * 40], keys=[ord('v')])
+    screen = FakeBodyScreen(width=30)
+
+    spin.show_help_body(screen)
+
+    assert _help_texts(screen)[2] == 'x' * 14 + '\u2026'
+
+
+def test_a_comment_wraps_under_the_value_column():
+    spin = OptionSpinner()
+    spin.add_key('order', 'o - order', vals=['up', 'down'], keys=[ord('o')],
+                 comments='too long to fit on one row of a narrow help screen')
+    screen = FakeBodyScreen(width=40)
+
+    spin.show_help_body(screen)
+
+    texts = _help_texts(screen)
+    assert ' ' * 13 + ':  too long to fit on one' in texts
+    assert ' ' * 16 + 'row of a narrow help' in texts
+
+
+def test_a_flat_layout_drops_the_comment_marker():
+    spin = OptionSpinner()
+    spin.add_key('order', 'o - order', vals=['up', 'down'], keys=[ord('o')],
+                 comments='one row')
+    screen = FakeBodyScreen(width=18)
+
+    spin.show_help_body(screen)
+
+    texts = _help_texts(screen)
+    assert '  one row' in texts
+    assert not any(':  ' in text for text in texts)
+
+
+def test_help_screen_runs_the_pushed_screens_cycle_key():
+    spin = OptionSpinner(stack=_pushed_stack())
+    spin.add_key('order', 'o - order', vals=['up', 'down'], keys=[ord('o')],
+                 scope={0})
+
+    assert spin.do_key(ord('o'), SimpleNamespace()) == 'down'
+    assert spin.default_obj.order == 'down'
+
+
+def test_help_screen_does_not_run_the_pushed_screens_action():
+    spin = OptionSpinner(stack=_pushed_stack())
+    spin.add_key('reload', 'r - reload', genre='action', keys=[ord('r')],
+                 scope={0})
+
+    assert spin.do_key(ord('r'), SimpleNamespace()) is None
+
+
+def test_a_screen_that_is_not_help_keeps_its_own_lookup():
+    stack = _pushed_stack()
+    stack.screen_objects[1].is_help_screen = False
+    spin = OptionSpinner(stack=stack)
+    spin.add_key('order', 'o - order', vals=['up', 'down'], keys=[ord('o')],
+                 scope={0})
+
+    assert spin.do_key(ord('o'), SimpleNamespace()) is None
 
 
 class FakeNavScreen:

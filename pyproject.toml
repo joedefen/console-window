@@ -88,9 +88,10 @@ filterwarnings = ["error::UserWarning"]
 
 [tool.coverage.run]
 # Pin the measured package so the number the release gate prints is the same
-# whichever directory pytest is started from.
+# whichever directory pytest is started from.  The demos are showcase programs,
+# not library code: they are free to change without moving the number.
 source = ["console_window"]
-omit = ["tests/*"]
+omit = ["tests/*", "demos/*"]
 
 [tool.coverage.report]
 # Measured at 90.69% when the shared release gate was adopted.  The floor is a

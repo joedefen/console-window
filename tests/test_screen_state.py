@@ -76,13 +76,11 @@ def test_clear_adopts_the_screen_and_resets_only_content():
 
 
 def test_opts_seed_the_screen_once_and_then_the_screen_owns_the_fields():
-    win, _backend = _window(pick_mode=True, pick_size=3, pick_range=[0, 4],
-                            max_rows=7)
+    win, _backend = _window(pick_mode=True, pick_range=[0, 4], max_rows=7)
     try:
         screen = Screen(_App(win))
         screen.clear()
         assert screen.pick_mode is True
-        assert screen.pick_size == 3
         assert screen.pick_range == [0, 4]
         assert screen.body.rows == 7
 
@@ -119,7 +117,7 @@ def test_stack_activation_is_a_pointer_swap_not_a_copy():
         assert win.body.texts == []     # HELP's own content, not MAIN's
 
         win.pick_pos = 5
-        win.set_pick_mode(True, 2)
+        win.set_pick_mode(True)
         help_screen.add_body('help row')
 
         assert stack.pop() == 3          # the parent's row, from the frame
@@ -248,9 +246,9 @@ def test_pick_mode_and_range_are_per_screen_through_the_window_proxy():
         main, help_screen = Screen(app), Screen(app)
         stack = ScreenStack(win, app.opts, ('MAIN', 'HELP'),
                             {0: main, 1: help_screen})
-        win.set_pick_mode(True, 2)
+        win.set_pick_mode(True)
         win.set_pick_range(0, 3)
-        assert main.pick_mode is True and main.pick_size == 2
+        assert main.pick_mode is True
         assert main.pick_range == [0, 3]
 
         stack.push(1)

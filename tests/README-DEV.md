@@ -77,6 +77,11 @@ The coverage floor (90%) is enforced through `[tool.coverage.report]
 fail_under`. It was set just below the measured 90.69% when the release gate
 was adopted; raise it when the number rises, never lower it.
 
+`demos/` is outside the measurement (`[tool.coverage.run] omit`) and outside the
+suite's behaviour assertions.  `tests/test_demo_syntax.py` only compiles and
+imports each demo script against the public API, so a demo can be reworked
+without touching the project.
+
 The ruff selection is committed rather than inherited, so that no user or global
 configuration can change what the gate enforces. `requires-python` still allows
 3.10, which is why the `test` and `dev` extras carry `tomli` for the interpreter

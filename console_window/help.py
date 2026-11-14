@@ -7,8 +7,9 @@ this library says the same true thing, and an app that adds a theme picker
 does not have to re-explain what ``t`` does.
 
 Both builders are plain strings: an app returns them from
-:meth:`Screen.extra_help_paragraphs`, and ``BasicHelpScreen`` wraps and dims
-them.
+:meth:`Screen.extra_help_paragraphs`, and ``BasicHelpScreen`` adds the
+``Instructions`` separator and renders them as bulleted instructions with a
+hanging indent.
 """
 
 from __future__ import annotations

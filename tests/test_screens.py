@@ -121,6 +121,62 @@ def test_basic_help_screen_resolves_window_created_after_construction():
         win.stop_curses()
 
 
+def _draw_help_notes(paragraphs=(), *, separator=None, display_notes=False):
+    """Draw a help screen with *paragraphs* and return (win, rows, attrs)."""
+    win = _make_window()
+    screen = BasicHelpScreen(SimpleNamespace(win=win))
+    screen.extra_help_paragraphs = lambda: tuple(paragraphs)
+    if separator is not None:
+        screen.notes_separator = separator
+    screen.show_display_notes = display_notes
+    OptionSpinner(
+        stack=ScreenStack(win, SimpleNamespace(), ('HELP',), {0: screen}))
+    screen.clear()
+    screen.draw_screen()
+    return win, win.body.texts, win.body.text_attrs
+
+
+def test_help_notes_are_bulleted_instructions_after_a_separator():
+    long_paragraph = (
+        'This paragraph is long enough to wrap onto a second row, so the '
+        'hanging indent has to line up under the text and not under the bullet.')
+    win, rows, attrs = _draw_help_notes([long_paragraph])
+    try:
+        assert rows[0] == '---------- Instructions ----------'
+        assert rows[1].startswith(' \u25c6 ')
+        assert len(rows) > 2                       # it really wrapped
+        assert all(row.startswith('   ') and not row.startswith(' \u25c6 ')
+                   for row in rows[2:])
+        assert all(attr == curses.A_NORMAL for run in attrs for attr, _ in run)
+    finally:
+        win.stop_curses()
+
+
+def test_help_notes_fall_back_to_the_display_note():
+    win, rows, _attrs = _draw_help_notes(display_notes=True)
+    try:
+        assert rows[0] == '---------- Instructions ----------'
+        assert rows[1].startswith(' \u25c6 ')
+    finally:
+        win.stop_curses()
+
+
+def test_help_notes_are_omitted_when_there_is_nothing_to_say():
+    win, rows, _attrs = _draw_help_notes()
+    try:
+        assert rows == []
+    finally:
+        win.stop_curses()
+
+
+def test_the_notes_separator_can_be_turned_off():
+    win, rows, _attrs = _draw_help_notes(['short note'], separator='')
+    try:
+        assert rows[0].startswith(' \u25c6 ')
+    finally:
+        win.stop_curses()
+
+
 def test_the_stack_numbers_links_and_supplies_the_spinner():
     win = _make_window()
     try:

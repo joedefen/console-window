@@ -282,7 +282,7 @@ def test_a_real_pick_move_resynchronises_the_view(make):
     assert win.free_scroll is False
 
 
-def test_page_and_end_reach_trailing_decor(make):
+def test_page_steps_scroll_and_end_selects_the_last_pickable(make):
     win, backend = make(backend=HeadlessBackend(rows=24, cols=80),
                         pick_mode=True, body_rows=400, head_rows=2)
     _add_decor_body(win)
@@ -292,9 +292,13 @@ def test_page_and_end_reach_trailing_decor(make):
     win.prompt()
     assert win.scroll_pos == win.scroll_view_size
 
-    backend.queue_keys(ord('$'))  # END
+    # END is a jump, not a scroll: it selects the last pickable row instead of
+    # leaving the pick behind while the view runs into the trailing DECOR.
+    backend.queue_keys(ord('$'))
     win.prompt()
-    assert win.scroll_pos == win.max_scroll_pos
+    assert win.pick_pos == 19
+    assert win.scroll_pos == 19
+    assert win.free_scroll is False
 
 
 def test_scroll_indicator_follows_the_viewport_while_free_scrolling(make):
@@ -447,7 +451,7 @@ def test_scroll_indicator_span_reserves_the_last_column(make):
 # --- render() / render_once(): the drawing half -----------------------------
 
 def test_render_draws_gutter_separator_and_indicator(make):
-    win, backend = make(pick_mode=True, body_rows=10, head_rows=2, pick_size=2)
+    win, backend = make(pick_mode=True, body_rows=10, head_rows=2)
     screen_of(win).add_header('HDR')
     for i in range(5):
         screen_of(win).add_body(f'body {i}')
@@ -515,9 +519,10 @@ def test_render_gives_up_after_the_retry_budget(monkeypatch, caplog, make):
 
 def test_set_pick_mode_updates_the_current_view(make):
     win, _backend = make()
-    win.set_pick_mode(True, 2)
+    win.set_pick_mode(True)
     assert win.pick_mode is True
-    assert win.pick_size == 2
+    win.set_pick_mode(False)
+    assert win.pick_mode is False
 
 
 def test_set_pick_range_is_per_screen(make):
@@ -526,6 +531,91 @@ def test_set_pick_range_is_per_screen(make):
     assert win.pick_range == [0, 2]
     # Not the window options: two screens can hold different ranges.
     assert win.opts.pick_range is None
+
+
+def test_a_pick_block_is_the_rows_attached_by_abut(make):
+    # Row 0 item, 1 detail (abut=-1), 2 item, 3 detail, 4 group header, 5 item.
+    # The block is the picked row plus the attached detail rows -- 0-1 and
+    # 2-3 -- while the separator ends the block.  The block is what stays on
+    # screen with the pick; it is not what gets highlighted.
+    win, _backend = make(pick_mode=True)
+    screen = screen_of(win)
+    win.set_pick_mode(True)
+    for text, ctx in (('A', Context(genre='item')),
+                      ('detail', Context(genre='DECOR', abut=-1)),
+                      ('B', Context(genre='item')),
+                      ('detail', Context(genre='DECOR', abut=-1)),
+                      ('--- group ---', Context(genre='DECOR')),
+                      ('C', Context(genre='item'))):
+        screen.add_body(text, context=ctx)
+
+    win.pick_pos = 0
+    win.fix_positions()
+    assert win.pick_pos == 0
+    assert win._pick_block() == (0, 1)
+
+    win.pick_pos = 2
+    assert win._pick_block() == (2, 3)
+
+    win.pick_pos = 5
+    win.fix_positions()
+    assert win.pick_pos == 5           # not snapped back over the DECOR rows
+    assert win._pick_block() == (5, 5)
+
+
+def test_only_the_picked_row_is_highlighted(monkeypatch, make):
+    # The block keeps the details on screen, but the pick attribute belongs to
+    # the primary row alone: an attached detail must not be painted as picked.
+    win, _backend = make(pick_mode=True, body_rows=10)
+    screen = screen_of(win)
+    win.set_pick_mode(True)
+    for text, ctx in (('A', Context(genre='item')),
+                      ('detail', Context(genre='DECOR', abut=-1)),
+                      ('B', Context(genre='item'))):
+        screen.add_body(text, context=ctx)
+    win.pick_pos = 0
+    win.fix_positions()
+
+    painted = []
+    original = win._paint_row
+
+    def record(pad, row, pos, *, picked):
+        painted.append((pos, picked))
+        return original(pad, row, pos, picked=picked)
+
+    monkeypatch.setattr(win, '_paint_row', record)
+    win._paint_body()
+
+    assert [pos for pos, picked in painted if picked] == [0]
+    assert {pos for pos, _ in painted} >= {0, 1, 2}
+
+
+def test_home_and_end_select_pickable_rows_not_the_body_edges(make):
+    # A group header first and a detail last: $ selects the last *pickable*
+    # row instead of leaving the pick behind while the view scrolls to the
+    # end, and 0 selects the first pickable row, not the header.
+    win, backend = make(pick_mode=True, body_rows=20)
+    screen = screen_of(win)
+    for text, ctx in (('--- top ---', Context(genre='DECOR')),
+                      ('A', Context(genre='item')),
+                      ('detail', Context(genre='DECOR', abut=-1)),
+                      ('B', Context(genre='item')),
+                      ('detail', Context(genre='DECOR', abut=-1))):
+        screen.add_body(text, context=ctx)
+    win.set_pick_mode(True)
+    win.fix_positions()
+
+    backend.queue_keys(ord('$'))
+    win.prompt()
+    assert win.pick_pos == 3
+
+    backend.queue_keys(ord('j'))
+    win.prompt()
+    assert win.pick_pos == 3           # the trailing detail is not visitable
+
+    backend.queue_keys(ord('0'))
+    win.prompt()
+    assert win.pick_pos == 1
 
 
 def test_paint_row_plain_line_with_range(make):

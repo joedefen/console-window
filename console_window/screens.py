@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import curses
 import textwrap
 from collections.abc import Iterable
 from types import SimpleNamespace
@@ -51,6 +50,12 @@ class Screen(_ViewState):
     come_from_whitelist = None  # None = can come from any screen, else list of screen numbers
     is_terminal = False         # True = cannot be pushed onto stack
     cannot_stack_me = False     # True = cannot have other screens pushed on top
+
+    #: True on a screen that documents another screen.  The spinner then lists
+    #: the pushed screen's value keys here and keeps them live, so a value can
+    #: be changed without backing out.  ``BasicHelpScreen`` sets this; see
+    #: ``OptionSpinner.help_subject()``.
+    is_help_screen = False
 
     #: Assigned by the owning ScreenStack when the stack is constructed.  A
     #: screen built without a stack keeps ``None`` for both.
@@ -134,8 +139,8 @@ class Screen(_ViewState):
 
         An app that owns a feature worth explaining returns its paragraphs here
         (``help.theme_paragraph()``, its own prose) and lets ``BasicHelpScreen``
-        do the wrapping and dimming.  The default is empty, so an app that says
-        nothing keeps its exact output.
+        do the separator, the bullet and the hanging-indent wrapping.  The
+        default is empty, so an app that says nothing keeps its exact output.
         """
         return ()
 
@@ -394,11 +399,23 @@ class ScreenStack:
 
 
 class BasicHelpScreen(Screen):
+    #: The help body describes the screen this one was pushed from, not itself.
+    is_help_screen = True
     #: Append the built-in display notes -- a font check in Unicode mode, and
     #: how to get the full set back in ASCII mode -- after the app's paragraphs.
     #: Off by default: an existing help screen must not gain a line merely by
     #: upgrading the library.  Turn it on with ``show_display_notes = True``.
     show_display_notes = False
+
+    #: Row that introduces the extra help, separating it from the key list
+    #: above.  Set it to '' to drop the separator and keep only the paragraphs.
+    notes_separator = '---------- Instructions ----------'
+
+    #: First-row prefix of an extra-help paragraph; the wrapped rows are
+    #: indented to line up under it.  Three cells wide by design.  The plain
+    #: ``\u25c6`` is downgraded to its ASCII spelling by the window when the
+    #: terminal cannot draw it.
+    notes_bullet = ' \u25c6 '
 
     def draw_screen(self) -> None:
         # The screen draws itself: pick mode is its own, and every writer below
@@ -411,21 +428,28 @@ class BasicHelpScreen(Screen):
         self.draw_notes()
 
     def draw_notes(self) -> None:
-        """Append the app's paragraphs and the display notes, dim and wrapped.
+        """Append the app's paragraphs and the display notes as bulleted prose.
 
         A method rather than inline code so a subclass can add its own notes
-        and still get the wrapping, the indent, and the ``A_DIM`` attribute
-        from one place.
+        and still get the separator, the bullet, the hanging indent and the
+        wrapping from one place.  The prose is drawn in the normal attribute:
+        these are instructions the user is meant to read, not dimmed fine print.
         """
         paragraphs = list(self.extra_help_paragraphs())
         if self.show_display_notes:
             # The window answers ``ascii_mode``; that is a terminal property,
             # not a screen one.
             paragraphs.append(help_text.glyph_paragraph(self.win))
-        width = max(getattr(self.win, 'cols', 80) - 8, 20)
+        if not paragraphs:
+            return
+        if self.notes_separator:
+            self.add_body(self.notes_separator)
+        indent = ' ' * len(self.notes_bullet)
+        width = max(getattr(self.win, 'cols', 80) - 8 - len(indent), 20)
         for paragraph in paragraphs:
-            for line in textwrap.wrap(paragraph, width=width):
-                self.add_body(line, attr=curses.A_DIM)
+            for number, line in enumerate(textwrap.wrap(paragraph, width=width)):
+                prefix = self.notes_bullet if number == 0 else indent
+                self.add_body(prefix + line)
 
 
 class BasicTextScreen(Screen):
