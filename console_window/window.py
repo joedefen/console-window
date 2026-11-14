@@ -1622,13 +1622,15 @@ class ConsoleWindow:
                           mode: str = 'Underline',
                           search_pattern_attr: int | None = None,
                           line_attr: int | None = None) -> None:
-        """Add a header line with legacy ``[x]``/``KEY:``/``/pattern`` markup.
+        """Implement ``Screen.add_fancy_header()``; see it for the public API.
 
-        String input is parsed unless ``mode='Off'``.  A :class:`HeaderLine`
-        keeps its declared span roles, but its ``bracket_key()`` delimiters are
-        treated as markup too: in every mode except ``'Off'`` they are removed,
-        while the enclosed key keeps its ``KEY`` styling.  Use
-        ``add_header_line()`` when literal brackets are wanted.
+        A ``str`` is handed to :func:`parse_fancy_header` unless *mode* is
+        ``'Off'``; the raw path adds the text as one unparsed run, which also
+        bypasses the demo-mode indicator and the ``max_header_len`` bookkeeping
+        that :meth:`_emit_header_spans` performs when it has spans to measure.
+        A :class:`HeaderLine`/span iterable keeps its declared roles and only
+        has ``bracket_key()``'s literal ``[``/``]`` removed, in every mode but
+        ``'Off'``; use ``_add_header_line()`` when literal brackets are wanted.
 
         *line_attr* is OR'd into the attribute of every span (and into the raw
         line emitted for ``mode='Off'``), so a caller can, for example, dim a
@@ -1653,11 +1655,13 @@ class ConsoleWindow:
                          mode: str = 'Underline',
                          search_pattern_attr: int | None = None,
                          line_attr: int | None = None) -> None:
-        """Render explicit header spans; see ``Screen.add_fancy_header()``.
+        """Implement ``Screen.add_header_line()``; see it for the public API.
 
-        *line_attr* is OR'd into every span's resolved attribute, including
-        plain spans, so the whole line can carry an extra style such as
-        ``curses.A_DIM``.
+        Spans are emitted exactly as given: no legacy scanning and no
+        ``bracket_key()`` delimiter elision (that exists only on the
+        ``_add_fancy_header()`` path).  *line_attr* is OR'd into every span's
+        resolved attribute, including plain spans, so the whole line can carry
+        an extra style such as ``curses.A_DIM``.
         """
         self._emit_header_spans(ns, list(header_line), mode, search_pattern_attr,
                                 line_attr)
@@ -1666,6 +1670,20 @@ class ConsoleWindow:
     def _resolve_header_attr(role: str, mode: str,
                              search_pattern_attr: int | None,
                              line_attr: int | None = None) -> int | None:
+        """Map one span *role* and header *mode* to a curses attribute.
+
+        *mode* is the case-sensitive string accepted by
+        ``Screen.add_fancy_header()`` and ``Screen.add_header_line()``:
+        ``'Underline'`` (bold for ``LABEL``; underline+bold for ``KEY``),
+        ``'Reverse'`` (bold for ``LABEL``; reverse for ``KEY``) or ``'Off'``
+        (nothing is styled, for any role).  Any other spelling falls through
+        to the ``'Reverse'`` key styling.  ``SEARCH`` uses
+        *search_pattern_attr* when given and bold+reverse otherwise, except in
+        ``'Off'`` mode, where it is ignored.
+
+        *line_attr* is OR'd into the result -- even into the ``None`` returned
+        for a plain span -- so it reaches every run of the line.
+        """
         if mode == 'Off' or role == PLAIN:
             attr = None
         elif role == LABEL:

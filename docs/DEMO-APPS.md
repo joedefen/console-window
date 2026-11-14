@@ -79,8 +79,8 @@ not police it.
 - **Size:** target 60–150 lines; 200 is a hard ceiling.  If a row needs more,
   the feature belongs in another demo.
 - **Live tables, calmly:** a demo whose table mutates sets
-  `PrimeRows.thaw_secs` (E, F, G and H each use `PrimeRows.thaw_secs = 5.0`),
-  which puts the churn's pass count on the wall clock: one churn pass at most
+  `PrimeRows.thaw_secs` (E, F, G, H, I and J all use `5.0`), which puts the
+  churn's pass count on the wall clock: one churn pass at most
   every thaw, so only one `interval`-th of the rows restyles.  The call sites do
   not change; `PrimeRows.pass_count` is the count if an app wants to show it.
   Without the thaw the churn follows the loop's `iteration`, which is right for
@@ -93,8 +93,7 @@ not police it.
   (`M-own-the-navigation-keys`, `N-pause-and-run`), and the whole title is bold.
   A key that is its hint's first letter is written once, inside the word, so
   `[q]uit` draws "quit" and `[c]heck` draws "check"; any other key is divided
-  from its hint by a colon (`[y]:confirm`, `[e]:run`, `[?]:help`, and
-  `[j]/[k]:move` for a key pair).
+  from its hint by a colon (`[y]:confirm`, `[e]:run`, `[?]:help`).
 - **Uniform entry point:** every demo exposes
   `build_app(backend=None, singleton=True) -> app`, and `q` quits, so a demo can
   be exercised by hand or against `HeadlessBackend` without knowing its shape.
@@ -175,8 +174,8 @@ for lookup.
 | F | **Ask in place** — `f-prompts` | D | `begin_prompt()` / `prompt_active` / `handle_prompt_key()`. Single-key confirmation (`mode='y'`) with `hint=`. Buffered text input (`mode='text'`, `seed=`). `add_prompt_lines()` drawn directly under the owning row (`y` confirms that row, which then wears a `✓ confirmed` marker). `add_prompt_header()` for a screen-wide question (`t` renames the spelled column from the header band). `on_confirm` / `on_cancel` callbacks that run after passthrough is restored. |
 | G | **Dialogs and the inline editor** — `g-dialogs` | C | `answer()` with `hint=` and its return/abort contract; the reply is table-wide, so it rides on the header's second line. `alert()` as a modal message. `InlineConfirmation` in `mode='identity'`, drawn under the picked row where its buffer echo and a wrong answer are visible; the row it confirms then wears a `✓` in an untitled left column, so the answer leaves a trace in the table. The line editor's caret keys (Left/Right/Home/End/Backspace/Delete). |
 | H | **Messages** — `h-messages` | C | `status()` with `level='info' / 'warn' / 'error'` and `timeout=`. `status('')`, `clear_status()` and `current_status`. Separator-row placement, truncation before the scroll indicator, and deferred status when `head_line=False`. `flash()` as a timed modal message. The per-message `attr=` override. The header's second line repeats the payload decorated per level (plain, bold, bold and reversed; `info` is plain there rather than the separator row's dim), so a status never vanishes into the dim band; `PrimeRows.thaw_secs = 5.0` keeps the table still behind the message. |
-| I | **Header composition** — `i-headers` | C | `HeaderLine` tokens: `text()`, `bracket_key()`, `key()` and `extend()`. `add_header_line()` (tokens emitted verbatim) versus `add_fancy_header()` (the mode string is interpreted). `mode='Underline'` and `line_attr=curses.A_DIM`. `Span` styling and a multi-row header band. |
-| J | **Themes and appearance** — `j-themes` | C | `Theme.create_picker_screen()` with `cycle_key=`. `ThemeStore` / `Theme.initial()` persistence. `win.set_theme()` as per-window state versus `Theme.set_active()` as process state. `mono`, `NO_COLOR` and `--theme`. `Appearance.semantic_attr()` for semantic body rows. `captions=` role renaming and the `swatch_attr()` / `swatch_rows()` overrides. |
+| I | **Header modes** — `i-headers` | C | `HeaderLine` tokens (`label()`, `text()`, `bracket_key()`) passed to `add_fancy_header()`, so the declared roles survive while the fancy path treats the bracket delimiters as markup. The single header line carries a LABEL title, KEY spans and plain text at once, and `m` cycles `mode='Off' / 'Underline' / 'Reverse'` (Off styles nothing and keeps the brackets literal) to show how each role is emphasized. `PrimeRows.thaw_secs = 5.0` keeps the table calm while the header is compared. |
+| J | **Themes and appearance** — `j-themes` | C | `Theme.create_picker_screen()` with `cycle_key=`. `ThemeStore` / `Theme.initial()` persistence. `win.set_theme()` as per-window state versus `Theme.set_active()` as process state. `mono`, `NO_COLOR` and `--theme`. `Appearance.semantic_attr()` for semantic body rows. `captions=` role renaming and the `swatch_attr()` / `swatch_rows()` overrides. `t` cycles the window's theme from the table and saves the choice through the same store, while `T` opens the picker (`t` cycles there too), so one key is bound on two screens with different scopes. `PrimeRows.thaw_secs = 5.0` keeps the table calm while the colors change. |
 | K | **Glyphs and ASCII** — `k-glyphs` | C | `Glyphs.catalog()` / `catalog_rows()` as a font-check page. Application vocabulary through `ConsoleWindowOpts(glyphs=..., glyphs_probe=...)`. `Glyphs.get()` in content and its ASCII fallback. `--ascii`, `--glyphs` and `CONSOLE_WINDOW_GLYPHS`. `help.glyph_paragraph()` with `show_display_notes`. This is also the home for the deferred "show the whole catalog" sample page. |
 | L | **Read-only screens** — `l-text-screens` | C | `BasicTextScreen` and `set_text()` accepting `str` or `(text, attr)`. A `BasicHelpScreen` subclass with `extra_help_paragraphs()`, drawn under an `Instructions` separator as bulleted prose with a hanging indent. A read-only text screen with no spinner. The default `escape_ACTION()` pop. |
 | M | **Own the navigation keys** — `m-own-keys` | C | `ConsoleWindowOpts(taken_nav_keys={key: label})`. `OptionSpinner(..., nav_keys=opts.nav_keys)`. LEFT/RIGHT as previous/next page, while dialogs still use them for the caret. The help legend showing the application's labels instead of the reserved arrows. |
@@ -208,7 +207,7 @@ for lookup.
 | In-place `y` / text prompts and `add_prompt_*` | F |
 | `answer()` and `alert()` | G |
 | `status()` and `flash()` | H |
-| `HeaderLine` / `add_header_line()` / three strategies | I |
+| `HeaderLine` tokens / `add_fancy_header()` modes | I |
 | Theme picker, `set_theme()`, `mono`, `NO_COLOR` | J |
 | One app glyph, `probe_text()`, font-check help note | K |
 | `BasicTextScreen` for HISTORY | L |

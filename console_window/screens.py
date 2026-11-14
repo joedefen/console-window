@@ -94,7 +94,65 @@ class Screen(_ViewState):
     def add_fancy_header(self, line: str | HeaderLine, mode: str = 'Underline',
                          search_pattern_attr: int | None = None,
                          line_attr: int | None = None) -> None:
-        """Add a header line with legacy ``[x]``/``KEY:``/``/pattern`` markup."""
+        """Append a header row, optionally scanning the legacy text markup.
+
+        *line* is either of the two accepted header forms:
+
+        ``str`` -- the legacy (or "simple") form.  Its text is scanned for the
+        markup described below.  This is what older applications wrote, and it
+        is still the shortest spelling for a one-off legend.
+
+        :class:`HeaderLine` (or any iterable of :class:`Span`) -- the newer
+        form.  Roles are declared by the builder (``text()``, ``key()``,
+        ``bracket_key()``, ``label()``, ``search()``) and are never re-guessed
+        from the text.  The one markup rule that still applies is
+        ``bracket_key()``'s pair of literal ``[``/``]``: in every mode except
+        ``'Off'`` those delimiters are removed and the enclosed key keeps its
+        ``KEY`` styling.  Use :meth:`add_header_line` to keep them verbatim.
+
+        *mode* selects how span roles are emphasized.  It is a case-sensitive
+        string with three recognized values:
+
+        ``'Underline'`` (default) -- ``KEY`` is underlined and bold, ``LABEL``
+        is bold, and ``SEARCH`` uses *search_pattern_attr* (or bold+reverse).
+
+        ``'Reverse'`` -- the same, except ``KEY`` is reverse video instead of
+        underlined.  Because the renderer only special-cases ``'Off'`` and
+        ``'Underline'``, any other spelling also lands here (``'reverse'``
+        works); prefer the capitalized form.
+
+        ``'Off'`` -- no role styling at all: ``LABEL``, ``KEY`` and ``SEARCH``
+        are all plain.  For a ``str`` *line* the markup is not scanned either,
+        so the text is emitted exactly as written; a ``HeaderLine`` keeps its
+        span split and its ``bracket_key()`` delimiters.  Only *line_attr*
+        still styles the line's own spans, so an "off" line can still be
+        dimmed.
+
+        Legacy string markup (``str`` input, and never in ``'Off'`` mode):
+
+        * the first word, if it is a word of letters/digits/underscores and
+          hyphens (``^[\\w-]+$``), is the title and is styled as ``LABEL``
+          (bold) -- any case, not just capitals;
+        * ``[x]`` anywhere in the text styles the single character ``x`` as
+          ``KEY`` and removes the brackets;
+        * a run of ASCII capitals followed by ``:``, at the start of the line
+          or after a space, styles that run as ``KEY`` (case-sensitive, so
+          ``q:`` stays plain);
+        * ``/text`` at the start of the line or after a space is a ``SEARCH``
+          span, slash included, ending at the next whitespace.
+
+        *search_pattern_attr* overrides the attribute used for ``SEARCH``
+        spans, which otherwise default to ``curses.A_BOLD | curses.A_REVERSE``.
+        It is ignored in ``'Off'`` mode, where no role is styled.
+
+        *line_attr* is OR'd into every span's attribute, including ``PLAIN``
+        spans and the raw line emitted for ``mode='Off'``.  It therefore lets
+        a caller dim a whole header (``line_attr=curses.A_DIM``) while keeping
+        each span's own bold/underline/reverse styling.
+
+        See also :meth:`add_header_line`, the variant that renders explicit
+        spans with neither scanning nor bracket elision.
+        """
         self.win._add_fancy_header(self.head, line, mode, search_pattern_attr,
                                    line_attr)
 
@@ -102,7 +160,30 @@ class Screen(_ViewState):
                         mode: str = 'Underline',
                         search_pattern_attr: int | None = None,
                         line_attr: int | None = None) -> None:
-        """Render explicit header spans; see :meth:`add_fancy_header`."""
+        """Append a header row from explicit spans, with no parsing at all.
+
+        This is the newer, less parsed form: every span's ``text`` and ``role``
+        is emitted exactly as given.  In particular, ``HeaderLine``'s
+        ``bracket_key()`` keeps its literal ``[``/``]`` here, whereas
+        :meth:`add_fancy_header` treats those delimiters as markup and removes
+        them.  No role is ever inferred from the text, so a leading title word,
+        a ``KEY:`` spelling or a ``/pattern`` is styled only if the caller
+        declared the matching role.
+
+        *mode* is one of the three values documented on
+        :meth:`add_fancy_header`: ``'Underline'`` (default) underlines keys,
+        ``'Reverse'`` reverses them, and ``'Off'`` applies no role styling at
+        all.  In ``'Off'`` mode only *line_attr* still styles the spans.
+
+        *search_pattern_attr* overrides the ``SEARCH`` span attribute (default
+        ``curses.A_BOLD | curses.A_REVERSE``) and is ignored in ``'Off'`` mode.
+        *line_attr* is OR'd into every span's attribute, including ``PLAIN``
+        spans, so the whole row can be dimmed without losing the role styling.
+
+        Use this method when the text must stay literal (paths, sample markup,
+        or brackets a user should see) or when the roles are already known and
+        re-parsing would be lossy.
+        """
         self.win._add_header_line(self.head, header_line, mode,
                                   search_pattern_attr, line_attr)
 

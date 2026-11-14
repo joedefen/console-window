@@ -19,6 +19,20 @@ class Span(NamedTuple):
 
 
 class HeaderLine:
+    """Builder for the explicit (newer, unparsed) header form.
+
+    Each method appends one :class:`Span` and returns ``self``, so calls
+    chain.  Declare roles with the method, not with punctuation: ``key('x')``
+    styles ``x`` as a key however it is spelled, while ``text('[x]')`` stays
+    literal.  Empty strings add nothing.
+
+    Emit the line with ``Screen.add_header_line()`` to render it verbatim
+    (brackets included), or with ``Screen.add_fancy_header()`` to keep the
+    declared roles but treat ``bracket_key()``'s delimiters as markup.  The
+    header *mode* (``'Underline'``, ``'Reverse'`` or ``'Off'``) decides how
+    the roles are emphasized; see ``Screen.add_fancy_header()``.
+    """
+
     def __init__(self) -> None:
         self.spans: list[Span] = []
 
@@ -28,23 +42,33 @@ class HeaderLine:
         return self
 
     def text(self, s: str) -> HeaderLine:
+        """Append *s* as literal ``PLAIN`` text."""
         return self._add(s, PLAIN)
 
     def key(self, k: str, display: str | None = None) -> HeaderLine:
+        """Append a ``KEY`` span; *display* overrides the text shown."""
         return self._add(display if display is not None else k, KEY)
 
     def bracket_key(self, k: str) -> HeaderLine:
+        """Append ``'['``, *k* as ``KEY``, and ``']'`` as literal spans.
+
+        ``add_header_line()`` keeps the brackets; ``add_fancy_header()``
+        treats them as markup and removes them.
+        """
         self._add('[', PLAIN)
         self._add(k, KEY)
         return self._add(']', PLAIN)
 
     def label(self, s: str) -> HeaderLine:
+        """Append a ``LABEL`` span (the header's title)."""
         return self._add(s, LABEL)
 
     def search(self, pattern: str, prefix: str = '/') -> HeaderLine:
+        """Append ``prefix + pattern`` as one ``SEARCH`` span."""
         return self._add(prefix + pattern, SEARCH)
 
     def extend(self, other: HeaderLine) -> HeaderLine:
+        """Append every span of *other* to this line."""
         self.spans.extend(other.spans)
         return self
 
@@ -58,6 +82,7 @@ class HeaderLine:
         return bool(self.spans)
 
     def __str__(self) -> str:
+        """The line as text, including literal markup characters."""
         return ''.join(span.text for span in self.spans)
 
 
@@ -111,6 +136,25 @@ def _re_match_pattern(s: str) -> str | None:
 
 
 def parse_fancy_header(line: str) -> list[Span]:
+    """Scan *line* with the legacy header grammar and return its spans.
+
+    The grammar is deliberately small:
+
+    * the first word, if it matches ``^[\\w-]+$``, becomes ``LABEL`` (bold)
+      whatever its case -- a historical quirk;
+    * ``[x]`` anywhere in the text becomes a one-character ``KEY`` span with
+      the brackets removed;
+    * a run of ASCII capitals followed by ``:``, at the start of the line or
+      after a space, becomes ``KEY`` (case-sensitive, so ``q:`` does not
+      match);
+    * ``/text`` at the start of the line or after a space becomes ``SEARCH``
+      up to the next whitespace;
+    * everything else is ``PLAIN`` text.
+
+    This is pure lexing: no attributes and no mode.  ``mode='Off'`` skips
+    this function entirely, which is how the legacy string form keeps its
+    literal brackets.
+    """
     result: list[Span] = []
     i = 0
     current_text = ''
