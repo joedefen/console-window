@@ -10,6 +10,20 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 
 class Context:
+    """Per-row metadata read by the pick engine.
+
+    Only ``genre``, ``pickable`` and ``abut`` are consumed by the engine; any
+    other attribute is app vocabulary, stored as given.
+
+    Args:
+        genre: Row genre; ``'DECOR'`` forces it unpickable, ``'TRANSIENT'``
+            stays navigable but is expected to be short-lived.
+        pickable: Whether pick mode may land on the row.
+        abut: Abutment spec from ``console_window.geometry``, or ``None``.
+        **kwargs: Extra attributes stored verbatim; a name close to a known
+            attribute warns instead of failing silently.
+    """
+
     # Engine-consumed attribute names.  A custom kwarg that closely matches one of
     # these is treated as a likely typo and warns rather than failing silently.
     KNOWN_ATTRS: ClassVar[frozenset[str]] = frozenset({'genre', 'pickable', 'abut'})

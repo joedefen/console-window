@@ -35,9 +35,15 @@ class ThemeStore(Protocol):
     """
 
     def load(self) -> str | None:
+        """The remembered theme name, or ``None`` when nothing is stored."""
         ...
 
     def save(self, name: str) -> None:
+        """Remember *name* as the theme to start on next time.
+
+        Args:
+            name: A theme name, in any form :meth:`Theme.resolve` accepts.
+        """
         ...
 
 
@@ -248,6 +254,14 @@ def resolve_color_pair(fg: int, bg: int, colors: int,
 
 
 class Theme:
+    """Palette registry plus the process-wide "current theme" state.
+
+    ``THEMES`` maps a name to pair-id/color specs; :meth:`set` is the one entry
+    point that installs colors and records the choice, and :meth:`resolve`
+    normalizes an unknown name to ``'default'``.  The semantic pair ids below
+    are the roles ``Appearance`` resolves and the keys a caption mapping uses.
+    """
+
     # Semantic color-pair IDs.  The pairs themselves are (re)initialized per theme
     # by Theme.set() and, at startup, by ConsoleWindow.start_curses().
     DEFAULT = 0      # Default terminal colors
@@ -558,6 +572,7 @@ class Theme:
 
     @classmethod
     def get_current(cls) -> str | None:
+        """The active theme name, or ``None`` until a theme has been installed."""
         return cls._current
 
     @classmethod
@@ -601,6 +616,7 @@ class Theme:
 
     @classmethod
     def list_all(cls) -> list[str]:
+        """Every canonical theme name, in registry order (aliases excluded)."""
         return list(cls.THEMES.keys())
 
     @classmethod
@@ -634,6 +650,16 @@ class Theme:
 
     @classmethod
     def set(cls, theme_name: str) -> bool:
+        """Install *theme_name* for the whole process and record it as current.
+
+        Args:
+            theme_name: A theme name; case and ``-``/``_`` spellings are
+                normalized, and ``mono`` is accepted without color support.
+
+        Returns:
+            True when the theme was applied; False for an unknown name, or when
+            the terminal has no colors and the theme is not ``mono``.
+        """
         name = cls.canonical(theme_name)
         if name is None:
             return False

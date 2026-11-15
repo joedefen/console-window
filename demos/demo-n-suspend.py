@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """N — Pause and run.
 
-Owns: suspend-resume, external-program
+Owns: suspend-resume, external-program, ctrl-c-reset
 Base: c-options
 Run:  ./demos/run-demo n-suspend
 
@@ -16,6 +16,13 @@ prints the command it is about to run (``+ ls -l /bin/*sh | head -n 8``), runs
 it, then asks ``===>  Return to screen?`` and waits for ENTER.  That pause is
 the lesson: the hand-back takes milliseconds, so without it ``e`` looks like it
 did nothing.  The help page says what the keys do and what survives.
+
+The hand-back covers SIGINT as well as the screen.  ``suspend_curses()`` already
+releases the handler this library installed; ``reset_ctrl_c()`` says so
+explicitly and is safe to call twice, and the following ``resume_curses()``
+installs the policy again.  The call is here because handing the terminal to a
+program of your own is where an embedding application decides who owns Ctrl-C
+while that program runs, and the reset is the public way to state that.
 """
 
 from __future__ import annotations
@@ -24,6 +31,8 @@ import curses as cs
 import subprocess
 
 from demo_kit import DemoApp, DemoScreen, run_main
+
+from console_window import reset_ctrl_c
 
 # The external program owns the terminal completely, prompt included.  Clearing
 # the screen makes it obvious what belongs to this run, the "+ ..." line shows
@@ -78,6 +87,9 @@ class SuspendApp(DemoApp):
         'the page: the content, the pick position and the scroll position are '
         'the same as before the hand-back.  A real editor or pager is the same '
         'shape -- it owns the terminal until it exits.',
+        'The signal goes with the screen: suspend_curses() gives SIGINT back, '
+        'reset_ctrl_c() makes that hand-back explicit (it is safe to call '
+        'twice), and resume_curses() installs the library policy again.',
     )
 
     def build_spinner(self):
@@ -94,6 +106,10 @@ class SuspendApp(DemoApp):
         try:
             subprocess.run(['sh', '-c', EXTERNAL_SCRIPT], check=False)
         finally:
+            # The program owned the terminal, so it owned Ctrl-C too.  Suspending
+            # already handed SIGINT back; the reset states that, and an
+            # embedding application uses the same call to own Ctrl-C itself.
+            reset_ctrl_c()
             self.win.resume_curses()
 
 

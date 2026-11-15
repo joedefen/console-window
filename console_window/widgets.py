@@ -13,6 +13,15 @@ _BACKSPACE_KEYS = (127, 8, curses.KEY_BACKSPACE, 263)
 
 
 class InlineConfirmation:
+    """One-line editor that resolves a typed answer against a mode.
+
+    Modes are ``'Y'``/``'y'`` (press the key), ``'yes'``/``'YES'`` (type it),
+    ``'identity'`` (type the expected string verbatim), ``'choices'`` (any of a
+    list, by exact text or unique prefix) and ``'text'`` (anything non-empty).
+    ``handle_key()`` is a pure state machine: it never draws and never calls
+    back.
+    """
+
     MODES = 'Y y YES yes identity choices text'.split()
 
     def __init__(self, min_abbrev_chars: int | None = None) -> None:
@@ -30,6 +39,19 @@ class InlineConfirmation:
               choices: str | list[str] | tuple[str, ...] | None = None,
               mode: str | None = None, min_abbrev_chars: int | None = None,
               initial: str = '') -> None:
+        """Begin editing, discarding any previous state.
+
+        Args:
+            action_type: App label for what is being confirmed, if any.
+            identity: The string ``mode='identity'`` requires verbatim.
+            choices: Allowed answers for ``'choices'`` mode; a bare string
+                becomes a one-entry list.
+            mode: One of ``MODES``; defaults to ``'choices'`` when *choices* is
+                given, else ``'yes'``.
+            min_abbrev_chars: Shortest prefix accepted in ``'choices'`` mode;
+                ``None`` keeps the computed default.
+            initial: Seed text, with the caret placed after it.
+        """
         self.active = True
         self.action_type = action_type
         self.identity = identity
@@ -54,6 +76,7 @@ class InlineConfirmation:
             self.mode = 'yes'
 
     def cancel(self) -> None:
+        """Go inactive and forget the buffer and any pending answer."""
         self.active = False
         self.action_type = None
         self.choices = None
@@ -62,6 +85,7 @@ class InlineConfirmation:
 
     @property
     def input_buffer(self) -> str:
+        """The text typed so far."""
         return self._input_buffer
 
     @input_buffer.setter
@@ -73,6 +97,7 @@ class InlineConfirmation:
 
     @property
     def cursor_pos(self) -> int:
+        """Caret position as a string index, not a display cell."""
         return self._cursor_pos
 
     @property
@@ -221,6 +246,14 @@ class InlineConfirmation:
         return ss_ci_matches[0] if len(ss_ci_matches) == 1 else None
 
     def handle_key(self, key: int) -> str:
+        """Consume one key and report the resulting state.
+
+        Args:
+            key: ``curses`` key code.
+
+        Returns:
+            ``'continue'``, ``'confirmed'`` or ``'cancelled'``.
+        """
         if key == 27:
             return 'cancelled'
 
@@ -311,6 +344,7 @@ class InlineConfirmation:
     }
 
     def get_hint(self) -> str:
+        """Hint line for the current mode; empty once any text is typed."""
         if self.input_buffer:
             return ''
 
@@ -369,6 +403,20 @@ class PromptLine:
               on_cancel: Callable[[], object] | None = None,
               min_abbrev_chars: int | None = None,
               answer_hint: str = '') -> None:
+        """Compose a prompt and make it active.
+
+        Args:
+            prompt: Leading text, drawn verbatim.
+            hint: Hint for the row below; ``''`` for none.
+            mode: Editor mode, as ``InlineConfirmation`` accepts.
+            identity: Expected string for ``mode='identity'``.
+            seed: Initial buffer contents.
+            choices: Allowed answers; forces ``mode='choices'``.
+            on_confirm: Handed back by :meth:`take`; never called here.
+            on_cancel: Handed back by :meth:`take`; never called here.
+            min_abbrev_chars: Shortest unique prefix that accepts a choice.
+            answer_hint: Replacement for ``DEFAULT_ANSWER_HINT``.
+        """
         self._editor.start(action_type=None, identity=identity, choices=choices,
                            mode=mode, min_abbrev_chars=min_abbrev_chars,
                            initial=seed)
@@ -422,7 +470,12 @@ class PromptLine:
         self._result = None
 
     def get_display_string(self, cursor_char: str | None = None) -> str:
-        """The prompt as one line, with the caret glyph for editable modes."""
+        """The prompt as one line, with the caret glyph for editable modes.
+
+        Args:
+            cursor_char: Caret to draw, or ``None`` for the registered
+                ``cursor`` glyph.
+        """
         if not self.active:
             return ''
         if cursor_char is None:
@@ -438,6 +491,11 @@ class PromptLine:
         return f'{self.prompt}: {buffer}'
 
     def get_hint_string(self, width: int | None = None) -> str:
+        """The hint, cut to *width* cells when a width is given.
+
+        Args:
+            width: Maximum display cells, or ``None`` for the whole hint.
+        """
         if not self.active or not self.hint:
             return ''
         if width is None:
@@ -457,6 +515,14 @@ class PromptLine:
 
 
 class IncrementalSearchBar:
+    """A filter bar: pattern text, a caret and the three search callbacks.
+
+    Arrows and Home/End (also Ctrl-A/Ctrl-E) move the caret, backspace deletes,
+    ENTER accepts and ESC restores the text the search started with.  Callbacks
+    fire from ``handle_key()``; ``reset()`` is the silent counterpart for a
+    caller that changes the pattern itself.
+    """
+
     def __init__(self, on_change: Callable[[str], None] | None = None,
                  on_accept: Callable[[str], None] | None = None,
                  on_cancel: Callable[[str], None] | None = None) -> None:
@@ -484,6 +550,11 @@ class IncrementalSearchBar:
             self._key_actions[code] = self._backspace
 
     def start(self, initial_text: str = '') -> None:
+        """Enter search mode with *initial_text* and the caret at its end.
+
+        Args:
+            initial_text: Pattern to start from; also what ESC restores.
+        """
         self._active = True
         self._text = initial_text
         self._start_text = initial_text
@@ -502,6 +573,15 @@ class IncrementalSearchBar:
         self._cursor_pos = len(initial_text)
 
     def handle_key(self, key: int) -> bool:
+        """Feed one key to the bar.
+
+        Args:
+            key: ``curses`` key code.
+
+        Returns:
+            True when the bar consumed the key; False when inactive or for a
+            key it does not handle.
+        """
         if not self._active:
             return False
 
@@ -568,6 +648,13 @@ class IncrementalSearchBar:
 
     def get_display_string(self, prefix: str = '/', suffix: str = '',
                            cursor_char: str | None = None) -> str:
+        """The bar as one line: prefix, pattern and caret.
+
+        Args:
+            prefix: Leading marker, usually ``'/'``.
+            suffix: Trailing text for the caller's own decoration.
+            cursor_char: Caret to draw, or ``None`` for ``cursor_block``.
+        """
         if self._active:
             # Show cursor position with cursor_char (block by default for visibility).
             # The space after the prefix keeps the indicator readable; it also kept
@@ -611,12 +698,15 @@ class IncrementalSearchBar:
 
     @property
     def is_active(self) -> bool:
+        """True while the bar is accepting keys."""
         return self._active
 
     @property
     def text(self) -> str:
+        """The current pattern."""
         return self._text
 
     @property
     def cursor_pos(self) -> int:
+        """Caret position as a string index, not a display cell."""
         return self._cursor_pos

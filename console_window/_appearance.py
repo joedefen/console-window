@@ -68,7 +68,12 @@ class Appearance:
 
     @classmethod
     def set_colors_enabled(cls, enabled: bool) -> None:
-        """Turn semantic color on or off for the whole process."""
+        """Turn semantic color on or off for the whole process.
+
+        Args:
+            enabled: True to resolve roles to color pairs, False to resolve them
+                through :attr:`MONO_ROLES`.
+        """
         cls._COLORS_ENABLED = bool(enabled)
 
     @classmethod
@@ -113,6 +118,10 @@ class Appearance:
     @classmethod
     def semantic_attr(cls, pair_id: int) -> int:
         """Attribute for a :class:`Theme` role, or its monochrome fallback.
+
+        Args:
+            pair_id: A semantic pair id, e.g. ``Theme.DANGER`` or
+                ``Theme.HOTSWAP``; unknown ids degrade to plain text.
 
         With color off, or on a terminal that reports no color support, the
         role becomes an attribute from :attr:`MONO_ROLES`.  Otherwise both

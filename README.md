@@ -92,7 +92,13 @@ dialogs, messages, headers, themes, glyphs, read-only text, navigation
 ownership, suspend/resume, large bodies, and width/debug aids.
 [`docs/DEMO-APPS.md`](docs/DEMO-APPS.md) lists all seventeen, the feature each
 one owns, and the rule that a library feature change names its demo in the
-changelog.
+changelog. [`docs/API-USAGE.md`](docs/API-USAGE.md) counts how often each public
+entry point and method is used by the demos and by the applications in the
+sibling directories; regenerate it with
+`python tests/api_usage_report.py --write docs/API-USAGE.md`.
+[`docs/DEMO-GAPS.md`](docs/DEMO-GAPS.md) reads that report for the one thing it
+cannot decide by itself: which of the names no demo uses are real gaps and which
+are call sites the applications have not migrated to `Screen` yet.
 
 ### Running it
 

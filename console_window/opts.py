@@ -132,6 +132,17 @@ def _normalize_taken_nav_keys(raw: object) -> dict[int, str]:
 
 
 class ConsoleWindowOpts:
+    """Validated keyword options for :class:`ConsoleWindow`.
+
+    Every option is one of the ``__slots__`` names below; an unknown name
+    raises ``TypeError`` with a nearest-match hint.  Options omitted here keep
+    the defaults documented on the attributes.
+
+    Args:
+        **kwargs: Any subset of the slot names; see the attribute comments in
+            this class for meaning and defaults.
+    """
+
     __slots__ = ['answer_show_redraws', 'ascii', 'body_cols', 'body_rows',
                  'ctrl_c_terminates', 'demo_mode', 'dialog_abort', 'dialog_return',
                  'glyphs', 'glyphs_probe', 'head_line', 'head_rows',

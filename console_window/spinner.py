@@ -103,6 +103,7 @@ class OptionSpinner:
 
     @property
     def default_obj(self) -> object:
+        """The object option values are read from and written to."""
         return self._default_obj
 
     @default_obj.setter
@@ -147,7 +148,11 @@ class OptionSpinner:
         )
 
     def get_value(self, attr: str) -> object:
-        """Return the current value without mutating the application object."""
+        """Return the current value without mutating the application object.
+
+        Args:
+            attr: Option name, as registered.
+        """
         ns = self.attr_to_option.get(attr, None)
         if ns is None or ns.obj is None:
             return None
@@ -155,6 +160,9 @@ class OptionSpinner:
 
     def normalize(self, attr: str) -> object:
         """Initialize a missing option to its first value (or '' for a prompt).
+
+        Args:
+            attr: Option name, as registered.
 
         This is the only path that writes while an option is being registered;
         ordinary reads (help rendering, key handling) use get_value() and stay
@@ -459,6 +467,12 @@ class OptionSpinner:
         raise ValueError(f"scope must be None, int, or list/set, got {type(scope)}")
 
     def show_help_nav_keys(self, screen: Screen) -> None:
+        """Draw the navigation block for *screen* from the live window.
+
+        Args:
+            screen: Help screen being built; its window supplies the key lines,
+                so ``opts.taken_nav_keys`` is honored.
+        """
         # Render from the live window so its own opts.taken_nav_keys are
         # honored: keys the app owns are not advertised as navigation.
         for line in screen.win.nav_help_lines():
@@ -494,6 +508,12 @@ class OptionSpinner:
                 if num in getattr(ns, 'effective_scope', set())]
 
     def show_help_body(self, screen: Screen) -> None:
+        """Draw the option body for the screen this help page describes.
+
+        Args:
+            screen: Help screen being built; its ``help_subject()`` picks the
+                rows, so global and screen-scoped options are the ones listed.
+        """
         subject = self.help_subject(screen)
         if subject is None:
             # Nothing was pushed under the help: fall back to every option, so
@@ -794,6 +814,16 @@ class OptionSpinner:
             value, hint = answer, problem
 
     def do_key(self, key: int, win: ConsoleWindow) -> object | None:
+        """Resolve *key* to its option and produce the option's new value.
+
+        Args:
+            key: ``curses`` key code.
+            win: Window used by ``prompt`` options (``win.answer``).
+
+        Returns:
+            The new value; ``None`` when the key matches nothing or a prompt
+            dialog was aborted (the previous value is then left untouched).
+        """
         # Try scoped lookup first (if stack is available)
         ns = None
         current_screen = None

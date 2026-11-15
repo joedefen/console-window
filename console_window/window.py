@@ -328,6 +328,18 @@ def _register_atexit() -> None:
 
 
 class TerminalTooSmallError(RuntimeError):
+    """``answer()`` could not present its dialog because the terminal is small.
+
+    Distinct from ``answer()`` returning ``None`` (the user aborted); a
+    ``RuntimeError`` so the dialog's own recovery loop cannot swallow it.
+
+    Args:
+        required_rows: Rows the dialog needed.
+        required_cols: Columns the dialog needed.
+        actual_rows: Rows the terminal has.
+        actual_cols: Columns the terminal has.
+    """
+
     # answer() could not present its dialog because the terminal is below the
     # effective minimum (the floor or the one-time first-screen fit) or the
     # requested box size.  This is deliberately a
@@ -365,6 +377,7 @@ class _StopCurses:
     def __get__(self, obj: ConsoleWindow | None,
                 objtype: type[ConsoleWindow]) -> Callable[[], None]:
         def stop() -> None:
+            """Stop the window: suspend in singleton mode, tear down per instance."""
             # The descriptor lives in the class body, so it deliberately reaches
             # the implementation methods that must stay off the public surface.
             if obj is None:
@@ -471,7 +484,12 @@ class _ViewState:
 
     def set_pick_range(self, start_col: int | None = None,
                        end_col: int | None = None) -> None:
-        """Set the highlighted column range for *this* screen's picked row."""
+        """Set the highlighted column range for *this* screen's picked row.
+
+        Args:
+            start_col: First highlighted column; ``None`` clears the range.
+            end_col: Last highlighted column; ``None`` also clears it.
+        """
         self.pick_range = (None if start_col is None or end_col is None
                            else [start_col, end_col])
 
@@ -721,6 +739,12 @@ class ConsoleWindow:
         self.calc()  # also creates the viewport-sized pads
 
     def set_handled_keys(self, keys: object) -> None:
+        """Replace ``handled_keys`` from a spinner, an iterable, or neither.
+
+        Args:
+            keys: An object exposing ``.keys`` (an ``OptionSpinner``), a
+                ``set``/``list`` of key codes, or anything else for an empty set.
+        """
         if hasattr(keys, 'keys'):
             # It's an OptionSpinner or similar object
             self.handled_keys = set(keys.keys) if keys.keys else set()
@@ -754,6 +778,11 @@ class ConsoleWindow:
             self.handled_keys.difference_update(added)
 
     def set_demo_mode(self, enabled: bool | None) -> bool:
+        """Turn demo mode on or off and return the resulting state.
+
+        Args:
+            enabled: True/False to set it explicitly; ``None`` toggles.
+        """
         if enabled is None: # toggle if not explicit
             self.opts.demo_mode = not (self.opts.demo_mode)
         else:
@@ -795,6 +824,7 @@ class ConsoleWindow:
         return _key_label(key)
 
     def get_pad_width(self) -> int:
+        """Usable pad width: terminal width less one column, capped by ``body_cols``."""
         return min(self.cols-1, self.body_cols)
 
     # --- content and view indirection --------------------------------------
@@ -866,6 +896,7 @@ class ConsoleWindow:
 
     @pick_mode.setter
     def pick_mode(self, value: bool) -> None:
+        """Set the active screen's pick highlight."""
         self._view.pick_mode = bool(value)
 
     @property
@@ -875,6 +906,7 @@ class ConsoleWindow:
 
     @pick_pos.setter
     def pick_pos(self, value: int) -> None:
+        """Move the pick position on the active screen (not clamped here)."""
         self._view.pick_pos = value
 
     @property
@@ -884,6 +916,7 @@ class ConsoleWindow:
 
     @scroll_pos.setter
     def scroll_pos(self, value: int) -> None:
+        """Set the top visible body row (clamped on the next ``render()``)."""
         self._view.scroll_pos = value
 
     @property
@@ -893,6 +926,7 @@ class ConsoleWindow:
 
     @free_scroll.setter
     def free_scroll(self, value: bool) -> None:
+        """Detach the viewport from the picked row so the two move apart."""
         self._view.free_scroll = bool(value)
 
     @property
@@ -902,6 +936,7 @@ class ConsoleWindow:
 
     @pick_range.setter
     def pick_range(self, value: list[int] | None) -> None:
+        """``[start_col, end_col]`` to highlight on the picked row, or ``None``."""
         self._view.pick_range = value
 
     @property
@@ -915,7 +950,11 @@ class ConsoleWindow:
         return glyphs.is_ascii()
 
     def glyph(self, name: str) -> str:
-        """Return a registered glyph in the active set (see ``Glyphs.get``)."""
+        """Return a registered glyph in the active set (see ``Glyphs.get``).
+
+        Args:
+            name: Registered glyph name, e.g. ``'cursor'`` or ``'bullet'``.
+        """
         return glyphs.get(name)
 
     def _apply_glyph_mode(self) -> None:
@@ -997,6 +1036,7 @@ class ConsoleWindow:
 
     @property
     def rows_dropped(self) -> int:
+        """Rows dropped so far by the ``opts.max_rows`` ceiling (head + body)."""
         # Rows handed to add_body()/add_header() after that namespace reached
         # opts.max_rows (the only ceiling; None disables it).  body_rows and
         # head_rows are advisory hints and never drop anything.  This counter,
@@ -1030,6 +1070,7 @@ class ConsoleWindow:
             self._is_pickable, self.body.row_cnt, start_pos, count, direction)
 
     def get_picked_context(self) -> Context | None:
+        """The :class:`Context` of the picked row, or None when not picking."""
         if not self.pick_mode:
             return None
         if self.pick_pos < 0 or self.pick_pos >= len(self.body.contexts):
@@ -1063,10 +1104,12 @@ class ConsoleWindow:
 
     @staticmethod
     def get_nav_keys_blurb() -> str:
+        """Legacy multi-line navigation blurb for the default key set."""
         return ConsoleWindow.nav_keys
 
     @staticmethod
     def get_nav_key_lines() -> tuple[str, ...]:
+        """The legacy navigation lines, for a window without per-instance keys."""
         return NAV_KEY_LINES
 
     def nav_help_lines(self) -> tuple[str, ...]:
@@ -1243,6 +1286,15 @@ class ConsoleWindow:
 
     @classmethod
     def start_curses(cls, backend: RenderBackend | None = None) -> CursesSurface:
+        """Start (or resume) the process screen and return its surface.
+
+        Args:
+            backend: Backend that creates the screen; ignored when a suspended
+                singleton screen is resumed, since the screen owns its backend.
+
+        Returns:
+            The surface the window should draw through.
+        """
         # Legacy class-level entry point: in singleton mode it shares the one
         # process screen rather than starting a second terminal session.  When
         # windows were suspended by stop_curses()/suspend_curses(), this is the
@@ -1359,6 +1411,10 @@ class ConsoleWindow:
     def set_pick_range(self, start_col: int | None = None, end_col: int | None = None) -> None:
         """Set the pick column range on the *current* screen.
 
+        Args:
+            start_col: First highlighted column; ``None`` clears the range.
+            end_col: Last highlighted column; ``None`` also clears it.
+
         Kept on the window for 4.x compatibility; it no longer writes
         ``opts.pick_range``, so two screens can hold different ranges.
         """
@@ -1435,10 +1491,16 @@ class ConsoleWindow:
 
     @classmethod
     def active_windows(cls) -> list[ConsoleWindow]:
+        """Every live window, in creation order."""
         return list(_WINDOWS.values())
 
     @classmethod
     def primary_window(cls) -> ConsoleWindow | None:
+        """The window process-level helpers act on, or None if none exist.
+
+        Singleton mode returns the registered ``static_win``; per-instance mode
+        returns the most recently created window.
+        """
         # Singleton mode restores the old "the last constructed window is the
         # active one" pointer; per-instance mode keeps the creation-order rule.
         if _SINGLETON_MODE:
@@ -1471,6 +1533,12 @@ class ConsoleWindow:
                     pass
 
     def calc(self) -> bool:
+        """Recompute dimensions and viewport sizes.
+
+        Returns:
+            True when the terminal size changed since the previous call, i.e.
+            when a full repaint is warranted.
+        """
         same = self._set_screen_dims()
         self._sync_pad_geometry()
         self.head.view_cnt = min(self.rows - self.hor_line_cnt, self.head.row_cnt)
@@ -1950,6 +2018,11 @@ class ConsoleWindow:
         return geometry.calc_indicator(pos, pos0, pos9, ind0, ind9, self.max_scroll_pos)
 
     def render(self, redraw: bool = False) -> None:
+        """Draw one frame, retrying briefly on ``curses.error``.
+
+        Args:
+            redraw: Force a full pad repaint instead of incremental updates.
+        """
         deadline = time.monotonic() + ConsoleWindow.render_retry_seconds
         while time.monotonic() < deadline:
             try:
@@ -1975,6 +2048,14 @@ class ConsoleWindow:
 
 
     def fix_positions(self, delta: int = 0) -> int:
+        """Clamp pick/scroll positions after a move.
+
+        Args:
+            delta: Rows to shift the viewport (and pick position) by.
+
+        Returns:
+            Columns of pick gutter to reserve, 0 when pick mode is off.
+        """
         self.calc()
 
         # Save old pick position to check for abut constraints before applying delta
@@ -2130,6 +2211,11 @@ class ConsoleWindow:
             self.scroll_pos = min(self.scroll_pos, max_scroll)
 
     def render_once(self, redraw: bool = False) -> None:
+        """Paint one frame, without the retry loop ``render()`` adds.
+
+        Args:
+            redraw: Mark the pads for a full repaint before drawing.
+        """
         # --- 1. Preparation and Conditional Redrawwin ---
         if redraw:
             self._mark_pads_for_redraw()
@@ -2855,6 +2941,14 @@ class ConsoleWindow:
 
     def alert(self, message: str = '', title: str = 'ALERT',
               _height: int | None = None, _width: int | None = None) -> None:
+        """Show a modal, scrollable message box until ENTER.
+
+        Args:
+            message: Body text; wrapped, and scrollable when it overflows.
+            title: Box title; a title too wide for the border moves inside.
+            _height: Content rows to cap the box at, or ``None`` for the full box.
+            _width: Content columns to cap the box at, or ``None`` for the full box.
+        """
         # Modal, scrollable message box.  Content taller than the box is
         # reachable with the usual navigation keys (j/k, arrows, PageUp/Down,
         # Home/End, Space); ENTER acknowledges and returns.  Everything is drawn
@@ -3268,6 +3362,14 @@ class ConsoleWindow:
         return self._finish_prompt_move(key, pos, was_pos, scroll_adjustment)
 
     def prompt(self, seconds: float = 1.0) -> int | None:
+        """Wait up to *seconds* for a key this window represents.
+
+        Args:
+            seconds: How long to wait before giving up.
+
+        Returns:
+            The key code, or ``None`` on timeout.
+        """
         # Enforce the minimum before blocking.  The first prompt after the first
         # render is where the one-time content fit is applied, and every later
         # call re-checks in case the terminal changed between waits.

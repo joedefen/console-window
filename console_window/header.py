@@ -14,6 +14,14 @@ SEARCH = 'search'
 
 
 class Span(NamedTuple):
+    """One run of header text plus the role used to style it.
+
+    Args:
+        text: Literal text of the run.
+        role: One of the module-level role constants (``PLAIN``, ``KEY``,
+            ``LABEL``, ``SEARCH``); mapped to an attribute at draw time.
+    """
+
     text: str
     role: str = PLAIN
 
@@ -46,7 +54,12 @@ class HeaderLine:
         return self._add(s, PLAIN)
 
     def key(self, k: str, display: str | None = None) -> HeaderLine:
-        """Append a ``KEY`` span; *display* overrides the text shown."""
+        """Append a ``KEY`` span.
+
+        Args:
+            k: Key name; also the text drawn when *display* is omitted.
+            display: Text to draw instead of *k*.
+        """
         return self._add(display if display is not None else k, KEY)
 
     def bracket_key(self, k: str) -> HeaderLine:
@@ -64,7 +77,12 @@ class HeaderLine:
         return self._add(s, LABEL)
 
     def search(self, pattern: str, prefix: str = '/') -> HeaderLine:
-        """Append ``prefix + pattern`` as one ``SEARCH`` span."""
+        """Append ``prefix + pattern`` as one ``SEARCH`` span.
+
+        Args:
+            pattern: The search text.
+            prefix: Marker placed before *pattern*, usually ``'/'``.
+        """
         return self._add(prefix + pattern, SEARCH)
 
     def extend(self, other: HeaderLine) -> HeaderLine:

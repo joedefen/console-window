@@ -84,12 +84,26 @@ class Screen(_ViewState):
 
     def add_header(self, text: str, attr: int | None = None, resume: bool = False,
                    context: Context | None = None) -> None:
-        """Append one header row (or resume the current one, on the same row)."""
+        """Append one header row (or resume the current one, on the same row).
+
+        Args:
+            text: Row text, written verbatim.
+            attr: Row attribute, or ``None`` for the plain/role default.
+            resume: Continue the current row instead of starting a new one.
+            context: Pick metadata for the row, or ``None``.
+        """
         self.win._add(self.head, text, attr, resume, context, is_body=False)
 
     def add_body(self, text: str, attr: int | None = None, resume: bool = False,
                  context: Context | None = None) -> None:
-        """Append one body row (or resume the current one, on the same row)."""
+        """Append one body row (or resume the current one, on the same row).
+
+        Args:
+            text: Row text, written verbatim.
+            attr: Row attribute, or ``None`` for the plain default.
+            resume: Continue the current row instead of starting a new one.
+            context: Pick metadata (genre, pickable, abut), or ``None``.
+        """
         self.win._add(self.body, text, attr, resume, context, is_body=True)
 
     def add_fancy_header(self, line: str | HeaderLine, mode: str = 'Underline',
@@ -190,12 +204,22 @@ class Screen(_ViewState):
 
     def add_prompt_header(self, attr: int | None = None,
                           align: str | None = None) -> bool:
-        """Draw the active in-place prompt as a header row; False if inactive."""
+        """Draw the active in-place prompt as a header row; False if inactive.
+
+        Args:
+            attr: Row attribute, or ``None`` for the window's prompt default.
+            align: ``'center'`` centers the composed line; ``None`` left-aligns.
+        """
         return self.win._add_prompt_header(self.head, attr, align)
 
     def add_prompt_lines(self, attr: int | None = None,
                          hint_attr: int | None = None) -> bool:
-        """Draw the active in-place prompt and hint as transient body rows."""
+        """Draw the active in-place prompt and hint as transient body rows.
+
+        Args:
+            attr: Attribute for the prompt row, or ``None`` for the default.
+            hint_attr: Attribute for the hint row, or ``None`` for its default.
+        """
         return self.win._add_prompt_lines(self.body, attr, hint_attr)
 
     def clear(self) -> None:
@@ -214,7 +238,7 @@ class Screen(_ViewState):
         self.reset()
 
     def draw_screen(self) -> None:
-        pass
+        """Draw this screen's content.  Override; the base draws nothing."""
 
     def extra_help_paragraphs(self) -> Iterable[str]:
         """Paragraphs appended to this screen's help output, if it draws any.
@@ -227,12 +251,15 @@ class Screen(_ViewState):
         return ()
 
     def on_pause(self) -> bool:
+        """Veto hook for being covered by a push; False refuses the push."""
         return not self.cannot_stack_me
 
     def on_resume(self) -> bool:
+        """Veto hook for becoming current again on pop; False refuses the pop."""
         return True
 
     def on_pop(self) -> bool:
+        """Notification that this screen is being removed; the return is ignored."""
         return True
 
     def get_spinner(self) -> OptionSpinner | None:
@@ -246,6 +273,11 @@ class Screen(_ViewState):
         return None if stack is None else getattr(stack, 'spinner', None)
 
     def handle_action(self, action_name: str) -> bool:
+        """Call ``<action_name>_ACTION`` if it exists; False when there is none.
+
+        Args:
+            action_name: Bare action name, without the ``_ACTION`` suffix.
+        """
         method_name = f'{action_name}_ACTION'
         method = getattr(self, method_name, None)
         if method and callable(method):
@@ -265,6 +297,14 @@ class Screen(_ViewState):
 
 
 class ScreenStack:
+    """Screen numbers plus the objects behind them, with push/pop validation.
+
+    Screens are numbered in declaration order, ``HOME_ST`` (0) first.  A move
+    can be refused by the outgoing screen's ``on_pause()``, the incoming
+    screen's ``come_from_whitelist``/``is_terminal``, or a repeat push.
+    ``curr`` is the live frame, and every owned ``Screen`` points back here.
+    """
+
     def __init__(self, win: ConsoleWindow, spins_obj: object, screens: tuple,
                  screen_objects: dict[int, Screen] | None = None) -> None:
         self.win = win
@@ -315,6 +355,17 @@ class ScreenStack:
 
     def push(self, screen: int | str | Screen, prev_pos: int | None = None,
              force: bool = False) -> int | None:
+        """Make *screen* current after the validation hooks.
+
+        Args:
+            screen: Screen number, screen name, or ``Screen`` object.
+            prev_pos: Row the parent wants restored on pop; defaults to the
+                window's current pick position.
+            force: Skip the loop, whitelist and ``on_pause()`` checks.
+
+        Returns:
+            0 when the push happened, ``None`` when a hook refused it.
+        """
         screen = self._screen_index(screen)
         if prev_pos is None:
             prev_pos = self.win.pick_pos
@@ -380,11 +431,20 @@ class ScreenStack:
         return view
 
     def get_curr_obj(self) -> Screen | None:
+        """The ``Screen`` for the current frame, or None for bare-number stacks."""
         if self.curr:
             return self.screen_objects.get(self.curr.num, None)
         return None
 
     def pop(self, force: bool = False) -> int | None:
+        """Pop the current frame and report where the parent wants to be.
+
+        Args:
+            force: Skip ``on_pop()``/``on_resume()``, so no veto is honored.
+
+        Returns:
+            The restored frame's ``prev_pos``, or ``None`` on the home screen.
+        """
         if not self.stack:
             return None
 
@@ -411,6 +471,11 @@ class ScreenStack:
         return self.curr.prev_pos
 
     def is_curr(self, screens: int | str | list | tuple | set) -> bool:
+        """True when the current screen is (one of) *screens*.
+
+        Args:
+            screens: A screen number, a screen name, or an iterable of either.
+        """
         curr = self.curr
         if curr is None:
             return False
@@ -440,6 +505,16 @@ class ScreenStack:
         return bool(val) and (screens is None or self.is_curr(screens))
 
     def perform_actions(self, spinner: OptionSpinner) -> int:
+        """Run the ``*_ACTION`` handlers whose flags are set, then clear them.
+
+        Args:
+            spinner: Supplies the action options; each option's ``obj`` holds
+                its flag, and ``effective_scope`` (when present) restricts the
+                action to the listed screens.
+
+        Returns:
+            How many handlers were called.
+        """
         if self.curr is None:
             return 0
         current_screen = self.screen_objects.get(self.curr.num)
@@ -481,6 +556,16 @@ class ScreenStack:
 
 
 class BasicHelpScreen(Screen):
+    """Help page: navigation keys, the spinner's option body, notes, fonts.
+
+    Content comes from the injected spinner
+    (``show_help_nav_keys()``/``show_help_body()``), the app's
+    ``extra_help_paragraphs()``, and the built-in font check.  Each section's
+    separator, bullet and visibility are class attributes, so a subclass
+    overrides them rather than the draw method; ``is_help_screen`` tells the
+    window that this page describes the screen it was pushed from.
+    """
+
     #: The help body describes the screen this one was pushed from, not itself.
     is_help_screen = True
     #: Per-screen override of ``ConsoleWindowOpts(help_fonts=...)``: ``None``
@@ -509,6 +594,7 @@ class BasicHelpScreen(Screen):
     notes_bullet = ' \u25c6 '
 
     def draw_screen(self) -> None:
+        """Draw the whole page; pick mode is off because nothing here is pickable."""
         # The screen draws itself: pick mode is its own, and every writer below
         # targets this screen's content, so no window handle is resolved here.
         self.set_pick_mode(False)
@@ -628,7 +714,12 @@ class BasicTextScreen(Screen):
 
     def set_text(self, lines: Iterable[_LineItem] = (),
                  head: _HeadSpec = ()) -> None:
-        """Replace the screen's content.  Safe before or after the first draw."""
+        """Replace the screen's content.  Safe before or after the first draw.
+
+        Args:
+            lines: ``str`` items, or ``(text, attr)`` pairs.
+            head: A ``str``, a :class:`HeaderLine`, or an iterable of either.
+        """
         self._lines = [self._normalize_line(item) for item in (lines or ())]
         self._heads = self._normalize_heads(head)
 
@@ -648,6 +739,7 @@ class BasicTextScreen(Screen):
         return list(head)
 
     def draw_screen(self) -> None:
+        """Draw the heads first, then the content rows in order."""
         self.set_pick_mode(False)
         for head_item in self._heads:
             if isinstance(head_item, HeaderLine):

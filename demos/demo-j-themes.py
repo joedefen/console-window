@@ -2,7 +2,7 @@
 """J — Themes and appearance.
 
 Owns: theme-picker, theme-store, per-window-theme, mono-theme, semantic-attrs,
-      theme-captions
+      runtime-color-switch, theme-captions
 Base: c-options
 Run:  ./demos/run-demo j-themes
 
@@ -15,6 +15,13 @@ bold/reverse attribute hierarchy.
 The host's ``captions=`` mapping renames one role, and ``store=`` remembers the
 last choice for the next start.  Body rows use ``Appearance.semantic_attr()``,
 so the same rows degrade correctly under ``mono``.
+
+``C`` is the other route to that switch: it calls
+``Appearance.set_colors_enabled()`` itself, the way an application that parses
+its own ``--no-color`` does after its argument handling.  The header reads
+``Appearance.colors_enabled()`` back, so the rows lose their hue while the
+theme name stays put.  ``t`` afterwards resynchronizes the two, because
+``Theme.set_active()`` owns the switch whenever a theme is applied.
 
 ``t`` cycles the window's theme without leaving the table; the header names the
 theme it lands on and the choice is saved.  ``T`` opens the picker, where ``t``
@@ -59,13 +66,16 @@ class ThemeMainScreen(DemoScreen):
 
     def draw_screen(self) -> None:
         self.set_pick_mode(False)
+        colors = 'on' if Appearance.colors_enabled() else 'off'
         self.add_fancy_header(
-            f'J-themes  [t]heme={Theme.theme_of(self.win)}  '
+            f'J-themes  [t]heme={Theme.theme_of(self.win)}  [C]olor={colors}  '
             f'[T]hemeScreen  [?]:help  [q]uit',
             mode='Underline',
             line_attr=cs.A_NORMAL,
         )
         self.add_header('Note: role rows use Appearance.semantic_attr()', attr=cs.A_DIM)
+        self.add_header(f'switch: colors_enabled() -> {colors}',
+                        attr=Appearance.semantic_attr(Theme.EMPHASIS))
         for index, row in enumerate(self.app.rows[:40]):
             role = self.SEMANTIC_ROLES[index % len(self.SEMANTIC_ROLES)]
             self.add_body(row_line(row, self.app.iteration),
@@ -79,6 +89,10 @@ class ThemeMainScreen(DemoScreen):
         """``t``: advance this window's theme without opening the picker."""
         self.app.cycle_theme()
 
+    def cycle_color_ACTION(self) -> None:
+        """``C``: flip semantic color without touching the theme."""
+        Appearance.set_colors_enabled(not Appearance.colors_enabled())
+
 
 class ThemeApp(DemoApp):
     title = 'J-themes'
@@ -88,6 +102,12 @@ class ThemeApp(DemoApp):
         'swatches show what each semantic role looks like.',
         'The theme list ends with mono.  It uses the terminal colors and a '
         'bold/reverse attribute hierarchy; a palette turns color back on.',
+        'C is the low-level route: it flips the process-wide switch itself '
+        '(Appearance.set_colors_enabled()) and leaves the theme alone, which is '
+        'what an application does when it parses its own --no-color.  The rows '
+        'swap hue for bold/reverse while the theme name stays put; the next t '
+        'resynchronizes them, because Theme.set_active() owns the switch '
+        'whenever a theme is applied.',
         'The picker remembers the last choice through its ThemeStore.  The '
         'table churns once every five seconds, so the color change is the only '
         'motion on screen.',
@@ -121,6 +141,11 @@ class ThemeApp(DemoApp):
         spin.add_key('cycle_theme', 't - cycle theme', keys=[ord('t')],
                      genre='action', scope={MAIN_ST},
                      comments='Applies to this window and remembers the choice.')
+        spin.add_key('cycle_color', 'C - color on/off', keys=[ord('C')],
+                     genre='action', scope={MAIN_ST},
+                     comments='Flips Appearance.set_colors_enabled() without '
+                              'changing the theme; the rows swap hue for the '
+                              'mono hierarchy.')
         spin.add_key('theme_screen', 'T - theme screen', keys=[ord('T')],
                      genre='action', scope={MAIN_ST},
                      comments='The picker shows every semantic role as a swatch.')

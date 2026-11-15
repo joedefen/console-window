@@ -150,6 +150,63 @@ def test_opts_defaults():
     assert opts.min_cols_rows == (20, 5)
 
 
+def _public_routines():
+    """``(owner, name, routine)`` for every public routine on an exported symbol.
+
+    Each routine is reported once, under the class it is defined on, so an
+    inherited method does not have to be documented three times.  Properties
+    are skipped by construction: an unbound ``property`` is not a routine, so a
+    documented getter also covers its setter.
+    """
+    import inspect
+    pkg = importlib.import_module('console_window')
+    seen = set()
+    for name in PUBLIC_NAMES:
+        obj = getattr(pkg, name)
+        if not isinstance(obj, type):
+            continue
+        for member_name, member in inspect.getmembers(obj, inspect.isroutine):
+            if member_name.startswith('_'):
+                continue
+            key = getattr(member, '__qualname__', f'{name}.{member_name}')
+            if key in seen:
+                continue
+            seen.add(key)
+            if getattr(member, '__module__', None) == 'builtins':
+                continue  # tuple.index and friends are not our API
+            yield name, member_name, member
+
+
+def test_public_routines_have_docstrings():
+    # Modest bar: a one-line reminder is enough, but silence is not.  New
+    # public API must document itself as it lands, not in a later sweep.
+    undocumented = [f'{owner}.{name}' for owner, name, fn in _public_routines()
+                    if not (fn.__doc__ or '').strip()]
+    assert not undocumented, f'undocumented public API: {undocumented}'
+
+
+def test_documented_public_routines_list_their_args():
+    import inspect
+    offenders = []
+    for owner, name, fn in _public_routines():
+        doc = (fn.__doc__ or '').strip()
+        try:
+            params = [p for p in inspect.signature(fn).parameters
+                      if p not in ('self', 'cls')]
+        except (TypeError, ValueError):  # pragma: no cover - builtins
+            continue
+        # A summary line is enough for one argument, and prose that already
+        # explains the arguments counts too.  The gap this guards is a bare
+        # one-liner on a multi-argument method, where nothing says which is which.
+        lines = [line for line in doc.splitlines() if line.strip()]
+        if len(params) < 2 or len(lines) > 1:
+            continue
+        if 'args:' in doc.lower() or all(param in doc for param in params):
+            continue
+        offenders.append(f'{owner}.{name}({", ".join(params)})')
+    assert not offenders, f'public API without arg descriptions: {offenders}'
+
+
 @pytest.mark.parametrize('bad', [
     (0, 5),
     (20, 0),
