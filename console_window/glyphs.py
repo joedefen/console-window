@@ -38,8 +38,8 @@ in the terminal, and appending a variation selector cannot change that.  The
 ASCII spelling is two cells as well, so ``--ascii`` (or a terminal with no emoji
 font) never moves the columns around a mark.  :func:`mark` is the accessor and
 :func:`find_issues` is the development-time check that reports VS16-promoted,
-Ambiguous and unapproved marks in a string.  ``docs/Emoji-support.md`` is the
-long form, including why the bold-looking text symbols are the unsafe ones.
+Ambiguous and unapproved marks in a string, including why the bold-looking text
+symbols are the unsafe ones.
 
 Degrading for free
 ------------------
@@ -356,9 +356,9 @@ MARK_GROUP = 'badges'
 def validate_mark(spec: SafeMark) -> None:
     """Raise unless *spec* is a width-safe mark.
 
-    The rules are the ones in ``docs/Emoji-support.md``: a single ``EAW=W`` code
-    point, two cells in this model, two cells with a variation selector appended,
-    and a plain-ASCII fallback that is also two cells.  They are checked because
+    The rules: a single ``EAW=W`` code point, two cells in this model, two cells
+    with a variation selector appended, and a plain-ASCII fallback that is also
+    two cells.  They are checked because
     a violation is invisible -- the terminal draws something, at a width the row
     was not measured for.
     """
@@ -830,7 +830,7 @@ def _sequence_offsets(text: str) -> set[int]:
 def find_issues(text: str) -> list[Issue]:
     """Report decoration in *text* whose width the row was not measured for.
 
-    Four verdicts, one per failure mode in ``docs/Emoji-support.md``:
+    Four verdicts, one per failure mode:
 
     * ``vs16`` -- a code point whose width depends on whether the terminal
       honors a variation selector (``⚠`` becomes two cells with ``U+FE0F``);

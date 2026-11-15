@@ -1,11 +1,60 @@
 # console-window: working on the source tree
 
 This is the developer companion to [`README.md`](../README.md), which documents
-the library for its users. Here we document the two things a maintainer needs
-and a user does not: the **test gate** and the **release gate** (`./bless`).
+the library for its users. Here we document the things a maintainer needs and a
+user does not: running the **lettered demos** from the working tree, the
+**test gate**, and the **release gate** (`./bless`).
 
 This file lives in `tests/`, so its links point one directory up. The commands
 assume the repository root, which is where the gate has to be run.
+
+## Running the demos from the working tree
+
+The demos run directly against your working tree — no install or build step
+required:
+
+    ./runner                     # the lettered menu from demos/demos.ini
+    ./demos/run-demo a-basic     # one demo, by short name
+
+A, B and C are complete single-file programs; D–Q are short deltas on
+`demos/demo_kit.py`. The demos are interactive and need a real terminal (any
+POSIX box). They are repo-level scripts, **not** part of the installed package:
+after `pip install console-window` you write your own `main()` — copy C, the
+boilerplate (stack + spinner + help).
+
+Every demo takes the same display switches:
+
+    ./demos/run-demo a-basic --ascii
+    ./demos/run-demo j-themes --theme nord
+    NO_COLOR=1 ./demos/run-demo j-themes   # same as --theme mono
+
+`mono` is a real theme, not a separate color flag. It uses the terminal's own
+foreground and background plus a bold/reverse attribute hierarchy, so it follows
+a light or dark terminal automatically. `NO_COLOR` selects it for a run when no
+explicit `--theme` is given.
+
+### The demo curriculum
+
+The canonical examples are the demos in [`../demos/`](../demos). They form a
+curriculum, not one app with every feature:
+
+* **A — [`a-basic`](../demos/demo-a-basic.py)** is the degenerate showcase: one
+  `Screen`, one table, and the four-call loop, with no stack, spinner or help.
+  Navigation scrolls the body; live data changes one row each pass.
+* **B — [`b-stack`](../demos/demo-b-stack.py)** is the second degenerate step: two
+  pages on a `ScreenStack`, still with no spinner and no help. Each screen keeps
+  its own content and scroll position.
+* **C — [`c-options`](../demos/demo-c-options.py)** is the **boilerplate**: a
+  `ScreenStack`, an `OptionSpinner` and a `BasicHelpScreen`, plus the smallest
+  set of options that still shows every genre. Copy this file to start an app.
+
+D through P each add one focused lesson on top of that shape, and they all keep
+it -- every one has a help page, and its keys are spinner registrations, so the
+help page lists them (a test enforces both): picking, search, in-place prompts,
+dialogs, messages, headers, themes, glyphs, read-only text, navigation
+ownership, suspend/resume, large bodies, and width/debug aids. Each demo's
+`Owns:` docstring line records the learning objectives it demonstrates, and a
+library feature change names its demo in the changelog.
 
 ## Layout and single sources of truth
 
@@ -207,6 +256,43 @@ pushes at the tagged commit: one branch with `["main"]`, the pair with
 `["main", "dev"]`. Everything else about the release is one of the stages above,
 and the shared half lives in
 [`blessd/docs/release-strategy.md`](../../blessd/docs/release-strategy.md).
+
+## Future features and considerations
+
+Deferred or out-of-repo work, recorded here so no separate plan document is
+needed:
+
+* **Modal layers and help.** `IncrementalSearchBar` consumes printable keys
+  inside `handle_key()` and outranks the spinner while it is active. It is a
+  layer, not a screen, so it has no `effective_scope`, and the help screen is
+  unreachable underneath it. Two options were identified: list the bar's keys in
+  a separate "while typing" block on the help page, or have the bar take its
+  keys from the current screen's spinner set so the two cannot diverge.
+* **External app ports to the 3.0 `Screen` shape.** `nanny` and `psistat` live
+  outside this repository. Their required changes are the same: drop the
+  `_draw_separator_and_indicator` monkey-patch (`head_line=False` now has no
+  side effects), replace `draw(y, x, ...)` with composed `add_body()` segments
+  (column padding via `textwidth`), replace `_set_body_context()` with
+  `add_body(..., context=ctx)`, drop the `body.drawn[row] = []` resets, and
+  start each pass with `screen.clear()`.
+* **Status with no separator row.** With `head_line=False` there is no separator
+  row, so `status()` stores the message and warns once per episode instead of
+  painting it. Drawing it on the last header row remains a possible later
+  addition if an application asks for it.
+* **Dropping the scroll indicator while keeping the rule.** `head_line=True`
+  paints the separator row and the scroll indicator together, so an application
+  that keeps the rule cannot turn the indicator off. Nothing needs that today; a
+  `scroll_indicator` option would be the way to add it.
+* **Two-cell emoji marks: deliberate limits.** The approved `mark()` family is
+  width-safe but stops short of: colour/presentation control (a mark renders in
+  whatever colour the terminal chooses; `--theme mono` and attributes are the
+  answer), ZWJ sequences and flag pairs (variable width, no safe fallback), and
+  per-terminal emoji probing (not observable, so the font check and `--ascii`
+  are the whole story). Content is never rewritten: `transliterate()` touches
+  only registered code points, and the marks family does not change that. The
+  two-cell table needs one colour emoji font from mid-2019 or later, and no
+  single font covers both the one-cell catalog and the marks, which is why the
+  fallback is one switch.
 
 ## Notes on this adoption
 

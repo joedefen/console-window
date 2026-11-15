@@ -33,27 +33,12 @@ Install the package via `pip`:
 pip install console-window
 ```
 
-## Running the Demos (from source)
+## Development
 
-For development, the demos run directly against your working tree — no install or build step required:
-
-```bash
-./runner                     # the lettered menu from demos/demos.ini
-./demos/run-demo a-basic     # one demo, by short name
-./demos/run-demo features    # the feature -> demo owner map
-```
-
-A, B and C are complete single-file programs; D–Q are short deltas on `demos/demo_kit.py`. The full curriculum, feature ownership and change rule are in [`docs/DEMO-APPS.md`](docs/DEMO-APPS.md).
-
-Every demo takes the same display switches:
-
-```bash
-./demos/run-demo a-basic --ascii
-./demos/run-demo j-themes --theme nord
-NO_COLOR=1 ./demos/run-demo j-themes   # same as --theme mono
-```
-
-`mono` is a real theme, not a separate color flag. It uses the terminal's own foreground and background plus a bold/reverse attribute hierarchy, so it follows a light or dark terminal automatically. `NO_COLOR` selects it for a run when no explicit `--theme` is given.
+Working on `console-window` itself — running the lettered demos, the demo
+curriculum, the test gate and the release gate — is covered in
+[`tests/README-DEV.md`](tests/README-DEV.md). None of it is needed to use the
+installed package.
 
 ## Core Features (The "Secret Sauce")
 
@@ -70,47 +55,7 @@ The wrapper handles several advanced terminal interaction patterns automatically
   * **Dynamic Options Management (`OptionSpinner`):** The companion class simplifies creation of application settings, allowing users to **cycle values** or input strings using single keypresses (e.g., a theme name, or a validated free-text range).
   * **Blocking Popups:** Includes fully implemented, blocking pop-up methods for user input (`.answer()`) and alerts (`.alert()`), handling the necessary temporary screen takeover and cursor management.
 
-## Worked Example: the lettered demos
-
-The canonical examples are the demos in [`demos/`](demos). They form a
-curriculum, not one app with every feature:
-
-* **A — [`a-basic`](demos/demo-a-basic.py)** is the degenerate showcase: one
-  `Screen`, one table, and the four-call loop, with no stack, spinner or help.
-  Navigation scrolls the body; live data changes one row each pass.
-* **B — [`b-stack`](demos/demo-b-stack.py)** is the second degenerate step: two
-  pages on a `ScreenStack`, still with no spinner and no help. Each screen keeps
-  its own content and scroll position.
-* **C — [`c-options`](demos/demo-c-options.py)** is the **boilerplate**: a
-  `ScreenStack`, an `OptionSpinner` and a `BasicHelpScreen`, plus the smallest
-  set of options that still shows every genre. Copy this file to start an app.
-
-D through P each add one focused lesson on top of that shape, and they all keep
-it -- every one has a help page, and its keys are spinner registrations, so the
-help page lists them (a test enforces both): picking, search, in-place prompts,
-dialogs, messages, headers, themes, glyphs, read-only text, navigation
-ownership, suspend/resume, large bodies, and width/debug aids.
-[`docs/DEMO-APPS.md`](docs/DEMO-APPS.md) lists all seventeen, the feature each
-one owns, and the rule that a library feature change names its demo in the
-changelog. [`docs/API-USAGE.md`](docs/API-USAGE.md) counts how often each public
-entry point and method is used by the demos and by the applications in the
-sibling directories; regenerate it with
-`python tests/api_usage_report.py --write docs/API-USAGE.md`.
-[`docs/DEMO-GAPS.md`](docs/DEMO-GAPS.md) reads that report for the one thing it
-cannot decide by itself: which of the names no demo uses are real gaps and which
-are call sites the applications have not migrated to `Screen` yet.
-
-### Running it
-
-```bash
-./runner                 # menu
-./demos/run-demo a-basic # one demo
-```
-
-The demos are interactive and need a real terminal (any POSIX box). They are
-repo-level scripts, **not** part of the installed package: after
-`pip install console-window` you write your own `main()` — copy C, the
-boilerplate (stack + spinner + help), or start from the minimal loop below.
+## Usage
 
 ### The shape of every app
 
@@ -294,8 +239,8 @@ The UI is built around non-ASCII symbols (`│`, `➤`, `█`, `⬅`, `➡`, `·
   did not register, with the exact `register()` call to add.
 
 * **A catalog to choose from.** The registry carries about eighty named symbols, grouped as UI marks, frames, arrows, triangles, filled/hollow shape pairs, blocks and bars, marks, math, currency and typography. Every one is a single cell wide and is covered by the default monospace font on Debian, Ubuntu and Fedora (DejaVu Sans Mono), so it is safe to use without a patched font: no emoji, no icon fonts. `Glyphs.catalog()` returns the set in the active spelling and `Glyphs.catalog_rows(width)` packs it into display rows; the theme picker page prints all of them, so that page doubles as the font check. `Glyphs.catalog_entries()` adds the name and family (`Glyphs.group_of('infinity')` is `'math'`) for a table or a grouped listing, and `Glyphs.lookup()` returns the whole `Glyph`. A character has exactly one fallback even when two names draw it (`cursor_block` and `swatch` are the same block).
-* **Two-cell marks, on purpose.** Some rows need a mark that is *seen*: a status column, a prompt badge. `Glyphs.marks()` is a small approved family (39 emoji) whose contract is width, not beauty: every entry is a single East-Asian-Width `W` code point, so it measures two cells in this library and in the terminal, and appending a variation selector cannot change that. `Glyphs.mark('ok')` returns the emoji, or its two-cell ASCII fallback after `--ascii`, so switching modes never moves a column; a name outside the family raises `KeyError`. `Glyphs.find_issues(text)` reports the four ways a mark is unsafe (VS16-promoted, zero-width joiner, East-Asian Ambiguous, unapproved) and says what to use instead, which is the quickest development-time check for a prompt or a table. The one-cell catalog above still promises no emoji; this is a separate family, designed in [`docs/Emoji-support.md`](docs/Emoji-support.md).
-* **The font bill for both families, checked on the help page.** The one-cell catalog is covered by the stock monospace face: all 80 names (78 distinct characters) are in DejaVu Sans Mono, each at exactly the font's cell advance, so "no patched font, no icon fonts" is measured, not hoped for. The two-cell family needs one colour emoji font — Noto Color Emoji, Apple Color Emoji or Segoe UI Emoji — from mid-2019 or later: 🧲 is Emoji 11 (2018) and 🟢/🟡 are Emoji 12 (2019), everything else dates from 2016 or earlier. No single font covers both (DejaVu Sans Mono has none of the marks; Noto Color Emoji has 13 of the 78 glyphs), which is why the fallback is one switch rather than per-app font code. Every help page now draws the whole catalog and every mark with the unconditional advice to install those two families; `ConsoleWindowOpts(help_fonts='once' | 'always' | 'never')` decides how often (default `'once'`, the first help page the window shows), and a symbol registered by the app is checked against its family at registration time and named on the page if the font lacks it. The measurements are in §5.4 of [`docs/Emoji-support.md`](docs/Emoji-support.md).
+* **Two-cell marks, on purpose.** Some rows need a mark that is *seen*: a status column, a prompt badge. `Glyphs.marks()` is a small approved family (39 emoji) whose contract is width, not beauty: every entry is a single East-Asian-Width `W` code point, so it measures two cells in this library and in the terminal, and appending a variation selector cannot change that. `Glyphs.mark('ok')` returns the emoji, or its two-cell ASCII fallback after `--ascii`, so switching modes never moves a column; a name outside the family raises `KeyError`. `Glyphs.find_issues(text)` reports the four ways a mark is unsafe (VS16-promoted, zero-width joiner, East-Asian Ambiguous, unapproved) and says what to use instead, which is the quickest development-time check for a prompt or a table. The one-cell catalog above still promises no emoji; this is a separate family.
+* **The font bill for both families, checked on the help page.** The one-cell catalog is covered by the stock monospace face: all 80 names (78 distinct characters) are in DejaVu Sans Mono, each at exactly the font's cell advance, so "no patched font, no icon fonts" is measured, not hoped for. The two-cell family needs one colour emoji font — Noto Color Emoji, Apple Color Emoji or Segoe UI Emoji — from mid-2019 or later: 🧲 is Emoji 11 (2018) and 🟢/🟡 are Emoji 12 (2019), everything else dates from 2016 or earlier. No single font covers both (DejaVu Sans Mono has none of the marks; Noto Color Emoji has 13 of the 78 glyphs), which is why the fallback is one switch rather than per-app font code. Every help page now draws the whole catalog and every mark with the unconditional advice to install those two families; `ConsoleWindowOpts(help_fonts='once' | 'always' | 'never')` decides how often (default `'once'`, the first help page the window shows), and a symbol registered by the app is checked against its family at registration time and named on the page if the font lacks it. The measurements are pinned by the test suite.
 * **App vocabulary.** Register what only your app draws:
 
   ```python

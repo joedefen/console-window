@@ -8,10 +8,6 @@ removed, so both of these launch ``demos/demo-a-basic.py``::
     ./demos/run-demo a-basic
     ./run-demo a-basic                # with demos/ on PATH, from demos/
 
-``./demos/run-demo features`` prints the feature-to-demo owner map from
-``features.py``.  The full family and its curriculum are described in
-``docs/DEMO-APPS.md``.
-
 Any remaining arguments are handed to the sample's own command line, and the
 project root is put on ``sys.path`` first so ``console_window`` imports from
 the working tree no matter which of those directories you invoke the runner

@@ -28,7 +28,7 @@ from dataclasses import dataclass
 TEXT_FONT = 'DejaVu Sans Mono'
 
 #: The family the two-cell marks are promised from.  Emoji 12 or later draws all
-#: of them; older versions box the newest three (see docs/Emoji-support.md).
+#: of them; older versions box the newest three.
 EMOJI_FONT = 'Noto Color Emoji'
 
 #: Seconds to wait for fontconfig.  A local query is fast; a hung one must not
