@@ -15,6 +15,7 @@ from console_window import (
 )
 from console_window.backend import HeadlessBackend
 from console_window.fonts import Missing
+from console_window.textwidth import string_width
 
 
 def _make_window(**opts):
@@ -185,7 +186,7 @@ def test_the_help_page_shows_every_symbol_and_the_font_advice():
         win.stop_curses()
 
 
-def test_the_fonts_section_is_full_once_then_one_line():
+def test_the_fonts_section_appears_once_then_is_not_mentioned():
     win = ConsoleWindow(
         opts=ConsoleWindowOpts(head_rows=8, body_rows=40),
         backend=HeadlessBackend(rows=40, cols=80),
@@ -206,9 +207,71 @@ def test_the_fonts_section_is_full_once_then_one_line():
         second.draw_screen()
         page = '\n'.join(win.body.texts)
         assert '\u2705' not in page
-        assert 'first help page' in page
+        assert 'Fonts' not in page
+        assert 'first help page' not in page
     finally:
         win.stop_curses()
+
+
+def test_reentering_the_same_help_screen_does_not_repeat_the_fonts_section():
+    # The demos reuse one help-screen instance for every '?', so the once-only
+    # rule must survive a pop/push of the same object.
+    win = ConsoleWindow(
+        opts=ConsoleWindowOpts(head_rows=8, body_rows=40),
+        backend=HeadlessBackend(rows=40, cols=80),
+        singleton=False,
+    )
+    try:
+        app = SimpleNamespace(win=win)
+        main = BasicTextScreen(app, lines=['main'])
+        help_screen = BasicHelpScreen(app)
+        stack = ScreenStack(win, SimpleNamespace(), ('MAIN', 'HELP'),
+                            {0: main, 1: help_screen})
+        OptionSpinner(stack=stack)
+
+        stack.push(help_screen)
+        help_screen.clear()
+        help_screen.draw_screen()
+        assert '\u2705' in '\n'.join(win.body.texts)
+
+        stack.pop()
+        stack.push(help_screen)
+        help_screen.clear()
+        help_screen.draw_screen()
+        page = '\n'.join(win.body.texts)
+        assert '\u2705' not in page
+        assert 'Fonts' not in page
+    finally:
+        win.stop_curses()
+
+
+def test_font_check_rows_are_fixed_width_blocks():
+    rows = glyphs.font_check_rows()
+    assert rows
+    assert glyphs.FONT_CHECK_ROW_WIDTH == 55
+    # Five ten-cell blocks plus five '|' markers on every row; the marks are
+    # two cells each, so width is measured in terminal cells, not code points.
+    for row in rows:
+        assert string_width(row) == 55
+        blocks = row.split('|')
+        assert blocks[-1] == ''
+        assert len(blocks) == 6
+        assert all(string_width(block) == 10 for block in blocks[:-1])
+    # Fill characters are '.', never '/'.
+    page = ''.join(rows)
+    assert '.' in page
+    assert '/' not in page
+
+
+def test_font_check_starts_the_marks_on_a_new_row():
+    rows = glyphs.font_check_rows()
+    first_mark = glyphs.marks()[0].emoji
+    mark_rows = [index for index, row in enumerate(rows)
+                 if first_mark in row]
+    assert mark_rows == [2]
+    assert rows[2].startswith(first_mark)
+    # The symbol section filled out its own final row first.
+    assert '.' in rows[1]
 
 
 def test_the_fonts_section_can_be_suppressed_by_option():
@@ -247,11 +310,12 @@ def test_ascii_mode_shows_one_sentence_instead_of_the_rows():
         win.stop_curses()
 
 
-def test_a_narrow_page_points_at_the_catalog_instead_of_wrapping_to_death():
+def test_a_narrow_page_asks_for_more_width_instead_of_wrapping_to_death():
     win, _screen, rows = _draw_fonts_help(cols=40, help_fonts='always')
     try:
         page = '\n'.join(rows)
         assert 'Widen the terminal' in page
+        assert 'theme page' not in page
         assert '\u2705' not in page
     finally:
         win.stop_curses()

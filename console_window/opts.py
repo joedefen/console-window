@@ -19,9 +19,9 @@ HELP_FONTS_VALUES = ('always', 'once', 'never')
 def _normalize_help_fonts(raw: object) -> str:
     """Normalize ``help_fonts`` to ``'always'``, ``'once'`` or ``'never'``.
 
-    ``once`` is the default: the built-in Fonts section costs about six rows, so
-    a window shows it on its first help page and a one-line footer afterwards.
-    A bool is accepted for symmetry with the other display options.
+    ``once`` is the default: a window shows the built-in Fonts section on its
+    first help page and does not mention it on later help pages.  A bool is
+    accepted for symmetry with the other display options.
     """
     if raw is None:
         return 'once'

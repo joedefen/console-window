@@ -731,8 +731,8 @@ class ConsoleWindow:
         self._status_attr: int | None = None
         self._status_deadline: float | None = None
         self._status_no_row_warned = False
-        #: The built-in Fonts section is full on this window's first help page
-        #: and one line afterwards (opts.help_fonts == 'once').
+        #: The built-in Fonts section appears on this window's first help page
+        #: and not on later ones (opts.help_fonts == 'once').
         self._help_fonts_shown = False
         self.relax_handled_keys = self.opts.relax_handled_keys  # When True, pass non-nav keys without checking handled_keys
         self._set_screen_dims()

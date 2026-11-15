@@ -32,17 +32,20 @@ removed, and the appearance and glyph layers are unified.  The README's
   fallback and covered by DejaVu Sans Mono: `Glyphs.catalog()`,
   `catalog_rows(width)`, `catalog_entries()`, `group_of(name)`, `lookup(name)`
   and `register(..., group=...)`.  Re-registering a built-in keeps its family.
-  The theme picker prints the catalog as a font check.
 - `BUILTIN_MARKS` / `Glyphs.marks()` is a 39-entry two-cell mark family whose
   contract is width: one East-Asian-Width `W` code point, two cells with and
   without VS16, and a two-cell ASCII fallback.  `Glyphs.mark(name)` returns the
   active form, `validate_mark()` enforces the rules at import, and
   `Glyphs.find_issues(text)` reports VS16-promoted, ZWJ, Ambiguous and
   unapproved marks (also from the glyph audit).
-- Every help page carries a **Fonts** section drawing the catalog, the marks and
-  the two reference families.  `ConsoleWindowOpts(help_fonts=...)` is `'once'`
-  (default), `'always'` or `'never'`; `BasicHelpScreen.font_section` overrides it
-  per screen, and ASCII mode collapses it to a sentence.  `register()` and
+- The first help page in a run carries a **Fonts** section drawing the catalog,
+  the marks and the two reference families; later help pages do not mention it.
+  `Glyphs.font_check_rows()` packs five ten-cell blocks per row, each followed
+  by `|` and padded with `.`, and starts the marks on a fresh row after filling
+  the symbol section's last row, so a missing glyph or shifted column shows as a
+  broken alignment.  `ConsoleWindowOpts(help_fonts=...)` is `'once'` (default),
+  `'always'` or `'never'`; `BasicHelpScreen.font_section` overrides it per
+  screen, and ASCII mode collapses it to a sentence.  `register()` and
   `register_mark()` record a missing font for an application symbol.
 - `check_ans` on `OptionSpinner.add_key()` validates a `prompt` reply: a string
   or compiled pattern must match the whole reply, and a callable returns `None`

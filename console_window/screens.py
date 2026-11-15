@@ -578,10 +578,10 @@ class BasicHelpScreen(Screen):
     #: Row that introduces the Fonts section.  Set it to '' to drop the
     #: separator and keep only the sample rows and the advice.
     fonts_separator = '---------- Fonts ----------'
-    #: Narrowest body the sample rows are drawn in.  Below this the catalog would
-    #: wrap into more rows than a help page should spend, so the section points at
-    #: the theme page, which prints the same catalog at any width.
-    fonts_min_width = 40
+    #: Narrowest body the sample rows are drawn in.  The rows are a fixed
+    #: :data:`glyphs.FONT_CHECK_ROW_WIDTH` cells wide, so a narrower body would
+    #: wrap them and destroy the alignment check; the section says so instead.
+    fonts_min_width = glyphs.FONT_CHECK_ROW_WIDTH
 
     #: Row that introduces the extra help, separating it from the key list
     #: above.  Set it to '' to drop the separator and keep only the paragraphs.
@@ -633,9 +633,11 @@ class BasicHelpScreen(Screen):
         to one sentence instead.  Nothing here queries fonts: the advice is
         unconditional, and a registration's font note is recorded by
         :mod:`console_window.fonts` before the page is ever drawn.
+
+        With the default ``help_fonts='once'`` the section is drawn on the
+        window's first help page only; later help pages do not mention it.
         """
-        mode = self._fonts_mode()
-        if mode == 'none':
+        if self._fonts_mode() == 'none':
             return
         if self.fonts_separator:
             self.add_body(self.fonts_separator)
@@ -643,15 +645,10 @@ class BasicHelpScreen(Screen):
         if getattr(self.win, 'ascii_mode', glyphs.is_ascii()):
             self._add_font_lines(help_text.FONT_ASCII, width)
             return
-        if mode == 'brief':
-            self._add_font_lines(help_text.FONT_BRIEF, width)
-            return
         if width < self.fonts_min_width:
             self._add_font_lines(help_text.FONT_NARROW, width)
             return
-        for row in glyphs.catalog_rows(width):
-            self.add_body(row)
-        for row in glyphs.marks_rows(width):
+        for row in glyphs.font_check_rows():
             self.add_body(row)
         missing = glyphs.font_missing()
         if missing:
@@ -664,8 +661,20 @@ class BasicHelpScreen(Screen):
         for line in textwrap.wrap(paragraph, width=width):
             self.add_body(line)
 
+    def on_pop(self) -> bool:
+        """Forget the resolved Fonts mode so the next visit resolves it afresh.
+
+        The demos (and many applications) reuse one help-screen instance for
+        every ``?`` press.  Without this reset the first visit's cached
+        ``'full'`` would be reused forever; clearing it lets the window's
+        ``help_fonts='once'`` flag suppress the section on later visits while a
+        redraw during the same visit still sees the same page.
+        """
+        self._fonts_mode_cache = None
+        return super().on_pop()
+
     def _fonts_mode(self) -> str:
-        """Return 'full', 'brief' or 'none' for this help page (once per screen)."""
+        """Return 'full' or 'none' for this help page (once per visit)."""
         if self._fonts_mode_cache is None:
             self._fonts_mode_cache = self._resolve_fonts_mode()
         return self._fonts_mode_cache
@@ -680,7 +689,7 @@ class BasicHelpScreen(Screen):
         if mode == 'always':
             return 'full'
         if getattr(self.win, '_help_fonts_shown', False):
-            return 'brief'
+            return 'none'
         try:
             self.win._help_fonts_shown = True  # pylint: disable=protected-access
         except AttributeError:

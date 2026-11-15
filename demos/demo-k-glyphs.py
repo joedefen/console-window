@@ -5,10 +5,9 @@ Owns: glyph-catalog, glyph-vocabulary, glyph-fallback, glyph-cli, glyph-help
 Base: c-options
 Run:  ./demos/run-demo k-glyphs --ascii
 
-The catalog page is the font check: if a symbol is a box or a blank, restart
-with ``--ascii``.  The table lists every registered glyph with its fallback,
-its code point and its name, grouped by family with a dim divider, so a missing
-glyph can be identified rather than merely noticed.
+The catalog page lists every registered glyph with its fallback, its code point
+and its name, grouped by family with a dim divider, so a missing glyph can be
+identified rather than merely noticed.
 
 The application vocabulary comes from ``ConsoleWindowOpts(glyphs=...)``.  Here
 ``tick`` falls back to ``OK`` in ASCII mode; the window registers it, so
@@ -43,7 +42,6 @@ class GlyphScreen(DemoScreen):
     def draw_screen(self) -> None:
         self.set_pick_mode(False)
         self.add_fancy_header('K-glyphs  [?]:help  [q]uit', mode='Underline')
-        self.add_header(f'font check: {Glyphs.probe_text()}')
 
         entries = Glyphs.catalog_entries()
         glyph_width, fallback_width, unicode_width = self._column_widths(entries)

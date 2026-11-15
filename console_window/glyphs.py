@@ -10,8 +10,9 @@ failure is invisible.
 The table an application draws from is :data:`BUILTIN_GLYPHS`: about eighty
 symbols grouped by family, every one of them a single cell wide and covered by
 the default monospace font on Debian, Ubuntu and Fedora.  :func:`catalog_items`
-and :func:`catalog_rows` are how a screen lists the characters; the theme page
-does.  :func:`catalog_entries` keeps each name and its family, which is what a
+and :func:`catalog_rows` are how a screen lists the characters;
+:func:`font_check_rows` is the fixed-block form the help page uses.
+:func:`catalog_entries` keeps each name and its family, which is what a
 grouped table wants, and :func:`group_of` answers the same question for one
 name.
 
@@ -91,6 +92,7 @@ __all__ = [
     'catalog_rows',
     'ensure_policy',
     'find_issues',
+    'font_check_rows',
     'font_missing',
     'get',
     'group_of',
@@ -499,14 +501,30 @@ MARKS_PROBE: tuple[str, ...] = ('ok', 'fail', 'attention', 'siren')
 
 #: Glyph names the font check prints, in reading order, when an app registers
 #: none of its own.  These are the built-ins a user is most likely to notice.
-#: The theme page shows the whole catalog, so this line stays short.
+#: The help page shows the whole catalog, so this line stays short.
 BUILTIN_PROBE: tuple[str, ...] = (
     'nav_prev', 'nav_next', 'choice', 'cursor', 'cursor_block', 'bullet',
 )
 
-#: Symbols per sample row on the theme page.  The full catalog is three rows at
-#: this width; a narrower terminal wraps into more rows rather than truncating.
+#: Symbols per sample row for the generic catalog packing.  Superseded on the
+#: help page by the fixed block layout below, but kept for callers that just
+#: want a compact list.
 CATALOG_PER_ROW = 27
+
+#: Cells in one block of the help page's font check.  One-cell symbols pack ten
+#: to a block; the two-cell marks pack five, which is why both end up ten cells
+#: wide.  Every block ends with a ``|`` so a font that shifts a column is
+#: immediately visible.
+FONT_CHECK_BLOCK_CELLS = 10
+
+#: Blocks on one font-check row.  Five blocks plus five ``|`` separators make
+#: every row exactly :data:`FONT_CHECK_ROW_WIDTH` cells wide.
+FONT_CHECK_BLOCKS = 5
+
+#: Width of a complete font-check row.  The help page will not draw the sample
+#: rows in a narrower body: a wrapped row would defeat the visual alignment
+#: check, so the section falls back to a sentence instead.
+FONT_CHECK_ROW_WIDTH = FONT_CHECK_BLOCK_CELLS * FONT_CHECK_BLOCKS + FONT_CHECK_BLOCKS
 
 #: Spellings this library used to draw, mapped to the code point that replaced
 #: them.  Text written against an older release is upgraded in *both* modes, so
@@ -1015,6 +1033,70 @@ def catalog_rows(width: int, per_row: int = CATALOG_PER_ROW,
     return rows
 
 
+def _check_block(parts: list[str]) -> str:
+    """Finish one ten-cell block with ``.`` padding and a trailing ``|``."""
+    text = ''.join(parts)
+    missing = FONT_CHECK_BLOCK_CELLS - string_width(text)
+    if missing > 0:
+        text += '.' * missing
+    return text + '|'
+
+
+def _check_blocks(items: Iterable[str]) -> list[str]:
+    """Pack *items* into ten-cell blocks, each ending with ``|``.
+
+    One-cell symbols therefore fill ten to a block; two-cell marks fill five.
+    A block that runs out of items is completed with ``.`` so the ``|`` stays in
+    the same column on every row.
+    """
+    blocks: list[str] = []
+    parts: list[str] = []
+    used = 0
+    for item in items:
+        item_width = string_width(item)
+        if used + item_width > FONT_CHECK_BLOCK_CELLS:
+            blocks.append(_check_block(parts))
+            parts, used = [], 0
+        parts.append(item)
+        used += item_width
+    if parts:
+        blocks.append(_check_block(parts))
+    return blocks
+
+
+def _pad_to_rows(blocks: list[str]) -> list[str]:
+    """Complete *blocks* with ``.`` blocks so a section ends on a full row."""
+    remaining = len(blocks) % FONT_CHECK_BLOCKS
+    if remaining:
+        blocks = blocks + [_check_block([])] * (FONT_CHECK_BLOCKS - remaining)
+    return blocks
+
+
+def font_check_rows() -> list[str]:
+    """Return the fixed-width symbol and mark rows for the help page.
+
+    Each row is exactly :data:`FONT_CHECK_ROW_WIDTH` cells: five ten-cell blocks,
+    each followed by ``|``.  One-cell catalog symbols come first, ten per block;
+    the two-cell marks follow, five per block and on a fresh row.  A block with
+    more room than items is padded with ``.``, and the last row of each section
+    is completed with ``.`` blocks, so every ``|`` must line up when the font and
+    terminal are set up correctly.  A box, a blank or a shifted column breaks
+    that alignment and makes the problem obvious.
+
+    The marks are always the Unicode ones, because the section exists to show
+    what the emoji font will have to draw.
+    """
+    symbol_blocks = _pad_to_rows(_check_blocks(catalog_items()))
+    mark_blocks = _pad_to_rows(_check_blocks(spec.emoji for spec in marks()))
+    blocks = symbol_blocks + mark_blocks
+    if not blocks:
+        return []
+    return [
+        ''.join(blocks[start:start + FONT_CHECK_BLOCKS])
+        for start in range(0, len(blocks), FONT_CHECK_BLOCKS)
+    ]
+
+
 def _spellings(text: str) -> list[str]:
     """Every form of *text* an app might have typed, most specific first.
 
@@ -1350,6 +1432,7 @@ class Glyphs:
     catalog = staticmethod(catalog_items)
     catalog_entries = staticmethod(catalog_entries)
     catalog_rows = staticmethod(catalog_rows)
+    font_check_rows = staticmethod(font_check_rows)
     transliterate = staticmethod(transliterate)
     terminal_report = staticmethod(terminal_report)
     apply_policy = staticmethod(apply_policy)

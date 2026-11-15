@@ -13,7 +13,6 @@ from console_window import (
     Theme,
 )
 from console_window.backend import HeadlessBackend
-from console_window.glyphs import catalog_items, catalog_rows, set_ascii
 
 
 class _Store:
@@ -333,8 +332,7 @@ def test_replace_mode_shows_only_the_apps_rows():
         )
         picker(app).clear_and_draw()
         rows = win.body.texts
-        swatches = rows[:rows.index('')]  # the symbol block starts after a blank
-        assert [row.split()[0] for row in swatches] == ['FAILED', 'OK']
+        assert [row.split()[0] for row in rows] == ['FAILED', 'OK']
     finally:
         win.stop_curses()
 
@@ -386,9 +384,8 @@ def test_a_host_can_override_the_swatch_rows_hook():
         _OnlyDanger(app).clear_and_draw()
         rows = win.body.texts
         assert rows[0].startswith('FAILED')
-        # ...and the symbol block still follows the swatches.
-        assert rows[1] == ''
-        assert rows[2].startswith('Symbols (')
+        # The theme page no longer prints a symbol catalog of its own.
+        assert not any('Symbols (' in row for row in rows)
     finally:
         win.stop_curses()
 
@@ -399,32 +396,3 @@ def test_the_factory_validates_captions_eagerly():
             _BaseScreen,
             captions={'chartreuse': ('NOPE', None)},
         )
-
-
-def test_the_picker_shows_every_symbol_in_the_catalog():
-    win = _window()
-    try:
-        app = SimpleNamespace(win=win, opts=SimpleNamespace(theme='default'))
-        Theme.create_picker_screen(_BaseScreen)(app).clear_and_draw()
-        body = win.body.texts
-        samples = catalog_items()
-        assert f'Symbols ({len(samples)}, Unicode):' in body
-        rows = catalog_rows(win.get_pad_width())
-        assert rows and all(row in body for row in rows)
-        # Every symbol appears once, in catalog order, across the rows.
-        assert ' '.join(samples) in ' '.join(body)
-    finally:
-        win.stop_curses()
-
-
-def test_the_symbol_rows_follow_the_ascii_switch():
-    set_ascii(True)
-    win = _window()
-    try:
-        app = SimpleNamespace(win=win, opts=SimpleNamespace(theme='default'))
-        Theme.create_picker_screen(_BaseScreen)(app).clear_and_draw()
-        body = win.body.texts
-        assert f'Symbols ({len(catalog_items())}, plain ASCII):' in body
-        assert all(row.isascii() for row in body)
-    finally:
-        win.stop_curses()
