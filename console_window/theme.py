@@ -36,7 +36,6 @@ class ThemeStore(Protocol):
 
     def load(self) -> str | None:
         """The remembered theme name, or ``None`` when nothing is stored."""
-        ...
 
     def save(self, name: str) -> None:
         """Remember *name* as the theme to start on next time.
@@ -44,7 +43,6 @@ class ThemeStore(Protocol):
         Args:
             name: A theme name, in any form :meth:`Theme.resolve` accepts.
         """
-        ...
 
 
 def _discover_cycle_key(screen: object, fallback: str = 't') -> str:

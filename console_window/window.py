@@ -191,7 +191,7 @@ def render_nav_help(effective: Iterable[int],
     aligned rows of ``action: keys`` chunks covering the whole scroll map.
     """
     effective = frozenset(effective)
-    lines = []
+    lines: list[str] = []
     for rows in NAV_HELP_LINES:
         text = ''
         for action, keys, gap in rows:
@@ -1030,9 +1030,9 @@ class ConsoleWindow:
         for ns in (self.head, self.body):
             if ns.pad_rows == height and ns.pad_cols == width:
                 continue
-            ns.pad = self._backend.newpad(height, width)
+            ns.pad = cast(CursesSurface, self._backend.newpad(height, width))
             ns.pad_rows, ns.pad_cols = height, width
-            self._apply_pad_theme(cast(CursesSurface, ns.pad))
+            self._apply_pad_theme(ns.pad)
 
     @property
     def rows_dropped(self) -> int:
@@ -1129,10 +1129,13 @@ class ConsoleWindow:
     def _min_size(self) -> tuple[int, int]:
         """The effective ``(cols, rows)`` floor: the option plus the one-time fit."""
         floor_cols, floor_rows = self.opts.min_cols_rows
+        # getattr keeps test windows that bypass __init__ usable; a real
+        # ConsoleWindow always has the attribute (see __init__).
         fit: tuple[int, int] | None = getattr(self, '_auto_min_cols_rows', None)
         if fit is None:
             return floor_cols, floor_rows
-        fit_cols, fit_rows = cast(tuple[int, int], fit)
+        # Pylint cannot see through getattr()'s default to the tuple type.
+        fit_cols, fit_rows = fit  # pylint: disable=unpacking-non-sequence
         return max(floor_cols, fit_cols), max(floor_rows, fit_rows)
 
     def _finalize_min_size(self) -> None:
@@ -1528,7 +1531,7 @@ class ConsoleWindow:
                     pass
             for ns in (win.head, win.body):
                 try:
-                    ns.pad.bkgd(' ', pair)
+                    cast(CursesSurface, ns.pad).bkgd(' ', pair)
                 except curses.error:
                     pass
 
@@ -2246,8 +2249,8 @@ class ConsoleWindow:
 
     def _mark_pads_for_redraw(self) -> None:
         self.scr.redrawwin()
-        self.head.pad.redrawwin()
-        self.body.pad.redrawwin()
+        cast(CursesSurface, self.head.pad).redrawwin()
+        cast(CursesSurface, self.body.pad).redrawwin()
 
     def _draw_pick_gutter(self) -> None:
         # The head and body pads are shifted right by the gutter's single cell,
@@ -2371,14 +2374,14 @@ class ConsoleWindow:
 
     def _refresh_pads(self, indent: int) -> None:
         if self._paint_body() > 0:
-            self.body.pad.noutrefresh(
+            cast(CursesSurface, self.body.pad).noutrefresh(
                 0, 0,
                 self.body_base, indent, self.rows-1, self.cols-1
             )
 
         last_row = self._paint_head()
         if last_row >= 0:
-            self.head.pad.noutrefresh(
+            cast(CursesSurface, self.head.pad).noutrefresh(
                 0, 0,
                 0, indent, last_row, self.cols-1
             )

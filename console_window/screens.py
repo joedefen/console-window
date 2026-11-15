@@ -15,6 +15,12 @@ from .window import _ViewState
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .window import ConsoleWindow
 
+# A Screen deliberately drives the window's private content writers: they are
+# the single implementation of append/adopt, and copying them into the public
+# surface would let two code paths drift.  The access is internal to the
+# package, not a client of it.
+# pylint: disable=protected-access
+
 
 class _AppLike(Protocol):
     # The only part of the host application a Screen touches at construction.

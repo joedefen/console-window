@@ -492,7 +492,7 @@ class OptionSpinner:
             chunks.append(f'{label}: {keys}')
         return '   '.join(chunks)
 
-    def options_for_screen(self, screen: Screen) -> list[SimpleNamespace]:
+    def options_for_screen(self, screen: object) -> list[SimpleNamespace]:
         """The options that apply on *screen*, built-ins excluded.
 
         Without a stack -- or on a screen the stack did not number -- there is
@@ -529,7 +529,7 @@ class OptionSpinner:
             screen.add_body(line, curses.A_UNDERLINE)
         self._write_options(screen, options, width)
 
-    def help_subject(self, screen: Screen) -> SimpleNamespace | None:
+    def help_subject(self, screen: object) -> SimpleNamespace | None:
         """The paused frame this help screen describes, or ``None``.
 
         A help screen is pushed onto the screen it documents, so the frame the
