@@ -11,13 +11,15 @@ from console_window import (
     HeaderLine,
     OptionSpinner,
     ScreenStack,
+    glyphs,
 )
 from console_window.backend import HeadlessBackend
+from console_window.fonts import Missing
 
 
-def _make_window():
+def _make_window(**opts):
     return ConsoleWindow(
-        opts=ConsoleWindowOpts(head_rows=8, body_rows=8),
+        opts=ConsoleWindowOpts(head_rows=8, body_rows=8, **opts),
         backend=HeadlessBackend(rows=24, cols=80),
         singleton=False,
     )
@@ -121,14 +123,17 @@ def test_basic_help_screen_resolves_window_created_after_construction():
         win.stop_curses()
 
 
-def _draw_help_notes(paragraphs=(), *, separator=None, display_notes=False):
-    """Draw a help screen with *paragraphs* and return (win, rows, attrs)."""
-    win = _make_window()
+def _draw_help_notes(paragraphs=(), *, separator=None):
+    """Draw a help screen with *paragraphs* and return (win, rows, attrs).
+
+    The built-in Fonts section is suppressed: these cases are about the app's
+    own prose and must not depend on it.
+    """
+    win = _make_window(help_fonts='never')
     screen = BasicHelpScreen(SimpleNamespace(win=win))
     screen.extra_help_paragraphs = lambda: tuple(paragraphs)
     if separator is not None:
         screen.notes_separator = separator
-    screen.show_display_notes = display_notes
     OptionSpinner(
         stack=ScreenStack(win, SimpleNamespace(), ('HELP',), {0: screen}))
     screen.clear()
@@ -152,11 +157,114 @@ def test_help_notes_are_bulleted_instructions_after_a_separator():
         win.stop_curses()
 
 
-def test_help_notes_fall_back_to_the_display_note():
-    win, rows, _attrs = _draw_help_notes(display_notes=True)
+def _draw_fonts_help(cols=80, **opts):
+    """Draw an otherwise empty help page and return (win, screen, rows)."""
+    win = ConsoleWindow(
+        opts=ConsoleWindowOpts(head_rows=8, body_rows=40, **opts),
+        backend=HeadlessBackend(rows=40, cols=cols),
+        singleton=False,
+    )
+    screen = BasicHelpScreen(SimpleNamespace(win=win))
+    OptionSpinner(
+        stack=ScreenStack(win, SimpleNamespace(), ('HELP',), {0: screen}))
+    screen.clear()
+    screen.draw_screen()
+    return win, screen, win.body.texts
+
+
+def test_the_help_page_shows_every_symbol_and_the_font_advice():
+    win, _screen, rows = _draw_fonts_help(help_fonts='always')
     try:
-        assert rows[0] == '---------- Instructions ----------'
-        assert rows[1].startswith(' \u25c6 ')
+        assert rows[0] == '---------- Fonts ----------'
+        page = '\n'.join(rows)
+        assert all(item in page for item in glyphs.catalog_items())
+        assert all(spec.emoji in page for spec in glyphs.marks())
+        assert 'DejaVu Sans Mono' in page
+        assert 'Noto Color Emoji' in page
+    finally:
+        win.stop_curses()
+
+
+def test_the_fonts_section_is_full_once_then_one_line():
+    win = ConsoleWindow(
+        opts=ConsoleWindowOpts(head_rows=8, body_rows=40),
+        backend=HeadlessBackend(rows=40, cols=80),
+        singleton=False,
+    )
+    try:
+        first = BasicHelpScreen(SimpleNamespace(win=win))
+        OptionSpinner(
+            stack=ScreenStack(win, SimpleNamespace(), ('ONE',), {0: first}))
+        first.clear()
+        first.draw_screen()
+        assert '\u2705' in '\n'.join(win.body.texts)
+
+        second = BasicHelpScreen(SimpleNamespace(win=win))
+        OptionSpinner(
+            stack=ScreenStack(win, SimpleNamespace(), ('TWO',), {0: second}))
+        second.clear()
+        second.draw_screen()
+        page = '\n'.join(win.body.texts)
+        assert '\u2705' not in page
+        assert 'first help page' in page
+    finally:
+        win.stop_curses()
+
+
+def test_the_fonts_section_can_be_suppressed_by_option():
+    win, _screen, rows = _draw_fonts_help(help_fonts='never')
+    try:
+        assert not any('Fonts' in row for row in rows)
+    finally:
+        win.stop_curses()
+
+
+def test_a_screen_override_beats_the_option():
+    win = ConsoleWindow(
+        opts=ConsoleWindowOpts(head_rows=8, body_rows=40, help_fonts='always'),
+        backend=HeadlessBackend(rows=40, cols=80),
+        singleton=False,
+    )
+    try:
+        screen = BasicHelpScreen(SimpleNamespace(win=win))
+        screen.font_section = False
+        OptionSpinner(
+            stack=ScreenStack(win, SimpleNamespace(), ('HELP',), {0: screen}))
+        screen.clear()
+        screen.draw_screen()
+        assert not any('Fonts' in row for row in win.body.texts)
+    finally:
+        win.stop_curses()
+
+
+def test_ascii_mode_shows_one_sentence_instead_of_the_rows():
+    win, _screen, rows = _draw_fonts_help(help_fonts='always', ascii=True)
+    try:
+        page = '\n'.join(rows)
+        assert 'Plain ASCII is in use' in page
+        assert '\u2705' not in page
+    finally:
+        win.stop_curses()
+
+
+def test_a_narrow_page_points_at_the_catalog_instead_of_wrapping_to_death():
+    win, _screen, rows = _draw_fonts_help(cols=40, help_fonts='always')
+    try:
+        page = '\n'.join(rows)
+        assert 'Widen the terminal' in page
+        assert '\u2705' not in page
+    finally:
+        win.stop_curses()
+
+
+def test_the_fonts_section_names_a_registration_the_fonts_lack(monkeypatch):
+    monkeypatch.setattr(
+        glyphs, 'font_missing',
+        lambda: (Missing('glyph', 'tick', '\u2713', 'DejaVu Sans Mono'),),
+    )
+    win, _screen, rows = _draw_fonts_help(help_fonts='always')
+    try:
+        assert any('tick' in row for row in rows)
     finally:
         win.stop_curses()
 

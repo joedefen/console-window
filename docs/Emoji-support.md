@@ -137,8 +137,8 @@ that failed it are listed, with their reasons, in Appendix B.
 
 ### 5.1 What belongs in it
 
-A small, garden-variety vocabulary: status, dots, data, comms, waiting. About
-thirty entries, not three hundred. The list is data, not policy, so an
+A small, garden-variety vocabulary: status, dots, shapes, data, comms, waiting.
+About forty entries, not three hundred. The list is data, not policy, so an
 application can add to it — under the same validation.
 
 ```python
@@ -170,7 +170,9 @@ as well, or `--ascii` moves every column the emoji did not.
 Fallbacks use the house style already set by the one-cell catalog (`check` → `v`,
 `cross` → `x`, `warn` → `!`): one ASCII character plus a trailing space, so the
 token is two cells and reads as a single mark. Names avoid the one-cell catalog's
-names, because both tables share one registry (`warn` is already `⚠`).
+names, because both tables share one registry (`warn` is already `⚠`). A code
+point appears once in the table, so a longer wish list cannot fork it: the bell
+(🔔) and the speech balloon (💬) are `bell` and `chat` already.
 
 | use | name | mark | ascii | meaning |
 |---|---|---|---|---|
@@ -180,24 +182,37 @@ names, because both tables share one registry (`warn` is already `⚠`).
 | status | `ask` | ❓ | `? ` | unknown, question |
 | status | `stop` | 🛑 | `- ` | stop, do not proceed |
 | status | `ban` | ⛔ | `# ` | forbidden |
+| status | `denied` | 🚫 | `X ` | blocked, refused |
 | status | `siren` | 🚨 | `!!` | alarm, incident |
 | status | `boom` | 💥 | `* ` | crash, collision |
+| status | `idea` | 💡 | `i ` | idea, note |
+| status | `build` | 🚧 | `C ` | work in progress |
 | dots | `dot_green` | 🟢 | `G ` | healthy |
 | dots | `dot_yellow` | 🟡 | `Y ` | degraded |
 | dots | `dot_red` | 🔴 | `R ` | failing |
 | dots | `dot_blue` | 🔵 | `B ` | informational |
 | dots | `dot_black` | ⚫ | `K ` | off, absent |
 | dots | `dot_white` | ⚪ | `W ` | empty, unknown |
+| dots | `radio` | 🔘 | `r ` | selected, one of |
+| shapes | `star` | ⭐ | `s ` | starred, favourite |
+| shapes | `star_glow` | 🌟 | `S ` | highlighted |
+| shapes | `circle_heavy` | ⭕ | `0 ` | open, ring |
+| shapes | `diamond_orange` | 🔶 | `O ` | bullet, orange |
+| shapes | `diamond_blue` | 🔷 | `D ` | bullet, blue |
+| shapes | `diamond_dot` | 💠 | `. ` | bullet, detail |
 | data | `folder` | 📁 | `[ ` | directory |
 | data | `file` | 📄 | `f ` | file |
 | data | `chart` | 📊 | `\| ` | metrics |
 | data | `find` | 🔍 | `o ` | search |
 | data | `lock` | 🔒 | `L ` | locked |
 | data | `key` | 🔑 | `k ` | credential |
+| data | `link` | 🔗 | `> ` | reference, link |
+| data | `magnet` | 🧲 | `M ` | pinned, attached |
 | comms | `mail` | 📧 | `@ ` | mail |
 | comms | `bell` | 🔔 | `n ` | notification |
 | comms | `chat` | 💬 | `m ` | message |
 | comms | `globe` | 🌍 | `g ` | network, world |
+| comms | `net` | 🌐 | `N ` | internet, web |
 | comms | `package` | 📦 | `p ` | package, release |
 | time | `wait` | ⏳ | `w ` | pending |
 
@@ -228,6 +243,69 @@ mark('tick')          # KeyError: not an approved mark
 * `demo-q-marks` (next free letter) owns the catalog, the fallback switch and the
   detector page. `demo-p-key-debug` keeps one mark row in its width table, which
   is where the two-cell claim is easiest to see.
+
+### 5.4 The font budget
+
+A mark is a single code point with `Emoji_Presentation=Yes`, so the mark table
+costs **one** font, not one per group: a colour emoji font. Nothing here wants a
+text-symbol font on the side, and nothing wants a per-entry fallback font. The
+code point either has its emoji glyph in that font or it is a box.
+
+Measured with `fc-list :charset=…` over all 39 marks: exactly one installed family
+covers every entry, **Noto Color Emoji**. The near misses are instructive —
+Symbola covers 36 of the 39 (it lacks 🟢 🟡 🧲), and Noto Sans Symbols2 has the
+punctuation-like marks (❗ ❓ ⛔ ⭕) but not the pictures (✅ 🔑 📁).
+
+The version floor comes from the newest additions:
+
+| entry | code point | emoji version |
+|---|---|---|
+| `dot_green`, `dot_yellow` | U+1F7E2, U+1F7E1 | 12.0 (2019) |
+| `magnet` | U+1F9F2 | 11.0 (2018) |
+
+Everything else dates from Emoji 1.0–3.0 (2015–2016), so "an emoji font" means one
+from mid-2019 or later: Noto Color Emoji on Linux and Android, Apple Color Emoji on
+macOS and iOS, Segoe UI Emoji on Windows 10+. An older font boxes those three
+entries and nothing else.
+
+The one-cell catalog is the cheaper side of the bill, and the README's "no patched
+font" promise is measured rather than hoped for: all 80 names (78 distinct
+characters) are in **DejaVu Sans Mono**, each at exactly the font's cell advance
+(1233 of 2048 units), so the default face on Debian and Ubuntu needs no fallback
+at all. **FreeMono** carries all 78 as well (600 of 1000 units). Other monospace
+faces are partial — Noto Sans Mono 63 of the 80 names, JetBrains Mono 64, Hack 68,
+Liberation Mono 35 — each missing mostly arrows, stars and ballot boxes. Terminals
+fall back per code point (fontconfig picks a face that has the character), so this
+is usually invisible; where fallback is disabled it is a box, not a shifted row.
+
+No single font covers both tables. Over the 117 distinct code points of the two
+families, the closest installed face is Symbola at 114 (every glyph, 36 of the
+marks), and it is not a terminal font; DejaVu Sans Mono has all the glyphs and none
+of the marks, Noto Color Emoji the mirror image (all 39 marks, 13 of the glyphs).
+So the budget is two fonts, each already implied by a different promise: the
+monospace you have, plus one emoji font you install once. Installing several emoji
+fonts buys nothing (first match wins, so two fonts can disagree about a mark), and
+the library cannot see which fonts exist (§3) — which is why the answer is one
+switch (`--ascii`) and one probe line, not a font database.
+
+The check itself is built in, not per application. Every help page carries a
+**Fonts** section: three rows of one-cell glyphs, two rows of marks, and the
+advice above word for word. The section is purely visual, so it runs no font
+query and cannot stall a redraw; the option only decides how often it appears —
+`ConsoleWindowOpts(help_fonts='once' | 'always' | 'never')`, default `'once'`,
+which is the full section on the first help page a window shows and one line
+afterwards, with `BasicHelpScreen.font_section` overriding it per screen. In
+ASCII mode the section collapses to a sentence, because every cell is plain
+ASCII there.
+
+The one machine check is narrower, and runs only when an application registers
+something. `register()` and `register_mark()` ask fontconfig, once, whether the
+family that should carry the new symbol (`DejaVu Sans Mono` for a glyph, `Noto
+Color Emoji` for a mark) has it, and record a miss that the help page then names.
+If the family is not installed the answer is "cannot check" and nothing is
+recorded: a machine without the font is not a bug. The blessed tables skip the
+check entirely — the test suite asserts that the two families cover them, which
+is the contract from the start of this section.
 
 ## 6. Loud check marks without the gamble
 

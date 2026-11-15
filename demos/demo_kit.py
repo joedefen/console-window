@@ -108,17 +108,13 @@ class DemoHelpScreen(BasicHelpScreen):
     """The help page of the full shape, fed by the app, not by a subclass.
 
     ``DemoApp`` builds one by default and pushes it from the shared ``?``
-    action.  A demo declares its prose as data (``help_paragraphs`` and
-    ``help_display_notes``) instead of subclassing this screen just to add a
-    paragraph: ``BasicHelpScreen.draw_notes()`` already owns the separator, the
-    bullet, the hanging indent and the wrapping.
+    action.  A demo declares its prose as data (``help_paragraphs``) instead of
+    subclassing this screen just to add a paragraph: ``BasicHelpScreen`` already
+    owns the separator, the bullet, the hanging indent and the wrapping, and its
+    built-in Fonts section shows every symbol the library can draw.
     """
 
     title = 'HELP'
-
-    @property
-    def show_display_notes(self) -> bool:
-        return bool(getattr(self.app, 'help_display_notes', False))
 
     def extra_help_paragraphs(self):
         return tuple(getattr(self.app, 'help_paragraphs', ()))
@@ -139,8 +135,6 @@ class DemoApp:
     #: it for what a reader cannot infer from the keys: what an action is
     #: expected to do, what survives, what the demo deliberately omits.
     help_paragraphs: tuple[str, ...] = ()
-    #: Append the built-in display notes (glyph font check) to the help page.
-    help_display_notes = False
 
     def __init__(self, backend: object | None = None,
                  singleton: bool = True) -> None:

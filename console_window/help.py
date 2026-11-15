@@ -10,13 +10,54 @@ Both builders are plain strings: an app returns them from
 :meth:`Screen.extra_help_paragraphs`, and ``BasicHelpScreen`` adds the
 ``Instructions`` separator and renders them as bulleted instructions with a
 hanging indent.
+
+The symbol check itself is no longer a paragraph an app opts into: every help
+page gets ``BasicHelpScreen.draw_fonts()``, and the ``FONT_*`` constants here
+are the sentences it uses -- the unconditional install advice, the one-line
+form for later pages, and the ASCII and narrow-terminal variants.
+``glyph_paragraph()`` stays for an app that draws its own help body.
 """
 
 from __future__ import annotations
 
 from . import glyphs
 
-__all__ = ['glyph_paragraph', 'theme_paragraph']
+__all__ = [
+    'FONT_ADVICE',
+    'FONT_ASCII',
+    'FONT_BRIEF',
+    'FONT_NARROW',
+    'glyph_paragraph',
+    'theme_paragraph',
+]
+
+#: Closing line of the built-in Fonts section.  It is unconditional on purpose:
+#: the library cannot see a box, so it names the two families and lets the user
+#: judge the symbols on the page.
+FONT_ADVICE = (
+    'If any symbol above is a box, a blank, or pushes the columns sideways, '
+    'install DejaVu Sans Mono and Noto Color Emoji (fonts-dejavu-core and '
+    'fonts-noto-color-emoji on Debian and Ubuntu).'
+)
+
+#: The one-line form shown on later help pages when ``help_fonts='once'``.
+FONT_BRIEF = (
+    'The full symbol check appears on the first help page this window shows; '
+    'install DejaVu Sans Mono and Noto Color Emoji if any symbol is a box.'
+)
+
+#: What the section says in ASCII mode, where no font can fail to draw a symbol.
+FONT_ASCII = (
+    'Plain ASCII is in use, so every symbol is covered. Restart with '
+    '--glyphs unicode to check the full set.'
+)
+
+#: What the section says when the body is too narrow for the sample rows: the
+#: theme page prints the same catalog at any width, and the advice still holds.
+FONT_NARROW = (
+    'Widen the terminal (or open the theme page) to see the full symbol check; '
+    'install DejaVu Sans Mono and Noto Color Emoji if any symbol is a box.'
+)
 
 
 def theme_paragraph(
@@ -39,12 +80,13 @@ def theme_paragraph(
 
 
 def glyph_paragraph(window: object = None) -> str:
-    """Describe the symbol set, including how to change it.
+    """Describe the symbol set in one line, including how to change it.
 
-    In Unicode mode this is the font check: the real glyphs, so the user can
-    see for themselves whether the font has them.  In ASCII mode it says how to
-    get the full set back, which is the only thing a user can act on once the
-    fallback is already in use.
+    For an application that draws its own help body; ``BasicHelpScreen`` uses
+    its built-in Fonts section instead.  In Unicode mode this is the short font
+    check -- the real glyphs, so the user can see for themselves whether the
+    font has them.  In ASCII mode it says how to get the full set back, which is
+    the only thing a user can act on once the fallback is already in use.
     """
     ascii_mode = getattr(window, 'ascii_mode', None)
     if ascii_mode is None:

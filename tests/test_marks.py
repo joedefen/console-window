@@ -28,6 +28,24 @@ DOT = '\u25cf'           # East-Asian Ambiguous
 UNICORN = '\U0001f984'
 FAMILY = '\U0001f468\u200d\U0001f469\u200d\U0001f467'
 
+#: The vocabulary added after the first table.  Same rule as the entries above:
+#: one code point, two cells, a two-cell fallback.
+EXPANDED_MARKS = (
+    ('denied', '\U0001f6ab', 'X '),       # no entry sign
+    ('idea', '\U0001f4a1', 'i '),         # electric light bulb
+    ('build', '\U0001f6a7', 'C '),        # construction sign
+    ('radio', '\U0001f518', 'r '),        # radio button
+    ('star', '\u2b50', 's '),             # white medium star
+    ('star_glow', '\U0001f31f', 'S '),    # glowing star
+    ('circle_heavy', '\u2b55', '0 '),     # heavy large circle
+    ('diamond_orange', '\U0001f536', 'O '),
+    ('diamond_blue', '\U0001f537', 'D '),
+    ('diamond_dot', '\U0001f4a0', '. '),
+    ('link', '\U0001f517', '> '),         # link symbol
+    ('magnet', '\U0001f9f2', 'M '),       # magnet
+    ('net', '\U0001f310', 'N '),          # globe with meridians
+)
+
 
 def test_every_mark_is_two_cells_in_both_spellings():
     for spec in marks():
@@ -44,6 +62,24 @@ def test_the_table_is_unambiguous():
     assert len({spec.name for spec in specs}) == len(specs)
     assert len({spec.emoji for spec in specs}) == len(specs)
     assert len({spec.ascii for spec in specs}) == len(specs)
+
+
+@pytest.mark.parametrize(('name', 'emoji', 'ascii_text'), EXPANDED_MARKS)
+def test_every_expanded_mark_is_available_in_both_spellings(name, emoji, ascii_text):
+    assert mark(name) == emoji
+    assert string_width(mark(name)) == 2
+    set_ascii(True)
+    assert mark(name) == ascii_text
+    assert string_width(mark(name)) == 2
+
+
+def test_a_mark_asked_for_twice_does_not_enter_the_table_twice():
+    # The bell and the speech balloon were already approved under the names the
+    # table uses, so each code point is still drawn by exactly one mark.
+    assert mark('bell') == '\U0001f514'
+    assert mark('chat') == '\U0001f4ac'
+    drawn = [spec.name for spec in marks() if spec.emoji in ('\U0001f514', '\U0001f4ac')]
+    assert drawn == ['bell', 'chat']
 
 
 @pytest.mark.parametrize(('emoji', 'ascii_text', 'reason'), [

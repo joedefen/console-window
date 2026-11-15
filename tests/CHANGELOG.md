@@ -55,7 +55,7 @@ them.
   built-in keeps its family.  The demo K font-check page uses the entries for a
   glyph/fallback/unicode/name table with a dim divider where the family changes.
 - A two-cell mark family for the places where a one-cell symbol is too quiet:
-  `BUILTIN_MARKS` / `Glyphs.marks()` is 26 approved emoji whose contract is
+  `BUILTIN_MARKS` / `Glyphs.marks()` is 39 approved emoji whose contract is
   width.  Every entry is one East-Asian-Width `W` code point, so it measures two
   cells in the model and in the terminal, and appending VS16 cannot change that;
   `Glyphs.mark(name)` returns the emoji, or its **two-cell** ASCII fallback, so
@@ -68,6 +68,20 @@ them.
   point.  The one-cell catalog is unchanged: `catalog_items()` still lists no
   emoji, and `include_marks=True` is the opt-in for a page that wants both.
   **Safe marks** — see demo: q-marks.
+- The font check is built into every help page: `BasicHelpScreen` appends a
+  **Fonts** section that draws the whole one-cell catalog, every approved mark
+  and the unconditional advice to install DejaVu Sans Mono and Noto Color Emoji
+  when the terminal boxes or shifts them.  `ConsoleWindowOpts(help_fonts=...)`
+  is `'once'` (the default: the full section on the first help page the window
+  shows, one line afterwards), `'always'` or `'never'`; `BasicHelpScreen.font_section`
+  overrides it per screen, and ASCII mode collapses the section to a sentence.
+- The two reference font families are a checked contract.  `console_window.fonts`
+  answers coverage from fontconfig, and `register()` / `register_mark()` ask it
+  once, at registration time, whether the family that should carry a new symbol
+  has it -- recording a miss the Fonts section names, and recording nothing when
+  that family is not installed.  The blessed tables are checked by the test
+  suite instead of at run time: every blessed glyph and mark is covered by
+  DejaVu Sans Mono or Noto Color Emoji.
 - `IncrementalSearchBar.reset(initial_text='')` leaves search mode with the
   given text and runs no callback, so a clear action can drop a pattern without
   pretending to cancel an edit.
@@ -78,6 +92,11 @@ them.
   **Regex filter** — see demo: e-search.
 
 ### Changed
+- The startup report no longer carries a `font check:` line, and
+  `BasicHelpScreen.show_display_notes` (with the demos' `help_display_notes`
+  switch) is gone: the built-in Fonts section replaces both, so an application
+  needs no display notes to get a symbol check.  `help.glyph_paragraph()`
+  remains for a custom help body.
 - The copyable prompt hint in the prompt tests reads `["{mode}" or ESC] ❗`
   instead of the VS16-promoted `⚠️`: the selector makes the base one or two
   cells depending on the terminal.  The tests that *measure* VS16 keep it on

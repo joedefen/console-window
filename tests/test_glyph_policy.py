@@ -42,13 +42,12 @@ def test_the_linux_console_is_advisory_only():
     assert any('--ascii' in note for note in report.notes)
 
 
-def test_a_utf8_terminal_gets_the_font_check_line():
+def test_a_utf8_terminal_leaves_the_font_check_to_the_help_page():
     report = terminal_report(environ={'TERM': 'xterm-256color'}, stream=UTF8)
     assert report.ascii_required is False
-    check = [note for note in report.notes if 'font check' in note]
-    assert check
-    # The check must print the real glyphs, never the fallback.
-    assert not check[0].split(':', 1)[1].split('(')[0].strip().isascii()
+    # The symbol check is the built-in Fonts section of every help page now; the
+    # startup report no longer guesses about fonts, so it carries no such line.
+    assert not any('font check' in note for note in report.notes)
 
 
 def test_an_explicit_request_wins_and_says_so():

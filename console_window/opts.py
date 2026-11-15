@@ -12,6 +12,30 @@ from .keys import NAVIGATION_KEYS, VERTICAL_NAV_KEYS
 logger = logging.getLogger(__name__)
 
 
+#: Accepted values of the ``help_fonts`` option.
+HELP_FONTS_VALUES = ('always', 'once', 'never')
+
+
+def _normalize_help_fonts(raw: object) -> str:
+    """Normalize ``help_fonts`` to ``'always'``, ``'once'`` or ``'never'``.
+
+    ``once`` is the default: the built-in Fonts section costs about six rows, so
+    a window shows it on its first help page and a one-line footer afterwards.
+    A bool is accepted for symmetry with the other display options.
+    """
+    if raw is None:
+        return 'once'
+    if isinstance(raw, bool):
+        return 'always' if raw else 'never'
+    value = str(raw).strip().lower()
+    if value not in HELP_FONTS_VALUES:
+        raise ValueError(
+            "help_fonts must be 'always', 'once' or 'never', "
+            f'got {raw!r}'
+        )
+    return value
+
+
 def _normalize_ascii_flag(raw: object) -> bool | None:
     """Normalize the ``ascii`` option to ``None`` (auto), ``True`` or ``False``.
 
@@ -110,7 +134,8 @@ def _normalize_taken_nav_keys(raw: object) -> dict[int, str]:
 class ConsoleWindowOpts:
     __slots__ = ['answer_show_redraws', 'ascii', 'body_cols', 'body_rows',
                  'ctrl_c_terminates', 'demo_mode', 'dialog_abort', 'dialog_return',
-                 'glyphs', 'glyphs_probe', 'head_line', 'head_rows', 'keys',
+                 'glyphs', 'glyphs_probe', 'head_line', 'head_rows',
+                 'help_fonts', 'keys',
                  'max_rows', 'min_cols_rows', 'mod_pick', 'nav_keys', 'pick_attr',
                  'pick_mode', 'pick_range', 'relax_handled_keys',
                  'return_if_pos_change', 'single_cell_scroll_indicator',
@@ -136,6 +161,10 @@ class ConsoleWindowOpts:
     glyphs_probe: tuple[str, ...]
     head_line: bool
     head_rows: int | None  # advisory hint only; see max_rows
+    #: The built-in Fonts section of a help page: 'always', 'once' (the default:
+    #: the first help page of a run) or 'never'.  A screen can override it with
+    #: ``BasicHelpScreen.font_section``.
+    help_fonts: str
     max_rows: int | None
     keys: set | list | None
     min_cols_rows: tuple[int, int]
@@ -213,6 +242,9 @@ class ConsoleWindowOpts:
         self.ascii = _normalize_ascii_flag(kwargs.get('ascii'))
         self.glyphs = _normalize_glyphs(kwargs.get('glyphs'))
         self.glyphs_probe = _normalize_glyphs_probe(kwargs.get('glyphs_probe'))
+        # The help page's Fonts section is built in; this option only decides how
+        # often it appears (see console_window/fonts.py and BasicHelpScreen).
+        self.help_fonts = _normalize_help_fonts(kwargs.get('help_fonts'))
 
         # Validate min_cols_rows.  It is a hard floor, not a requested window
         # size; it is (cols, rows) to match the long-standing tuple order.

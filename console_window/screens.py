@@ -5,6 +5,7 @@ from collections.abc import Iterable
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Protocol
 
+from . import glyphs
 from . import help as help_text
 from .context import Context
 from .header import HeaderLine, Span
@@ -482,11 +483,20 @@ class ScreenStack:
 class BasicHelpScreen(Screen):
     #: The help body describes the screen this one was pushed from, not itself.
     is_help_screen = True
-    #: Append the built-in display notes -- a font check in Unicode mode, and
-    #: how to get the full set back in ASCII mode -- after the app's paragraphs.
-    #: Off by default: an existing help screen must not gain a line merely by
-    #: upgrading the library.  Turn it on with ``show_display_notes = True``.
-    show_display_notes = False
+    #: Per-screen override of ``ConsoleWindowOpts(help_fonts=...)``: ``None``
+    #: follows the window's option, ``True`` always shows the full Fonts
+    #: section, ``False`` never shows it.
+    font_section: bool | None = None
+    #: The rows of the Fonts section resolve once per screen instance: a redraw
+    #: must not change the page under the user.
+    _fonts_mode_cache: str | None = None
+    #: Row that introduces the Fonts section.  Set it to '' to drop the
+    #: separator and keep only the sample rows and the advice.
+    fonts_separator = '---------- Fonts ----------'
+    #: Narrowest body the sample rows are drawn in.  Below this the catalog would
+    #: wrap into more rows than a help page should spend, so the section points at
+    #: the theme page, which prints the same catalog at any width.
+    fonts_min_width = 40
 
     #: Row that introduces the extra help, separating it from the key list
     #: above.  Set it to '' to drop the separator and keep only the paragraphs.
@@ -507,9 +517,10 @@ class BasicHelpScreen(Screen):
             spinner.show_help_nav_keys(self)
             spinner.show_help_body(self)
         self.draw_notes()
+        self.draw_fonts()
 
     def draw_notes(self) -> None:
-        """Append the app's paragraphs and the display notes as bulleted prose.
+        """Append the app's paragraphs as bulleted prose.
 
         A method rather than inline code so a subclass can add its own notes
         and still get the separator, the bullet, the hanging indent and the
@@ -517,10 +528,6 @@ class BasicHelpScreen(Screen):
         these are instructions the user is meant to read, not dimmed fine print.
         """
         paragraphs = list(self.extra_help_paragraphs())
-        if self.show_display_notes:
-            # The window answers ``ascii_mode``; that is a terminal property,
-            # not a screen one.
-            paragraphs.append(help_text.glyph_paragraph(self.win))
         if not paragraphs:
             return
         if self.notes_separator:
@@ -531,6 +538,68 @@ class BasicHelpScreen(Screen):
             for number, line in enumerate(textwrap.wrap(paragraph, width=width)):
                 prefix = self.notes_bullet if number == 0 else indent
                 self.add_body(prefix + line)
+
+    def draw_fonts(self) -> None:
+        """Append the built-in font check: every symbol, then what to install.
+
+        The rows are the real Unicode symbols, which in ASCII mode would be
+        pointless -- every cell is plain ASCII there -- so the section collapses
+        to one sentence instead.  Nothing here queries fonts: the advice is
+        unconditional, and a registration's font note is recorded by
+        :mod:`console_window.fonts` before the page is ever drawn.
+        """
+        mode = self._fonts_mode()
+        if mode == 'none':
+            return
+        if self.fonts_separator:
+            self.add_body(self.fonts_separator)
+        width = max(getattr(self.win, 'cols', 80) - 8, 20)
+        if getattr(self.win, 'ascii_mode', glyphs.is_ascii()):
+            self._add_font_lines(help_text.FONT_ASCII, width)
+            return
+        if mode == 'brief':
+            self._add_font_lines(help_text.FONT_BRIEF, width)
+            return
+        if width < self.fonts_min_width:
+            self._add_font_lines(help_text.FONT_NARROW, width)
+            return
+        for row in glyphs.catalog_rows(width):
+            self.add_body(row)
+        for row in glyphs.marks_rows(width):
+            self.add_body(row)
+        missing = glyphs.font_missing()
+        if missing:
+            names = ', '.join(entry.name for entry in missing)
+            self._add_font_lines(
+                f'Registered, but not in the reference fonts: {names}.', width)
+        self._add_font_lines(help_text.FONT_ADVICE, width)
+
+    def _add_font_lines(self, paragraph: str, width: int) -> None:
+        for line in textwrap.wrap(paragraph, width=width):
+            self.add_body(line)
+
+    def _fonts_mode(self) -> str:
+        """Return 'full', 'brief' or 'none' for this help page (once per screen)."""
+        if self._fonts_mode_cache is None:
+            self._fonts_mode_cache = self._resolve_fonts_mode()
+        return self._fonts_mode_cache
+
+    def _resolve_fonts_mode(self) -> str:
+        if self.font_section is not None:
+            return 'full' if self.font_section else 'none'
+        opts = getattr(self.win, 'opts', None)
+        mode = getattr(opts, 'help_fonts', 'once')
+        if mode == 'never':
+            return 'none'
+        if mode == 'always':
+            return 'full'
+        if getattr(self.win, '_help_fonts_shown', False):
+            return 'brief'
+        try:
+            self.win._help_fonts_shown = True  # pylint: disable=protected-access
+        except AttributeError:
+            return 'full'
+        return 'full'
 
 
 class BasicTextScreen(Screen):

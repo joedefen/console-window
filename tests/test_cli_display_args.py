@@ -120,7 +120,8 @@ def test_apply_tolerates_a_namespace_without_display_attributes(capsys):
     report = cli.apply_display_arguments(
         argparse.Namespace(), environ={'TERM': 'xterm'}, stream=_Stream())
     assert report.ascii_mode is False
-    assert 'font check' in capsys.readouterr().out
+    # The symbol check lives on the help page now, not in the startup notes.
+    assert 'font check' not in capsys.readouterr().out
 
 
 def test_there_is_no_separate_no_color_switch():

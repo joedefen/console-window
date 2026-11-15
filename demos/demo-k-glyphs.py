@@ -12,8 +12,9 @@ glyph can be identified rather than merely noticed.
 
 The application vocabulary comes from ``ConsoleWindowOpts(glyphs=...)``.  Here
 ``tick`` falls back to ``OK`` in ASCII mode; the window registers it, so
-``Glyphs.get('tick')`` is all the draw code needs.  The help screen turns on
-``show_display_notes``, which appends ``help.glyph_paragraph()``.
+``Glyphs.get('tick')`` is all the draw code needs.  The help page's built-in
+Fonts section shows the whole catalog and every mark, so the demo adds no font
+check of its own.
 """
 
 from __future__ import annotations
@@ -99,8 +100,6 @@ class GlyphApp(DemoApp):
         'glyphs': DEMO_GLYPHS,
         'glyphs_probe': DEMO_PROBE,
     }
-    # The font check and the ASCII escape hatch are the app's own display notes.
-    help_display_notes = True
     help_paragraphs = (
         'Application vocabulary: ConsoleWindowOpts(glyphs=...) registers '
         "'tick' with its ASCII fallback 'OK'; Glyphs.get('tick') returns the "

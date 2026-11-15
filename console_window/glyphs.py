@@ -23,8 +23,8 @@ is not observable from inside the process.  So detection is split three ways:
 
 * :func:`terminal_report` reports what is detectable and sets
   ``ascii_required`` only when UTF-8 output is impossible;
-* that report always carries a *font check* line containing the real glyphs, so
-  the user can look at them and judge;
+* the built-in Fonts section of every help page draws the real glyphs and marks,
+  so the user can look at them and judge;
 * :func:`set_ascii` forces the fallback for everything else, including a font
   the check cannot see.
 
@@ -67,6 +67,7 @@ import unicodedata
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 
+from . import fonts
 from .textwidth import string_width
 
 logger = logging.getLogger(__name__)
@@ -90,6 +91,7 @@ __all__ = [
     'catalog_rows',
     'ensure_policy',
     'find_issues',
+    'font_missing',
     'get',
     'group_of',
     'is_ascii',
@@ -97,6 +99,7 @@ __all__ = [
     'mark',
     'marks',
     'marks_probe_text',
+    'marks_rows',
     'probe',
     'probe_text',
     'register',
@@ -417,10 +420,12 @@ class SafeMark:
         validate_mark(self)
 
 
-#: The approved two-cell marks.  Small on purpose: status, dots, data, comms and
-#: waiting cover an ordinary application, and every entry costs two cells wherever
-#: it is drawn.  Names do not reuse the one-cell catalog's names (both families
-#: share one registry, so `warn` is already U+26A0).
+#: The approved two-cell marks.  Small on purpose: status, dots, shapes, data,
+#: comms and waiting cover an ordinary application, and every entry costs two
+#: cells wherever it is drawn.  Names do not reuse the one-cell catalog's names
+#: (both families share one registry, so `warn` is already U+26A0).  A code point
+#: appears once, so a list that also names the bell and the speech balloon adds
+#: nothing: those are `bell` and `chat` already.
 BUILTIN_MARKS: dict[str, SafeMark] = {
     # --- status: the marks that have to be seen ------------------------------
     'ok': SafeMark('ok', '\u2705', 'v '),               # white heavy check mark
@@ -428,9 +433,12 @@ BUILTIN_MARKS: dict[str, SafeMark] = {
     'attention': SafeMark('attention', '\u2757', '! '),  # heavy exclamation
     'ask': SafeMark('ask', '\u2753', '? '),             # question ornament
     'stop': SafeMark('stop', '\U0001f6d1', '- '),       # octagonal sign
-    'ban': SafeMark('ban', '\u26d4', '# '),             # no entry
+    'ban': SafeMark('ban', '\u26d4', '# '),             # no-entry octagon
+    'denied': SafeMark('denied', '\U0001f6ab', 'X '),   # no-entry circle
     'siren': SafeMark('siren', '\U0001f6a8', '!!'),     # revolving light
     'boom': SafeMark('boom', '\U0001f4a5', '* '),       # collision symbol
+    'idea': SafeMark('idea', '\U0001f4a1', 'i '),       # electric light bulb
+    'build': SafeMark('build', '\U0001f6a7', 'C '),     # construction sign
     # --- dots: two cells of status colour ------------------------------------
     'dot_green': SafeMark('dot_green', '\U0001f7e2', 'G '),
     'dot_yellow': SafeMark('dot_yellow', '\U0001f7e1', 'Y '),
@@ -438,6 +446,16 @@ BUILTIN_MARKS: dict[str, SafeMark] = {
     'dot_blue': SafeMark('dot_blue', '\U0001f535', 'B '),
     'dot_black': SafeMark('dot_black', '\u26ab', 'K '),
     'dot_white': SafeMark('dot_white', '\u26aa', 'W '),
+    'radio': SafeMark('radio', '\U0001f518', 'r '),     # a dot in a ring
+    # --- shapes: emphatic geometry for a bullet column -----------------------
+    # Two stars, a heavy ring and three diamonds.  The fallback keeps the
+    # distinction the shape makes, so an ASCII row still reads as a column.
+    'star': SafeMark('star', '\u2b50', 's '),
+    'star_glow': SafeMark('star_glow', '\U0001f31f', 'S '),
+    'circle_heavy': SafeMark('circle_heavy', '\u2b55', '0 '),
+    'diamond_orange': SafeMark('diamond_orange', '\U0001f536', 'O '),
+    'diamond_blue': SafeMark('diamond_blue', '\U0001f537', 'D '),
+    'diamond_dot': SafeMark('diamond_dot', '\U0001f4a0', '. '),
     # --- data: the objects an app lists --------------------------------------
     'folder': SafeMark('folder', '\U0001f4c1', '[ '),
     'file': SafeMark('file', '\U0001f4c4', 'f '),
@@ -445,11 +463,14 @@ BUILTIN_MARKS: dict[str, SafeMark] = {
     'find': SafeMark('find', '\U0001f50d', 'o '),
     'lock': SafeMark('lock', '\U0001f512', 'L '),
     'key': SafeMark('key', '\U0001f511', 'k '),
+    'link': SafeMark('link', '\U0001f517', '> '),
+    'magnet': SafeMark('magnet', '\U0001f9f2', 'M '),
     # --- comms: the events an app reports ------------------------------------
     'mail': SafeMark('mail', '\U0001f4e7', '@ '),
     'bell': SafeMark('bell', '\U0001f514', 'n '),
     'chat': SafeMark('chat', '\U0001f4ac', 'm '),
     'globe': SafeMark('globe', '\U0001f30d', 'g '),
+    'net': SafeMark('net', '\U0001f310', 'N '),
     'package': SafeMark('package', '\U0001f4e6', 'p '),
     # --- waiting -------------------------------------------------------------
     'wait': SafeMark('wait', '\u23f3', 'w '),           # hourglass with sand
@@ -547,6 +568,7 @@ def _reset_state() -> None:
     _upgrade.clear()
     _audited.clear()
     _invalidate()
+    fonts.reset()
 
 
 def register(
@@ -576,6 +598,11 @@ def register(
     _registry[name] = Glyph(unicode_text, ascii_text, group=resolved_group)
     if probe:
         _add_probe(name)
+    if resolved_group != MARK_GROUP:
+        # Advisory only.  The blessed table is covered by a test, and a machine
+        # without the reference font is not a bug: console_window.fonts answers
+        # None then and records nothing.
+        fonts.check_registration('glyph', name, unicode_text)
     _invalidate()
 
 
@@ -681,6 +708,7 @@ def register_mark(name: str, emoji: str, ascii_text: str) -> None:
         if existing.emoji == spec.emoji and existing.name != name:
             raise ValueError(f'mark {existing.name!r} already draws {spec.emoji!r}')
     register(name, spec.emoji, spec.ascii, group=MARK_GROUP)
+    fonts.check_registration('mark', name, spec.emoji)
 
 
 def mark(name: str) -> str:
@@ -719,6 +747,39 @@ def marks_probe_text() -> str:
             continue
         shown.append(glyph.unicode)
     return ' '.join(shown)
+
+
+def marks_rows(width: int, per_row: int = CATALOG_PER_ROW) -> list[str]:
+    """Pack the approved marks into space-separated rows no wider than *width*.
+
+    The two-cell counterpart of :func:`catalog_rows`, for the built-in Fonts
+    section: the marks are always the Unicode ones, because the section exists
+    to show what the emoji font will have to draw.
+    """
+    rows: list[str] = []
+    row: list[str] = []
+    used = 0
+    for spec in marks():
+        item_width = string_width(spec.emoji)
+        needed = item_width if not row else item_width + 1
+        if row and (len(row) >= per_row or used + needed > width):
+            rows.append(' '.join(row))
+            row, used, needed = [], 0, item_width
+        row.append(spec.emoji)
+        used += needed
+    if row:
+        rows.append(' '.join(row))
+    return rows
+
+
+def font_missing() -> tuple[fonts.Missing, ...]:
+    """Registrations the reference font family cannot draw, in order.
+
+    Populated only when an application registers a glyph or a mark and the
+    expected family is installed (see :mod:`console_window.fonts`).  A help page
+    reads it; nothing on a draw path queries fonts.
+    """
+    return fonts.registered_missing()
 
 
 @dataclass(frozen=True)
@@ -1131,8 +1192,9 @@ def terminal_report(
     *environ* and *stream* exist so tests can supply a fake terminal.  The
     result is advisory except for ``ascii_required``, which is True only when
     the terminal provably cannot carry the glyphs (non-UTF-8 output encoding, or
-    ``TERM=dumb``).  A font's coverage cannot be observed, so the font-check
-    note asks the user to look instead.
+    ``TERM=dumb``).  A font's coverage cannot be observed, so the report does not
+    guess: every help page carries a built-in Fonts section with the real
+    symbols, and the user judges them there.
     """
     env = os.environ if environ is None else environ
     out = sys.stdout if stream is None else stream
@@ -1163,9 +1225,6 @@ def terminal_report(
             f'TERM={term} uses a console font that often lacks some of these '
             'symbols; restart with --ascii if any line shows boxes'
         )
-    notes.append(
-        f'font check: {probe_text()}  (if any symbol is a box or blank, use --ascii)'
-    )
     return TerminalReport(
         encoding=encoding, utf8=utf8, term=term,
         ascii_required=False, notes=tuple(notes),
@@ -1282,6 +1341,8 @@ class Glyphs:
     mark = staticmethod(mark)
     marks = staticmethod(marks)
     marks_probe_text = staticmethod(marks_probe_text)
+    marks_rows = staticmethod(marks_rows)
+    font_missing = staticmethod(font_missing)
     find_issues = staticmethod(find_issues)
     is_ascii = staticmethod(is_ascii)
     set_ascii = staticmethod(set_ascii)
