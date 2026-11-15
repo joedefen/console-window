@@ -8,8 +8,8 @@ This project follows [Semantic Versioning](https://semver.org/).
 ### Demos
 
 The single `demo-buffet.py` smorgasbord is retired.  The demos are now a family
-of feature-focused programs: sixteen lettered demos, `a-basic` through
-`p-key-debug`, one learning objective each, which share `demos/demo_kit.py`,
+of feature-focused programs: seventeen lettered demos, `a-basic` through
+`q-marks`, one learning objective each, which share `demos/demo_kit.py`,
 are indexed by `demos/features.py`, and run with `./demos/run-demo <name>`.
 The curriculum, the conventions, the feature-to-demo map, the reverse index and
 the demos' test posture are documented in
@@ -37,7 +37,9 @@ them.
   `header_rows + 4 + separator` rows.  The measurement happens before header
   truncation, so drawing on a narrow terminal cannot shrink it.  Later screens
   and later passes do not change it; `min_cols_rows=` remains the explicit
-  override.
+  override.  `ConsoleWindow.min_size` reports the effective `(cols, rows)` floor
+  in force, the same pair the size check enforces, so an app can show the fitted
+  floor instead of only the configured one.
 - A curated glyph catalog of 80 named symbols: UI marks, frames, arrows,
   triangles, filled/hollow shape pairs, blocks and bars, marks, math, currency
   and typography.  Every entry is one cell wide, has a plain ASCII fallback, and
@@ -46,6 +48,26 @@ them.
   characters in the active spelling, `Glyphs.catalog_rows(width)` packs them into
   measured display rows, and the theme picker page prints the whole catalog as a
   font check.
+- The catalog is grouped as data, not just comments: `Glyph.group`,
+  `Glyphs.catalog_entries()`, `Glyphs.group_of(name)` and
+  `Glyphs.lookup(name)` expose each symbol's family for iteration or lookup, and
+  `register(..., group=...)` declares an application family.  Re-registering a
+  built-in keeps its family.  The demo K font-check page uses the entries for a
+  glyph/fallback/unicode/name table with a dim divider where the family changes.
+- A two-cell mark family for the places where a one-cell symbol is too quiet:
+  `BUILTIN_MARKS` / `Glyphs.marks()` is 26 approved emoji whose contract is
+  width.  Every entry is one East-Asian-Width `W` code point, so it measures two
+  cells in the model and in the terminal, and appending VS16 cannot change that;
+  `Glyphs.mark(name)` returns the emoji, or its **two-cell** ASCII fallback, so
+  `--ascii` moves no column, and a name outside the family raises `KeyError`.
+  The rules are enforced at import by `validate_mark()` (one code point,
+  `EAW=W`, two cells with and without a selector, a two-cell ASCII fallback).
+  `Glyphs.find_issues(text)` reports the four unsafe cases -- VS16-promoted,
+  zero-width joiner, East-Asian Ambiguous, unapproved -- with a suggestion, and
+  the glyph audit now speaks in those verdicts, in both modes and once per code
+  point.  The one-cell catalog is unchanged: `catalog_items()` still lists no
+  emoji, and `include_marks=True` is the opt-in for a page that wants both.
+  **Safe marks** — see demo: q-marks.
 - `IncrementalSearchBar.reset(initial_text='')` leaves search mode with the
   given text and runs no callback, so a clear action can drop a pattern without
   pretending to cancel an edit.
@@ -56,6 +78,19 @@ them.
   **Regex filter** — see demo: e-search.
 
 ### Changed
+- The copyable prompt hint in the prompt tests reads `["{mode}" or ESC] ❗`
+  instead of the VS16-promoted `⚠️`: the selector makes the base one or two
+  cells depending on the terminal.  The tests that *measure* VS16 keep it on
+  purpose, as the fixtures for the rule.
+- The demo-mode last-key badge is drawn at the right edge of the first header
+  line instead of butting against the last hint, and it fades two seconds after
+  the key arrives while demo mode itself stays on.  Demo P binds the mode as a
+  cycling bool (`[K]:keys=off/ON`, default off) and adds `c` to cycle the
+  column-header case, so a key leaves a lasting mark after the badge is gone.
+  Its width table uses an East-Asian-Width `W` emoji rather than a
+  VS16-promoted narrow glyph, because terminals disagree on whether the
+  selector doubles the base cell.
+  **Last-key badge** — see demo: p-key-debug.
 - The help screen is three bands: the `NavKeys:` legend, a body headed
   `Keys for '<screen>':` for the screen the help was pushed from, and an
   `---------- Instructions ----------` block whose paragraphs are drawn in the

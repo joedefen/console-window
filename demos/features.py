@@ -31,6 +31,7 @@ DEMO_ORDER: tuple[str, ...] = (
     'n-suspend',
     'o-large-bodies',
     'p-key-debug',
+    'q-marks',
 )
 
 #: feature key -> demo short name.  The key names a learning objective, not an
@@ -66,6 +67,9 @@ FEATURES: dict[str, str] = {
     'inline-confirmation': 'g-dialogs',
     'large-body': 'o-large-bodies',
     'live-data': 'a-basic',
+    'mark-catalog': 'q-marks',
+    'mark-detector': 'q-marks',
+    'mark-fallback': 'q-marks',
     'max-rows': 'o-large-bodies',
     'min-size': 'o-large-bodies',
     'mono-theme': 'j-themes',
@@ -82,6 +86,7 @@ FEATURES: dict[str, str] = {
     'read-only-screen': 'l-text-screens',
     'redraw-recovery': 'o-large-bodies',
     'regex-filter': 'e-search',
+    'safe-marks': 'q-marks',
     'scoped-escape': 'e-search',
     'screen-stack': 'b-stack',
     'scroll-indicator': 'o-large-bodies',

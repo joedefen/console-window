@@ -4,13 +4,17 @@ import pytest
 
 from console_window.glyphs import (
     BUILTIN_GLYPHS,
+    BUILTIN_GROUPS,
     DEPRECATED_GLYPHS,
     Glyph,
     Glyphs,
+    catalog_entries,
     catalog_items,
     catalog_rows,
     get,
+    group_of,
     is_ascii,
+    lookup,
     probe_text,
     register,
     register_many,
@@ -194,3 +198,70 @@ def test_every_deprecated_spelling_maps_to_a_registered_replacement():
         # A deprecated form still present as a built-in would never upgrade,
         # and the app-wins rule would never fire, so the table would be dead.
         assert old not in registered, old
+
+
+def test_every_builtin_has_one_group_and_the_groups_are_contiguous():
+    grouped = {}
+    for group, names in BUILTIN_GROUPS:
+        for name in names:
+            assert name not in grouped, name
+            grouped[name] = group
+    assert set(grouped) == set(BUILTIN_GLYPHS)
+    for name, glyph in BUILTIN_GLYPHS.items():
+        assert glyph.group == grouped[name], name
+    groups = [group for group, _names in BUILTIN_GROUPS]
+    assert len(groups) == len(set(groups))
+
+
+def test_group_of_and_lookup_expose_the_family():
+    assert group_of('infinity') == 'math'
+    assert lookup('infinity').group == 'math'
+    assert lookup('infinity').unicode == '\u221e'
+    with pytest.raises(KeyError, match='no-such-glyph'):
+        group_of('no-such-glyph')
+    with pytest.raises(KeyError, match='no-such-glyph'):
+        lookup('no-such-glyph')
+
+
+def test_a_new_app_glyph_joins_the_application_group():
+    register('tick', '\u2713', 'OK')
+    assert group_of('tick') == 'application'
+
+
+def test_re_registering_a_builtin_keeps_its_family():
+    register('cursor', '\u258f', '|')
+    assert group_of('cursor') == 'ui'
+
+
+def test_register_many_does_not_move_an_overridden_builtin():
+    register_many({'cursor': Glyph('\u258f', '|')})
+    assert group_of('cursor') == 'ui'
+
+
+def test_register_many_can_declare_a_family_explicitly():
+    register_many({'tick': Glyph('\u2713', 'OK', group='status')})
+    assert group_of('tick') == 'status'
+
+
+def test_catalog_entries_list_every_name_and_family_in_catalog_order():
+    entries = catalog_entries()
+    assert len(entries) == len(BUILTIN_GLYPHS)
+    assert entries[0].name == 'cursor'
+    assert entries[0].group == 'ui'
+    # Names that draw the same character stay separate entries; the flat sample
+    # list is the one that collapses them.
+    assert [entry.name for entry in entries].count('swatch') == 1
+    assert len(catalog_items()) < len(entries)
+    groups = []
+    for entry in entries:
+        if not groups or groups[-1] != entry.group:
+            groups.append(entry.group)
+    assert groups[0] == 'ui'
+    assert groups[-1] == 'typography'
+    assert len(groups) == len(set(groups))
+
+
+def test_catalog_entries_follow_the_active_spelling():
+    assert catalog_entries()[0].active == BUILTIN_GLYPHS['cursor'].unicode
+    set_ascii(True)
+    assert catalog_entries()[0].active == BUILTIN_GLYPHS['cursor'].ascii

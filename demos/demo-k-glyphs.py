@@ -6,8 +6,9 @@ Base: c-options
 Run:  ./demos/run-demo k-glyphs --ascii
 
 The catalog page is the font check: if a symbol is a box or a blank, restart
-with ``--ascii``.  ``Glyphs.catalog_rows()`` packs the whole registered set into
-measured rows, so the page also doubles as the sample of every symbol.
+with ``--ascii``.  The table lists every registered glyph with its fallback,
+its code point and its name, grouped by family with a dim divider, so a missing
+glyph can be identified rather than merely noticed.
 
 The application vocabulary comes from ``ConsoleWindowOpts(glyphs=...)``.  Here
 ``tick`` falls back to ``OK`` in ASCII mode; the window registers it, so
@@ -17,14 +18,22 @@ The application vocabulary comes from ``ConsoleWindowOpts(glyphs=...)``.  Here
 
 from __future__ import annotations
 
+import curses as cs
 from typing import ClassVar
 
 from demo_kit import DemoApp, DemoScreen, run_main
 
 from console_window import Glyphs
+from console_window.glyphs import CatalogEntry
+from console_window.textwidth import ljust, string_width
 
 DEMO_GLYPHS = {'tick': ('\u2713', 'OK')}
 DEMO_PROBE = ('tick', 'cursor', 'choice', 'scroll_prev', 'scroll_next')
+
+
+def _codepoint(character: str) -> str:
+    """The Unicode column's payload, e.g. ``U+2502``."""
+    return f'U+{ord(character):04X}'
 
 
 class GlyphScreen(DemoScreen):
@@ -32,16 +41,56 @@ class GlyphScreen(DemoScreen):
 
     def draw_screen(self) -> None:
         self.set_pick_mode(False)
-        mode = 'ASCII' if self.win.ascii_mode else 'Unicode'
-        self.add_fancy_header(
-            f'K-glyphs  mode={mode}  [?]:help  [q]uit',
-            mode='Underline',
-        )
+        self.add_fancy_header('K-glyphs  [?]:help  [q]uit', mode='Underline')
         self.add_header(f'font check: {Glyphs.probe_text()}')
-        self.add_header(f'application glyph: {Glyphs.get("tick")} (tick)')
-        self.add_header('catalog:')
-        for line in Glyphs.catalog_rows(self.win.get_pad_width()):
-            self.add_body(line)
+
+        entries = Glyphs.catalog_entries()
+        glyph_width, fallback_width, unicode_width = self._column_widths(entries)
+        self.add_header(
+            f'{"glyph":<{glyph_width}}  '
+            f'{"fallback":<{fallback_width}}  '
+            f'{"unicode":<{unicode_width}}  '
+            'name',
+            attr=cs.A_BOLD,
+        )
+
+        width = self.win.get_pad_width()
+        group = None
+        for entry in entries:
+            if entry.group != group:
+                group = entry.group
+                self.add_body(self._group_divider(group, width), attr=cs.A_DIM)
+            self.add_body(self._table_row(
+                entry, glyph_width, fallback_width, unicode_width))
+
+    @staticmethod
+    def _column_widths(entries: list[CatalogEntry]) -> tuple[int, int, int]:
+        """Widths wide enough for both the titles and every row."""
+        glyph_width = max(
+            len('glyph'), *(string_width(entry.active) for entry in entries))
+        fallback_width = max(
+            len('fallback'), *(string_width(entry.ascii) for entry in entries))
+        unicode_width = max(
+            len('unicode'), *(len(_codepoint(entry.unicode)) for entry in entries))
+        return glyph_width, fallback_width, unicode_width
+
+    @staticmethod
+    def _table_row(entry: CatalogEntry, glyph_width: int,
+                   fallback_width: int, unicode_width: int) -> str:
+        return (
+            f'{ljust(entry.active, glyph_width)}  '
+            f'{ljust(entry.ascii, fallback_width)}  '
+            f'{ljust(_codepoint(entry.unicode), unicode_width)}  '
+            f'{entry.name}'
+        )
+
+    @staticmethod
+    def _group_divider(group: str, width: int) -> str:
+        """A rule that names the family it starts."""
+        label = f'{group} '
+        rule = Glyphs.get('box_h')
+        return label + rule * max(1, width - string_width(label))
+
 
 class GlyphApp(DemoApp):
     title = 'K-glyphs'

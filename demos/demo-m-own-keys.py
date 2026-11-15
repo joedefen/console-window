@@ -29,9 +29,14 @@ from demo_kit import (
     row_line,
     run_main,
 )
+from PrimeRows import PrimeRows
+
+#: One churn pass every five seconds.  Paging and the header are the lesson
+#: here, so the table should stay calm while the page is being read.
+PrimeRows.thaw_secs = 5.0
 
 MAIN_ST = 0
-PAGE_SIZE = 25
+PAGE_SIZE = 100
 
 
 class OwnKeysScreen(DemoScreen):
@@ -48,29 +53,44 @@ class OwnKeysScreen(DemoScreen):
     def draw_screen(self) -> None:
         self.set_pick_mode(False)
         self.add_fancy_header(
-            f'M-own-the-navigation-keys  page {self.page + 1}/{self.page_count}  '
-            f'LEFT:prev RIGHT:next [?]:help [q]uit',
+            'M-own-the-navigation-keys  LEFT:prev RIGHT:next [?]:help [q]uit',
             mode='Underline',
             line_attr=cs.A_DIM,
         )
-        self.add_header('LEFT and RIGHT are application keys in this window')
-        self.add_header(COLUMN_HEADER, attr=cs.A_BOLD)
+        self.add_header('NOTE: LEFT and RIGHT are application keys in this window')
         start = self.page * PAGE_SIZE
-        for row in self.app.rows[start:start + PAGE_SIZE]:
+        page_rows = self.app.rows[start:start + PAGE_SIZE]
+        self.add_header(
+            f'{COLUMN_HEADER}{" " * 12}'
+            f'Page: {self.page + 1}/{self.page_count} '
+            f'[{page_rows[0]["rank"]}-{page_rows[-1]["rank"]}]',
+            attr=cs.A_BOLD,
+        )
+        for row in page_rows:
             self.add_body(row_line(row, self.app.iteration))
 
+    def _go_top(self) -> None:
+        """Put the body at its first row when the page under it changes."""
+        self.pick_pos = 0
+        self.scroll_pos = 0
+        self.free_scroll = False
+
     def prev_page_ACTION(self) -> None:
-        self.page = max(0, self.page - 1)
-        self.win.status(f'page {self.page + 1}/{self.page_count}',
-                        timeout=1.0)
+        page = max(0, self.page - 1)
+        if page != self.page:
+            self.page = page
+            self._go_top()
 
     def next_page_ACTION(self) -> None:
-        self.page = min(self.page_count - 1, self.page + 1)
-        self.win.status(f'page {self.page + 1}/{self.page_count}',
-                        timeout=1.0)
+        page = min(self.page_count - 1, self.page + 1)
+        if page != self.page:
+            self.page = page
+            self._go_top()
 
 class OwnKeysApp(DemoApp):
     title = 'M-own-the-navigation-keys'
+    #: Five pages of one hundred ranks, so LEFT/RIGHT have somewhere to go.
+    row_range = (1, 500)
     win_options: ClassVar[dict[str, object]] = {
         'taken_nav_keys': {
             cs.KEY_LEFT: 'prev page',

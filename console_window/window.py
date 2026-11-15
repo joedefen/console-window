@@ -251,6 +251,11 @@ _JUMP_TO_PICKABLE_KEYS = frozenset({
     curses.KEY_HOME, curses.KEY_END,
 })
 
+# How long the demo-mode indicator stays on the header after a key press.
+# Long enough to read, short enough that a forgotten key does not linger while
+# demo mode itself stays on (the mode is a setting; the badge is a trace).
+_DEMO_KEY_TTL: float = 2.0
+
 # Compact demo-mode names for the keys whose plain curses name would be
 # unwieldy or ambiguous in the header indicator.  Printable keys are handled
 # separately (centered with spaces), so this table only covers the rest.
@@ -687,6 +692,10 @@ class ConsoleWindow:
         self.handled_keys = set(self.opts.keys) if isinstance(self.opts.keys, (set, list)) else set()
         self.pending_keys: set[int] = set()
         self.last_demo_key = ''  # Last key pressed in demo mode
+        # When that key arrived, so the indicator can fade after _DEMO_KEY_TTL.
+        # ``None`` means "no timestamp", which keeps a key set directly on the
+        # attribute (a test, an application) visible.
+        self._demo_key_at: float | None = None
         self.passthrough_mode = False  # When True, all printable keys pass through
         # In-place prompt widget and the passthrough value to restore when it
         # ends, so a callback can start the next prompt (see begin_prompt()).
@@ -748,7 +757,29 @@ class ConsoleWindow:
             self.opts.demo_mode = bool(enabled)
         if not self.opts.demo_mode:
             self.last_demo_key = ''
+            self._demo_key_at = None
         return self.opts.demo_mode
+
+    def _visible_demo_key(self) -> str:
+        """The badge text to draw, or '' once the key has faded.
+
+        Demo mode is a setting and lasts until it is turned off; the key it
+        echoes is a trace of the last input, so it expires.  The loop redraws
+        every pass (a getch() timeout is visible as a new frame), which is when
+        the expiry is noticed and the header repaints without the badge.
+        """
+        if not self.opts.demo_mode or not self.last_demo_key:
+            return ''
+        # getattr: a window reconstructed without __init__ (tests, a light
+        # shim) has no timestamp, and a key set directly on the attribute is
+        # then taken as fresh rather than as long expired.
+        arrived = getattr(self, '_demo_key_at', None)
+        if arrived is not None:
+            if time.monotonic() - arrived >= _DEMO_KEY_TTL:
+                self.last_demo_key = ''
+                self._demo_key_at = None
+                return ''
+        return self.last_demo_key
 
     def _format_key_for_demo(self, key: int) -> str:
         label = _DEMO_KEY_LABELS.get(key)
@@ -970,6 +1001,19 @@ class ConsoleWindow:
         # observable without the library deciding to abort the app.
         return self.head.rows_dropped + self.body.rows_dropped
 
+    @property
+    def min_size(self) -> tuple[int, int]:
+        """The effective ``(cols, rows)`` floor in force right now.
+
+        It starts at ``opts.min_cols_rows`` and grows once, after the first
+        frame is painted, to fit that frame's widest header (capped at 60
+        columns) and its header height plus a small body.  This is the pair
+        :meth:`_check_min_size` enforces and displays on a terminal that is too
+        small, so an application can show the same truth instead of the
+        configured floor alone.
+        """
+        return self._min_size()
+
     def _is_pickable(self, row: int) -> bool:
         if row < 0 or row >= len(self.body.contexts):
             return True  # Default to pickable if no context
@@ -1042,7 +1086,8 @@ class ConsoleWindow:
         fit: tuple[int, int] | None = getattr(self, '_auto_min_cols_rows', None)
         if fit is None:
             return floor_cols, floor_rows
-        return max(floor_cols, fit[0]), max(floor_rows, fit[1])
+        fit_cols, fit_rows = cast(tuple[int, int], fit)
+        return max(floor_cols, fit_cols), max(floor_rows, fit_rows)
 
     def _finalize_min_size(self) -> None:
         """Fold the first painted screen's shape into the minimum, once.
@@ -1718,14 +1763,18 @@ class ConsoleWindow:
         # Check if this is the first header line
         is_first_header = (ns.row_cnt == 0)
 
-        # Add demo indicator to first header if demo mode is active
-        if is_first_header and self.opts.demo_mode and self.last_demo_key:
-            # Pad to max_header_len + 2 spaces
-            padding_needed = max(0, ns.max_header_len + 2 - visible_length)
-            if padding_needed > 0:
-                result_sections.append((' ' * padding_needed, None))
-            # Add demo key in reverse video
-            result_sections.append((self.last_demo_key, curses.A_REVERSE))
+        # Add the demo indicator to the first header, at the right edge of the
+        # header band (the "corner" the feature documents) rather than against
+        # max_header_len: that value is measured per span while the line is
+        # appended, so using it put the badge flush against the last hint.
+        # The row is truncated to the pad width, so a header that already fills
+        # the line simply leaves no room and the badge is dropped.
+        demo_key = self._visible_demo_key() if is_first_header else ''
+        if demo_key:
+            key_width = textwidth.string_width(demo_key)
+            gap = max(1, self.get_pad_width() - visible_length - key_width)
+            result_sections.append((' ' * gap, None))
+            result_sections.append((demo_key, curses.A_REVERSE))
 
         # Now output the sections onto the header row, resuming each segment
         for idx, (text, attr) in enumerate(result_sections):
@@ -3040,10 +3089,12 @@ class ConsoleWindow:
         # just like any other application key.
         if self.opts.demo_mode and key not in self.opts.nav_keys:
             self.last_demo_key = self._format_key_for_demo(key)
+            self._demo_key_at = time.monotonic()
 
     def _clear_demo_indicator(self) -> None:
         if self.opts.demo_mode:
             self.last_demo_key = ''
+            self._demo_key_at = None
 
     def _is_passthrough_key(self, key: int) -> bool:
         return (32 <= key <= 126 or key in _PASSTHROUGH_EDITING_KEYS

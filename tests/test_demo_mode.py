@@ -1,4 +1,5 @@
 import curses
+import time
 
 import pytest
 
@@ -48,6 +49,33 @@ def test_return_value_tracks_new_state():
     assert win.set_demo_mode(True) is True
     assert win.set_demo_mode(False) is False
     assert win.set_demo_mode(None) is True  # toggles back on
+
+
+def test_demo_badge_is_visible_while_the_key_is_fresh():
+    win = make_window(demo_mode=True, last_demo_key=' k ')
+    win._demo_key_at = time.monotonic()  # pylint: disable=protected-access
+    assert win._visible_demo_key() == ' k '  # pylint: disable=protected-access
+
+
+def test_demo_badge_fades_after_two_seconds():
+    win = make_window(demo_mode=True, last_demo_key='ESC')
+    win._demo_key_at = time.monotonic() - 3.0  # pylint: disable=protected-access
+    assert win._visible_demo_key() == ''  # pylint: disable=protected-access
+    # The trace is gone; the mode itself is untouched by the fade.
+    assert win.opts.demo_mode is True
+    assert win.last_demo_key == ''
+
+
+def test_demo_badge_without_a_timestamp_stays_visible():
+    # A key set directly on the attribute (an application, a test) has no
+    # recorded arrival time and must not be treated as long expired.
+    win = make_window(demo_mode=True, last_demo_key=' k ')
+    assert win._visible_demo_key() == ' k '  # pylint: disable=protected-access
+
+
+def test_demo_badge_is_hidden_when_the_mode_is_off():
+    win = make_window(demo_mode=False, last_demo_key=' k ')
+    assert win._visible_demo_key() == ''  # pylint: disable=protected-access
 
 
 @pytest.mark.parametrize(('key', 'label'), [

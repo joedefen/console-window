@@ -159,12 +159,14 @@ def test_every_key_is_consumable_while_active():
 # --- answer hint ------------------------------------------------------------
 
 def test_answer_hint_replaces_the_default_suffix():
+    # An approved mark, not ⚠️: the hint is the line an application copies, and
+    # a VS16-promoted base is one or two cells depending on the terminal.
     win = _window()
     try:
         win.begin_prompt('Proceed?', mode='y',
-                         answer_hint='["{mode}" or ESC] ⚠️')
+                         answer_hint='["{mode}" or ESC] ❗')
 
-        assert win.prompt_line.get_display_string() == 'Proceed?  ["y" or ESC] ⚠️'
+        assert win.prompt_line.get_display_string() == 'Proceed?  ["y" or ESC] ❗'
     finally:
         win.stop_curses()
 
@@ -185,9 +187,9 @@ def test_answer_hint_is_plain_text_not_a_format_string():
     win = _window()
     try:
         win.begin_prompt('Proceed?', mode='y',
-                         answer_hint='["{mode}" or ESC] {⚠️}')
+                         answer_hint='["{mode}" or ESC] {❗}')
 
-        assert win.prompt_line.get_display_string() == 'Proceed?  ["y" or ESC] {⚠️}'
+        assert win.prompt_line.get_display_string() == 'Proceed?  ["y" or ESC] {❗}'
     finally:
         win.stop_curses()
 

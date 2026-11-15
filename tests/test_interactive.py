@@ -388,6 +388,17 @@ def test_the_minimum_starts_at_the_bare_floor(make):
     assert win._min_size() == (20, 5)
 
 
+def test_min_size_reports_the_same_floor_the_check_enforces(make):
+    win, _backend = make()
+    assert win.min_size == (20, 5)
+    screen_of(win).add_header('x' * 52)
+    win.render()
+    win.prompt(seconds=0.01)
+    # 52 header cells + 3 wiggle; 1 header row + 4 body rows + the separator.
+    assert win.min_size == (55, 6)
+    assert win.min_size == win._min_size()
+
+
 def test_the_first_screen_sets_the_minimum_once(make):
     win, _backend = make()
     screen = screen_of(win)

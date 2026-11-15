@@ -43,7 +43,7 @@ For development, the demos run directly against your working tree — no install
 ./demos/run-demo features    # the feature -> demo owner map
 ```
 
-A, B and C are complete single-file programs; D–P are short deltas on `demos/demo_kit.py`. The full curriculum, feature ownership and change rule are in [`docs/DEMO-APPS.md`](docs/DEMO-APPS.md).
+A, B and C are complete single-file programs; D–Q are short deltas on `demos/demo_kit.py`. The full curriculum, feature ownership and change rule are in [`docs/DEMO-APPS.md`](docs/DEMO-APPS.md).
 
 Every demo takes the same display switches:
 
@@ -90,7 +90,7 @@ it -- every one has a help page, and its keys are spinner registrations, so the
 help page lists them (a test enforces both): picking, search, in-place prompts,
 dialogs, messages, headers, themes, glyphs, read-only text, navigation
 ownership, suspend/resume, large bodies, and width/debug aids.
-[`docs/DEMO-APPS.md`](docs/DEMO-APPS.md) lists all sixteen, the feature each
+[`docs/DEMO-APPS.md`](docs/DEMO-APPS.md) lists all seventeen, the feature each
 one owns, and the rule that a library feature change names its demo in the
 changelog.
 
@@ -287,7 +287,8 @@ The UI is built around non-ASCII symbols (`│`, `➤`, `█`, `⬅`, `➡`, `·
 * **Only registered symbols are rewritten.** `Grüße` stays `Grüße`: the substitution table contains the catalog's characters, never arbitrary text, so letters, digits and unregistered code points pass through byte for byte. A registered typographic mark does follow the mode, which is the point of it — an em dash inside file content becomes `--` on an ASCII terminal rather than a box. The eight spellings this library used to draw (`⮞`, `←`, `→`, `↑`, `↓`, `○`, `□`, `■`) are upgraded to their replacements (`➤`, `⬅`, `➡`, `⬆`, `⬇`, `◯`, `◻`, `◼`) in **both** modes, so text written against an older release renders from the font that has it — inside content as well. Registering an old code point yourself keeps it. Set `CONSOLE_WINDOW_GLYPH_AUDIT=1` to log each decorative code point you use but
   did not register, with the exact `register()` call to add.
 
-* **A catalog to choose from.** The registry carries about eighty named symbols, grouped as UI marks, frames, arrows, triangles, filled/hollow shape pairs, blocks and bars, marks, math, currency and typography. Every one is a single cell wide and is covered by the default monospace font on Debian, Ubuntu and Fedora (DejaVu Sans Mono), so it is safe to use without a patched font: no emoji, no icon fonts. `Glyphs.catalog()` returns the set in the active spelling and `Glyphs.catalog_rows(width)` packs it into display rows; the theme picker page prints all of them, so that page doubles as the font check. A character has exactly one fallback even when two names draw it (`cursor_block` and `swatch` are the same block).
+* **A catalog to choose from.** The registry carries about eighty named symbols, grouped as UI marks, frames, arrows, triangles, filled/hollow shape pairs, blocks and bars, marks, math, currency and typography. Every one is a single cell wide and is covered by the default monospace font on Debian, Ubuntu and Fedora (DejaVu Sans Mono), so it is safe to use without a patched font: no emoji, no icon fonts. `Glyphs.catalog()` returns the set in the active spelling and `Glyphs.catalog_rows(width)` packs it into display rows; the theme picker page prints all of them, so that page doubles as the font check. `Glyphs.catalog_entries()` adds the name and family (`Glyphs.group_of('infinity')` is `'math'`) for a table or a grouped listing, and `Glyphs.lookup()` returns the whole `Glyph`. A character has exactly one fallback even when two names draw it (`cursor_block` and `swatch` are the same block).
+* **Two-cell marks, on purpose.** Some rows need a mark that is *seen*: a status column, a prompt badge. `Glyphs.marks()` is a small approved family (26 emoji) whose contract is width, not beauty: every entry is a single East-Asian-Width `W` code point, so it measures two cells in this library and in the terminal, and appending a variation selector cannot change that. `Glyphs.mark('ok')` returns the emoji, or its two-cell ASCII fallback after `--ascii`, so switching modes never moves a column; a name outside the family raises `KeyError`. `Glyphs.find_issues(text)` reports the four ways a mark is unsafe (VS16-promoted, zero-width joiner, East-Asian Ambiguous, unapproved) and says what to use instead, which is the quickest development-time check for a prompt or a table. The one-cell catalog above still promises no emoji; this is a separate family, designed in [`docs/Emoji-support.md`](docs/Emoji-support.md).
 * **App vocabulary.** Register what only your app draws:
 
   ```python

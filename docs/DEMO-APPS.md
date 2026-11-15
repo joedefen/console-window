@@ -1,6 +1,6 @@
 # Demo apps: a lettered family
 
-Status: **implemented** — the sixteen demos, `demo_kit.py` and `features.py`
+Status: **implemented** — the seventeen demos, `demo_kit.py` and `features.py`
 exist and `demo-buffet.py` is gone.  The demos are showcase programs, not
 library code: the test suite does not assert their screens, keys or manifest,
 and `demos/` is outside the coverage measurement.  This document remains the
@@ -19,7 +19,7 @@ adding one more feature to it made it worse.
   single-file starting points for the degenerate cases; C is the complete
   full-shape file to copy.
 - A feature is taught once.  Later demos reuse it without re-explaining it.
-- The set is bounded: **16 demos, A through P**, inside the 10–20 range.  A, B
+- The set is bounded: **17 demos, A through Q**, inside the 10–20 range.  A, B
   and C are the complete programs; every later demo is a short delta on the
   shared `demo_kit.py`, not a copy of a base.  If the family still feels large,
   the first candidates to fold are H (messages) into G (dialogs) and P (key
@@ -61,7 +61,7 @@ not police it.
   e.g. `./demos/run-demo a-basic`.
 - **Complete examples and deltas:** A and B are complete, standalone programs
   and the degenerate showcases.  C is the complete full-shape program and the
-  file to copy.  D–P import `demos/demo_kit.py`, which carries the full shape
+  file to copy.  D–Q import `demos/demo_kit.py`, which carries the full shape
   (window, stack, spinner with `? - help`, help page, loop, table, sample data)
   and none of the feature additions.  Each later demo adds only its row's
   features and stays short.  No demo imports another demo; `demo_kit.py` and
@@ -107,7 +107,7 @@ not police it.
 The unit of ownership is a **learning objective**, not an API symbol.  The
 picking model is one feature even though it uses `set_pick_mode()`, `Context`
 and `abut`; `status-levels` and `flash` are two because they are separate
-lessons.  This keeps the family at 16 demos instead of one per API call.
+lessons.  This keeps the family at 17 demos instead of one per API call.
 
 `demos/features.py` is the machine-readable owner map:
 
@@ -159,7 +159,7 @@ Run:  ./demos/run-demo d-pick
 ## The family
 
 Base names the curriculum lineage a reader should have seen first.  A and B are
-the degenerate showcases; C is the full shape and the file to copy.  D–P import
+the degenerate showcases; C is the full shape and the file to copy.  D–Q import
 `demo_kit.py`, which carries the full shape but none of the feature additions.
 The "Adds" column is the ownership list; the appendix is the same list sorted
 for lookup.
@@ -176,12 +176,14 @@ for lookup.
 | H | **Messages** — `h-messages` | C | `status()` with `level='info' / 'warn' / 'error'` and `timeout=`. `status('')`, `clear_status()` and `current_status`. Separator-row placement, truncation before the scroll indicator, and deferred status when `head_line=False`. `flash()` as a timed modal message. The per-message `attr=` override. The header's second line repeats the payload decorated per level (plain, bold, bold and reversed; `info` is plain there rather than the separator row's dim), so a status never vanishes into the dim band; `PrimeRows.thaw_secs = 5.0` keeps the table still behind the message. |
 | I | **Header modes** — `i-headers` | C | `HeaderLine` tokens (`label()`, `text()`, `bracket_key()`) passed to `add_fancy_header()`, so the declared roles survive while the fancy path treats the bracket delimiters as markup. The single header line carries a LABEL title, KEY spans and plain text at once, and `m` cycles `mode='Off' / 'Underline' / 'Reverse'` (Off styles nothing and keeps the brackets literal) to show how each role is emphasized. `PrimeRows.thaw_secs = 5.0` keeps the table calm while the header is compared. |
 | J | **Themes and appearance** — `j-themes` | C | `Theme.create_picker_screen()` with `cycle_key=`. `ThemeStore` / `Theme.initial()` persistence. `win.set_theme()` as per-window state versus `Theme.set_active()` as process state. `mono`, `NO_COLOR` and `--theme`. `Appearance.semantic_attr()` for semantic body rows. `captions=` role renaming and the `swatch_attr()` / `swatch_rows()` overrides. `t` cycles the window's theme from the table and saves the choice through the same store, while `T` opens the picker (`t` cycles there too), so one key is bound on two screens with different scopes. `PrimeRows.thaw_secs = 5.0` keeps the table calm while the colors change. |
-| K | **Glyphs and ASCII** — `k-glyphs` | C | `Glyphs.catalog()` / `catalog_rows()` as a font-check page. Application vocabulary through `ConsoleWindowOpts(glyphs=..., glyphs_probe=...)`. `Glyphs.get()` in content and its ASCII fallback. `--ascii`, `--glyphs` and `CONSOLE_WINDOW_GLYPHS`. `help.glyph_paragraph()` with `show_display_notes`. This is also the home for the deferred "show the whole catalog" sample page. |
+| K | **Glyphs and ASCII** — `k-glyphs` | C | `Glyphs.catalog_entries()` as a grouped font-check table: glyph, fallback, code point and name, with a dim divider when the family changes. `Glyphs.group_of()` / `Glyphs.lookup()` expose the family for a lookup or an iteration, while `catalog_rows()` remains the flat sample list. Application vocabulary through `ConsoleWindowOpts(glyphs=..., glyphs_probe=...)`. `Glyphs.get()` in content and its ASCII fallback. `--ascii`, `--glyphs` and `CONSOLE_WINDOW_GLYPHS`. `help.glyph_paragraph()` with `show_display_notes`. |
 | L | **Read-only screens** — `l-text-screens` | C | `BasicTextScreen` and `set_text()` accepting `str` or `(text, attr)`. A `BasicHelpScreen` subclass with `extra_help_paragraphs()`, drawn under an `Instructions` separator as bulleted prose with a hanging indent. A read-only text screen with no spinner. The default `escape_ACTION()` pop. |
 | M | **Own the navigation keys** — `m-own-keys` | C | `ConsoleWindowOpts(taken_nav_keys={key: label})`. `OptionSpinner(..., nav_keys=opts.nav_keys)`. LEFT/RIGHT as previous/next page, while dialogs still use them for the caret. The help legend showing the application's labels instead of the reserved arrows. |
 | N | **Pause and run** — `n-suspend` | C | `suspend_curses()` / `resume_curses()`. Running an external program between them: a small shell script that clears the screen, echoes the command it runs (`+ ls -l /bin/*sh | head -n 8`), lists those real files, then holds the terminal at `===>  Return to screen?` until ENTER, so the hand-back is visible instead of instantaneous. Content and pick state surviving the hand-back, with the next `render()` repainting. The help page states what `e` is expected to do and what survives. |
-| O | **Large bodies and limits** — `o-large-bodies` | C | A 2,000+ row body with viewport-sized pads. The scroll indicator on a long body. The `max_rows` safety ceiling, its one-time `UserWarning`, and `rows_dropped`. `min_cols_rows`, the one-time minimum-size fit, and `TerminalTooSmallError`. Resize recovery and `render(redraw=True)`. |
-| P | **Keys and widths** — `p-key-debug` | C | `set_demo_mode()` and the last-key indicator. `textwidth.string_width()` and `truncate()` for cell-accurate layout. Wide CJK, emoji and combining marks aligned in columns. |
+| O | **Large bodies and limits** — `o-large-bodies` | C | A body that starts at 2,000 ranks and grows by 509 per `+` / shrinks by 251 per `-`, showing every `PrimeRows` field except the palindrome flag (rank, prime, digits, digit sum, binary, mod 10, gap, spelled), with viewport-sized pads. The scroll indicator on a long body. The `max_rows` safety ceiling (10,000) and `rows_dropped`; the demo captures the library's stderr `UserWarning` (which would corrupt the curses display) and replaces it with one `alert()` per run that waits for ENTER — enough of a slap in the face to deal with or ignore. `min_cols_rows`, the one-time minimum-size fit, and `TerminalTooSmallError`; the second header line prints `ConsoleWindow.min_size` and the `rows=/dropped=` pair, so the configured 40-column floor can be seen rising to the 60-column cap. Resize recovery and `render(redraw=True)`; `PrimeRows.thaw_secs = 10.0` keeps the spelled column calm while the row count moves. |
+| P | **Keys and widths** — `p-key-debug` | C | `set_demo_mode()` bound as a cycling bool (`[K]:keys=off/ON`) and the last-key badge, drawn at the right edge of the first header line and faded two seconds after the key arrives while the mode stays on. `textwidth.string_width()`, `truncate()` and `ljust()`/`rjust()` for a cell-accurate table whose heading carries the same framing pipes as the body, so the columns start on the same cells. Wide CJK, a Wide emoji and combining marks aligned in columns; a `trunc6` column prefixes five `-` cells so the cut is visible, and a wide glyph that would straddle the boundary is dropped whole. The table uses an East-Asian-Width `W` emoji rather than a VS16-promoted narrow glyph, because terminals disagree on whether the selector doubles it (the disagreement is explained in the help page). `c` cycles the column-header case through lower/Title/UPPER -- a lasting mark for a key whose badge fades. |
+
+| Q | **Marks that stay two cells** — `q-marks` | C | `Glyphs.marks()` as the approved two-cell family: 26 emoji, each a single East-Asian-Width `W` code point, so the mark is two cells in the model and in the terminal and a variation selector cannot change that. `Glyphs.mark(name)` returns the emoji or the two-cell ASCII fallback, so `a` (a cycling bool) and `--ascii` leave every column where it was; a name outside the family raises `KeyError`. `Glyphs.find_issues()` over five samples shows the four unsafe cases -- VS16-promoted, zero-width joiner, East-Asian Ambiguous, unapproved -- beside the approved marks and a plain one-cell check, which is the row to read before copying a mark out of a document. `validate_mark()` and the glyph audit speak in the same verdicts. |
 
 ## Groups at a glance
 
@@ -191,8 +193,8 @@ for lookup.
    questions.  D, E and G start from C; F starts from D.
 3. **Presentation (H–L).** Messages, headers, themes, glyphs and read-only text.
    H through L all start from C.
-4. **Application plumbing (M–P).** Navigation ownership, pausing, scale/safety,
-   and debugging aids.  M, N, O and P all start from C.
+4. **Application plumbing (M–Q).** Navigation ownership, pausing, scale/safety,
+   debugging aids and the width-safe mark family.  M through Q all start from C.
 
 ## Where the `demo-buffet` features go
 
@@ -288,7 +290,7 @@ headers and help pages; both were removed for the reason above.
 
 ## Definition of done
 
-- Sixteen demos, A through P.  A–C are complete files; D–P are deltas on
+- Seventeen demos, A through Q.  A–C are complete files; D–Q are deltas on
   `demo_kit.py`, each within the size ceiling.
 - Every feature key in `FEATURES` appears exactly once, in the demo that owns
   it, and every demo's `Owns:` docstring matches its keys (maintained by hand).
@@ -340,6 +342,9 @@ This is the reverse index, sorted by feature key.  It is rendered from
 | `inline-confirmation` | `g-dialogs` |
 | `large-body` | `o-large-bodies` |
 | `live-data` | `a-basic` |
+| `mark-catalog` | `q-marks` |
+| `mark-detector` | `q-marks` |
+| `mark-fallback` | `q-marks` |
 | `max-rows` | `o-large-bodies` |
 | `min-size` | `o-large-bodies` |
 | `mono-theme` | `j-themes` |
@@ -356,6 +361,7 @@ This is the reverse index, sorted by feature key.  It is rendered from
 | `read-only-screen` | `l-text-screens` |
 | `redraw-recovery` | `o-large-bodies` |
 | `regex-filter` | `e-search` |
+| `safe-marks` | `q-marks` |
 | `scoped-escape` | `e-search` |
 | `screen-stack` | `b-stack` |
 | `scroll-indicator` | `o-large-bodies` |
