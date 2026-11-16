@@ -143,6 +143,28 @@ class Appearance:
             return 0
 
 
+def _startup_theme(chosen: str | None,
+                   environ: Mapping[str, str] | None = None) -> str | None:
+    """The theme to start on, honoring ``NO_COLOR`` only when nothing decided.
+
+    This is the silent guard behind a window with no theme of its own and no
+    earlier :meth:`Theme.set_active` call: the convention then selects
+    ``mono`` exactly as it would have at the application's startup, so an app
+    that never calls the display helpers still honors it.  An explicit theme
+    or a prior decision always wins — this only fills in for a decision that
+    was never made — so it can never override an application's choice.
+
+    Returns *chosen* unchanged when it is set or when a theme is already
+    active, and the resolver's decision otherwise (``mono``, or ``None`` when
+    the convention does not apply).  No message is produced: ``NO_COLOR`` is
+    the user's own instruction, not a terminal limitation the application has
+    to explain.
+    """
+    if chosen or Theme.get_current() is not None:
+        return chosen
+    return Appearance.resolve_appearance(environ=environ) or None
+
+
 # The individual names remain part of the package root's public surface, as
 # they have been since 2.2.0; they are the same functions the class exposes.
 MONO_ROLES = Appearance.MONO_ROLES

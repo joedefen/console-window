@@ -31,7 +31,9 @@ Every demo takes the same display switches:
 `mono` is a real theme, not a separate color flag. It uses the terminal's own
 foreground and background plus a bold/reverse attribute hierarchy, so it follows
 a light or dark terminal automatically. `NO_COLOR` selects it for a run when no
-explicit `--theme` is given.
+explicit `--theme` is given. A window that starts with no theme and no earlier
+`Theme.set_active()` honors `NO_COLOR` by itself, silently, so even a program
+that never calls the display helpers gets `mono`.
 
 ### The demo curriculum
 

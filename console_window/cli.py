@@ -18,7 +18,8 @@ optional boolean (``--ascii``, ``--ascii=no``) and ``--glyphs`` accepts a mode
 ``mono`` is a real theme, and the ``NO_COLOR`` environment convention selects it
 for a run.  :func:`apply_display_arguments` applies the decision returned by
 :meth:`console_window.Appearance.resolve_appearance`, so the two-line app honors
-both.
+both.  An app that skips this helper is not left without the convention: a
+window whose theme is undecided honors a non-empty ``NO_COLOR`` by itself.
 """
 
 from __future__ import annotations

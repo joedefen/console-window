@@ -4,12 +4,20 @@ import curses
 
 import pytest
 
-from console_window import Appearance, Theme
+from console_window import Appearance, Theme, signals
+from console_window.backend import HeadlessBackend
+from console_window.opts import ConsoleWindowOpts
+from console_window.window import ConsoleWindow
 
 
 @pytest.fixture(autouse=True)
 def _fresh_color_switch(monkeypatch):
     monkeypatch.setattr(Appearance, '_COLORS_ENABLED', True)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_process_theme(monkeypatch):
+    monkeypatch.setattr(Theme, '_current', None)
 
 
 def test_every_semantic_role_has_a_monochrome_attribute():
@@ -130,3 +138,71 @@ def test_selecting_mono_turns_color_off_and_a_palette_turns_it_on():
     assert Appearance.colors_enabled() is False
     Theme.set_active('nord')
     assert Appearance.colors_enabled() is True
+
+
+# --- the window-level guard -------------------------------------------------
+# A non-empty NO_COLOR is honored without a message when nothing has decided
+# the look yet, so an app that skips the display helpers still gets mono.
+
+def _headless_window(**opts):
+    return ConsoleWindow(
+        opts=ConsoleWindowOpts(**opts),
+        backend=HeadlessBackend(colors=True),
+        singleton=False,
+    )
+
+
+def test_a_window_with_no_theme_honors_no_color_by_itself(monkeypatch):
+    monkeypatch.setenv('NO_COLOR', '1')
+    win = _headless_window()
+    try:
+        assert win.theme == 'mono'
+        assert Theme.get_current() == 'mono'
+        assert Appearance.colors_enabled() is False
+    finally:
+        win.stop_curses()
+
+
+def test_an_explicit_window_theme_still_wins_over_no_color(monkeypatch):
+    monkeypatch.setenv('NO_COLOR', '1')
+    win = _headless_window(theme='nord')
+    try:
+        assert win.theme == 'nord'
+        assert Appearance.colors_enabled() is True
+    finally:
+        win.stop_curses()
+
+
+def test_a_theme_chosen_before_the_window_still_wins_over_no_color(monkeypatch):
+    monkeypatch.setenv('NO_COLOR', '1')
+    Theme.set_active('gruvbox')
+    win = _headless_window()
+    try:
+        assert win.theme == 'gruvbox'
+        assert Appearance.colors_enabled() is True
+    finally:
+        win.stop_curses()
+
+
+def test_an_empty_no_color_is_not_a_request(monkeypatch):
+    monkeypatch.setenv('NO_COLOR', '')
+    win = _headless_window()
+    try:
+        assert win.theme == 'default'
+        assert Appearance.colors_enabled() is True
+    finally:
+        win.stop_curses()
+
+
+def test_a_bare_screen_start_also_honors_no_color(monkeypatch):
+    # start_curses() can run before any window exists, and the guard is there
+    # too; the app does not have to route the convention through a window.
+    monkeypatch.setenv('NO_COLOR', '1')
+    backend = HeadlessBackend(colors=True)
+    scr = ConsoleWindow.start_curses(backend)
+    try:
+        assert Theme.get_current() == 'mono'
+        assert Appearance.colors_enabled() is False
+    finally:
+        backend.stop(scr)
+        signals.teardown_ctrl_c()

@@ -207,7 +207,7 @@ class ConsoleWindowOpts:
     return_if_pos_change: bool
     single_cell_scroll_indicator: bool
     strip_attrs_in_pick_mode: bool
-    theme: str | None  # initial per-window theme; None inherits the process default
+    theme: str | None  # initial theme; None inherits the process default (or NO_COLOR)
 
     def __init__(self, **kwargs: Any) -> None:  # noqa: ANN401 - dynamic options bag
         unknown = set(kwargs) - set(self.__slots__)
@@ -260,7 +260,8 @@ class ConsoleWindowOpts:
         self.relax_handled_keys = kwargs.get('relax_handled_keys', True)
         # Per-window theme (ConsoleWindow.theme).  None means "inherit whatever
         # theme is current when this window starts", which is the pre-existing
-        # process-default behavior.
+        # process-default behavior.  When nothing is current yet, the window
+        # honors a non-empty NO_COLOR by starting on mono.
         self.theme = kwargs.get('theme')
         # Glyph mode and app vocabulary.  The mode itself is process state (one
         # terminal); the option only seeds it, exactly as ``theme`` seeds the

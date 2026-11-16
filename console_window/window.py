@@ -20,6 +20,7 @@ from curses.textpad import rectangle
 from typing import Callable, ClassVar, cast
 
 from . import geometry, glyphs, signals, textwidth
+from ._appearance import _startup_theme
 from .backend import CursesBackend, CursesSurface, RenderBackend
 from .context import Context
 from .header import (
@@ -616,13 +617,17 @@ class ConsoleWindow:
 
         # Per-window theme (AUDIT.md §3.1).  opts.theme seeds it; otherwise the
         # window inherits the process default, which is what existing apps saw
-        # before themes were per-window.  curses owns a single pair table per
-        # terminal, so *applying* a theme is still terminal-global; what is now
-        # per-window is the choice, its use at startup and when pads are
-        # reallocated, and the far more common case of several windows in one
-        # process that are not drawn at the same time.
+        # before themes were per-window.  When neither the option nor the
+        # process has chosen yet, _startup_theme() honors NO_COLOR here, so a
+        # first window in an app that skips the display helpers still starts
+        # on mono.  curses owns a single pair table per terminal, so *applying*
+        # a theme is still terminal-global; what is per-window is the choice,
+        # its use at startup and when pads are reallocated, and the far more
+        # common case of several windows in one process that are not drawn at
+        # the same time.
         self.theme = Theme.resolve(
-            getattr(self.opts, 'theme', None) or Theme.get_current())
+            _startup_theme(getattr(self.opts, 'theme', None))
+            or Theme.get_current())
 
         # Glyph mode and vocabulary.  Like the theme, the *mode* is
         # process-global (there is one terminal); the option seeds it.
@@ -1368,6 +1373,10 @@ class ConsoleWindow:
     @staticmethod
     def _init_screen(backend: RenderBackend,
                      theme_name: str | None = None) -> CursesSurface:
+        # The screen can be started before any window exists (start_curses()),
+        # so the same silent NO_COLOR guard applies here.  A window or an app
+        # that already chose passes a resolved name, making this a no-op.
+        theme_name = _startup_theme(theme_name)
         _register_atexit()
         signals.setup_ctrl_c()
         scr = cast(CursesSurface, backend.start(ConsoleWindow.timeout_ms))
