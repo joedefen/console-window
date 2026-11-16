@@ -63,8 +63,8 @@ folded into this one.  It contains deliberate breaks from 3.0.0; the README's
 - `opts.nav_keys` is unchanged: a `frozenset` of `NAVIGATION_KEYS` minus the
   taken keys.
 - Demo M (`m-own-keys`) exercises the list form and the pruned navigation help;
-  Demo Q (`q-marks`) exercises the emoji group through `glyphs_in_group()`;
-  Demo K (`k-glyphs`) shows the one-cell catalog.
+  Demo K (`k-glyphs`) shows the one-cell catalog and, on its emoji page, the
+  group through `glyphs_in_group()` and the `find_issues()` verdicts.
 
 ## [3.0.0]
 
