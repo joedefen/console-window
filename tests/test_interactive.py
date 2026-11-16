@@ -100,8 +100,7 @@ def test_taken_arrow_key_is_named_in_demo_indicator(make):
     # grub-wiz takes LEFT/RIGHT for itself; the demo header must name the key
     # it recorded instead of showing the old '???' placeholder.
     win, backend = make(demo_mode=True,
-                        taken_nav_keys={curses.KEY_LEFT: 'prev',
-                                        curses.KEY_RIGHT: 'next'})
+                        taken_nav_keys=[curses.KEY_LEFT, curses.KEY_RIGHT])
     backend.queue_keys(curses.KEY_LEFT)
     assert win.prompt(seconds=0.5) == curses.KEY_LEFT
     assert win.last_demo_key == 'LEFT'

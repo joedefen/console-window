@@ -13,7 +13,7 @@ from console_window.fonts import (
     registered_missing,
     reset,
 )
-from console_window.glyphs import BUILTIN_GLYPHS, BUILTIN_MARKS
+from console_window.glyphs import BUILTIN_GLYPHS, EMOJI_GROUP
 
 
 def test_charset_ranges_are_parsed():
@@ -99,12 +99,7 @@ def test_a_registered_glyph_missing_from_the_text_font_is_recorded(monkeypatch):
 @pytest.mark.skipif(
     installed(TEXT_FONT) is not True or installed(EMOJI_FONT) is not True,
     reason='the two reference font families are not installed')
-def test_every_blessed_symbol_is_covered_by_one_of_the_two_families():
-    for spec in BUILTIN_GLYPHS.values():
-        covered = (has_char(TEXT_FONT, spec.unicode)
-                   or has_char(EMOJI_FONT, spec.unicode))
-        assert covered is True, spec.name
-    for mark in BUILTIN_MARKS.values():
-        covered = (has_char(TEXT_FONT, mark.emoji)
-                   or has_char(EMOJI_FONT, mark.emoji))
-        assert covered is True, mark.name
+def test_every_blessed_symbol_is_covered_by_its_family():
+    for name, spec in BUILTIN_GLYPHS.items():
+        family = EMOJI_FONT if spec.group == EMOJI_GROUP else TEXT_FONT
+        assert has_char(family, spec.unicode) is True, name

@@ -5,15 +5,15 @@ Owns: glyph-catalog, glyph-vocabulary, glyph-fallback, glyph-cli, glyph-help
 Base: c-options
 Run:  ./demos/run-demo k-glyphs --ascii
 
-The catalog page lists every registered glyph with its fallback, its code point
-and its name, grouped by family with a dim divider, so a missing glyph can be
-identified rather than merely noticed.
+The catalog page lists every registered one-cell glyph with its fallback, its
+code point and its name, grouped by family with a dim divider, so a missing glyph
+can be identified rather than merely noticed.
 
 The application vocabulary comes from ``ConsoleWindowOpts(glyphs=...)``.  Here
 ``tick`` falls back to ``OK`` in ASCII mode; the window registers it, so
 ``Glyphs.get('tick')`` is all the draw code needs.  The help page's built-in
-Fonts section shows the whole catalog and every mark, so the demo adds no font
-check of its own.
+Fonts section shows the whole one-cell catalog and every emoji, so the demo adds
+no font check of its own.
 """
 
 from __future__ import annotations

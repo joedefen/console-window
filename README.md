@@ -170,24 +170,23 @@ screen.set_text(lines=['replacement'])
 
 ### Taking navigation keys for the application
 
-Navigation keys are reserved by default, but an app may take specific ones for itself without monkeypatching the module global. Declare them on the window's options; the mapping value is the label the help screen shows:
+Navigation keys are reserved by default, but an app may take specific ones for itself without monkeypatching the module global. Declare the key codes on the window's options:
 
 ```python
 import curses
 from console_window import ConsoleWindowOpts, OptionSpinner
 
 opts = ConsoleWindowOpts(
-    taken_nav_keys={
-        curses.KEY_LEFT: 'prev page',
-        curses.KEY_RIGHT: 'next page',
-    },
+    taken_nav_keys=[curses.KEY_LEFT, curses.KEY_RIGHT],
 )
 win = ConsoleWindow(opts=opts)
 spin = OptionSpinner(stack=stack, nav_keys=opts.nav_keys)  # accept them in add_key()
 spin.add_key('prev', '⬅ - previous', genre='action', keys=[curses.KEY_LEFT])
 ```
 
-A taken key is withdrawn from navigation dispatch for that window only: it no longer scrolls, it is no longer advertised as navigation, and it takes the normal `handled_keys`/`relax_handled_keys` path on return. Text editing is unchanged — dialogs and widgets still use LEFT/RIGHT/HOME/END for the caret.  Because ownership lives in `ConsoleWindowOpts`, two windows in one process can have different bindings; `NAVIGATION_KEYS` itself is never mutated. Taking every vertical key is allowed (and logged as "reduced navigation"), since the application is then responsible for its own scrolling.
+A taken key is withdrawn from navigation dispatch for that window only: it no longer scrolls, it is no longer advertised as navigation, and it takes the normal `handled_keys`/`relax_handled_keys` path on return. The generated navigation help removes the key from its `action: keys` chunk; when every key in a chunk is taken the chunk disappears, and a chunk that loses only some keys is space-padded so the rest of the line keeps its columns. There is no second `App:` line: the app documents its own bindings in its own screen. Text editing is unchanged — dialogs and widgets still use LEFT/RIGHT/HOME/END for the caret.  Because ownership lives in `ConsoleWindowOpts`, two windows in one process can have different bindings; `NAVIGATION_KEYS` itself is never mutated. Taking every vertical key is allowed (and logged as "reduced navigation"), since the application is then responsible for its own scrolling.
+
+`taken_nav_keys` used to accept a `{key_code: label}` mapping; that form is deprecated and only its keys are used. Pass a list of key codes instead.
 
 `ScreenStack.perform_actions()` is the normal router: it walks the spinner options, honors their scopes, and calls the matching `<attr>_ACTION` method.  For apps that dispatch an action themselves, `ScreenStack.act_in(action, screens=None)` is the low-level single-flag variant: it clears that flag from `stack.obj` and returns whether it was set and the current screen matched.  `ScreenStack.is_curr()` answers the screen test on its own. A missing flag reads as `False`, so an options object need not pre-seed every action.
 
@@ -230,7 +229,7 @@ finally:
 
 The first successful construction latches the mode for the whole process.  Mixing the two values raises `AssertionError` rather than silently changing what teardown means. Use `singleton=False` in tests and in applications that create independent windows (for example, one real window plus a headless one).
 
-### Symbols on terminals that cannot draw them
+### Symbols: choosing a width and a fallback
 
 The UI is built around non-ASCII symbols (`│`, `➤`, `█`, `⬅`, `➡`, `·`, box drawing). A terminal that cannot encode them does not fail loudly: it paints a box, or nothing, and the row quietly loses its meaning. `console-window` therefore keeps every symbol in one registry, in two spellings, and degrades by itself:
 
@@ -238,9 +237,10 @@ The UI is built around non-ASCII symbols (`│`, `➤`, `█`, `⬅`, `➡`, `·
 * **Only registered symbols are rewritten.** `Grüße` stays `Grüße`: the substitution table contains the catalog's characters, never arbitrary text, so letters, digits and unregistered code points pass through byte for byte. A registered typographic mark does follow the mode, which is the point of it — an em dash inside file content becomes `--` on an ASCII terminal rather than a box. The eight spellings this library used to draw (`⮞`, `←`, `→`, `↑`, `↓`, `○`, `□`, `■`) are upgraded to their replacements (`➤`, `⬅`, `➡`, `⬆`, `⬇`, `◯`, `◻`, `◼`) in **both** modes, so text written against an older release renders from the font that has it — inside content as well. Registering an old code point yourself keeps it. Set `CONSOLE_WINDOW_GLYPH_AUDIT=1` to log each decorative code point you use but
   did not register, with the exact `register()` call to add.
 
-* **A catalog to choose from.** The registry carries about eighty named symbols, grouped as UI marks, frames, arrows, triangles, filled/hollow shape pairs, blocks and bars, marks, math, currency and typography. Every one is a single cell wide and is covered by the default monospace font on Debian, Ubuntu and Fedora (DejaVu Sans Mono), so it is safe to use without a patched font: no emoji, no icon fonts. `Glyphs.catalog()` returns the set in the active spelling and `Glyphs.catalog_rows(width)` packs it into display rows; the theme picker page prints all of them, so that page doubles as the font check. `Glyphs.catalog_entries()` adds the name and family (`Glyphs.group_of('infinity')` is `'math'`) for a table or a grouped listing, and `Glyphs.lookup()` returns the whole `Glyph`. A character has exactly one fallback even when two names draw it (`cursor_block` and `swatch` are the same block).
-* **Two-cell marks, on purpose.** Some rows need a mark that is *seen*: a status column, a prompt badge. `Glyphs.marks()` is a small approved family (39 emoji) whose contract is width, not beauty: every entry is a single East-Asian-Width `W` code point, so it measures two cells in this library and in the terminal, and appending a variation selector cannot change that. `Glyphs.mark('ok')` returns the emoji, or its two-cell ASCII fallback after `--ascii`, so switching modes never moves a column; a name outside the family raises `KeyError`. `Glyphs.find_issues(text)` reports the four ways a mark is unsafe (VS16-promoted, zero-width joiner, East-Asian Ambiguous, unapproved) and says what to use instead, which is the quickest development-time check for a prompt or a table. The one-cell catalog above still promises no emoji; this is a separate family.
-* **The font bill for both families, checked on the help page.** The one-cell catalog is covered by the stock monospace face: all 80 names (78 distinct characters) are in DejaVu Sans Mono, each at exactly the font's cell advance, so "no patched font, no icon fonts" is measured, not hoped for. The two-cell family needs one colour emoji font — Noto Color Emoji, Apple Color Emoji or Segoe UI Emoji — from mid-2019 or later: 🧲 is Emoji 11 (2018) and 🟢/🟡 are Emoji 12 (2019), everything else dates from 2016 or earlier. No single font covers both (DejaVu Sans Mono has none of the marks; Noto Color Emoji has 13 of the 78 glyphs), which is why the fallback is one switch rather than per-app font code. Every help page now draws the whole catalog and every mark with the unconditional advice to install those two families; `ConsoleWindowOpts(help_fonts='once' | 'always' | 'never')` decides how often (default `'once'`, the first help page the window shows), and a symbol registered by the app is checked against its family at registration time and named on the page if the font lacks it. The measurements are pinned by the test suite.
+* **A one-cell catalog.** The registry carries eighty named text symbols, grouped as UI marks, frames, arrows, triangles, filled/hollow shape pairs, blocks and bars, status marks, math, currency and typography. Every one is a single cell wide in Unicode and is covered by the default monospace font on Debian, Ubuntu and Fedora (DejaVu Sans Mono). `Glyphs.catalog()` returns the set in the active spelling and `Glyphs.catalog_rows(width)` packs it into display rows; the theme picker page prints all of them, so that page doubles as the font check. `Glyphs.catalog_entries()` adds the name and family (`Glyphs.group_of('infinity')` is `'math'`) for a table or a grouped listing, and `Glyphs.lookup()` returns the whole `Glyph`. A character has exactly one fallback even when two names draw it (`cursor_block` and `swatch` are the same block). Every lookup accepts either the name or the Unicode visual: `Glyphs.get('│')` and `Glyphs.get('cursor')` are the same request.
+* **A two-cell emoji family.** Some rows need a mark that is *seen*: a status column, a prompt badge. The `'emoji'` group is the same `Glyph` type, with a stricter width contract: every entry is a single East-Asian-Width `W` code point, so it measures two cells in this library and in the terminal, appending a variation selector cannot change that, and the ASCII spelling is two cells as well. `Glyphs.glyphs_in_group('emoji')` lists the family and `Glyphs.get('ok')` returns the emoji, or its two-cell text fallback after `--ascii`, so switching modes never moves a column. `Glyphs.find_issues(text)` reports the four ways a two-cell mark is unsafe (VS16-promoted, zero-width joiner, East-Asian Ambiguous, unapproved) and says what to use instead, which is the quickest development-time check for a prompt or a table.
+* **Pick the family by the row, not by a preference for text over emoji.** A dense status column that can spare only one cell uses the one-cell symbols; an alert or badge that should be seen uses the emoji. When the chosen emoji cannot be drawn, switch to its two-cell text fallback — or to a one-cell symbol if the layout can spare only one cell. Both choices keep the presentation and the width the row was measured for. `--ascii` is a compatibility switch, not the preferred look.
+* **The font bill for both families, checked on the help page.** The one-cell catalog is covered by the stock monospace face: all 80 names (78 distinct characters) are in DejaVu Sans Mono, each at exactly the font's cell advance, so the text family needs no patched font. The two-cell family needs one colour emoji font — Noto Color Emoji, Apple Color Emoji or Segoe UI Emoji — from mid-2019 or later: 🧲 is Emoji 11 (2018) and 🟢/🟡 are Emoji 12 (2019), everything else dates from 2016 or earlier. No single font covers both (DejaVu Sans Mono has none of the emoji; Noto Color Emoji has 13 of the 78 one-cell glyphs), which is why the fallback is one switch rather than per-app font code. Every help page now draws the whole catalog and every emoji with the unconditional advice to install those two families; `ConsoleWindowOpts(help_fonts='once' | 'always' | 'never')` decides how often (default `'once'`, the first help page the window shows), and a symbol registered by the app is checked against its family at registration time and named on the page if the font lacks it. The measurements are pinned by the test suite.
 * **App vocabulary.** Register what only your app draws:
 
   ```python
@@ -287,9 +287,20 @@ Deprecated APIs remain supported **indefinitely**. A deprecation is a request to
 
 ---
 
+### 3.1.0 Breakages
+
+**Glyphs and marks are one `Glyph` type.** The separate two-cell mark API is gone; an emoji is simply a `Glyph` in the `'emoji'` group, and its two-cell width is enforced by the same constructor. The families are fixed by `GLYPH_GROUPS`; an application cannot invent a new group name.
+
+- **Removed:** `SafeMark`, `BUILTIN_MARKS`, `validate_mark()`, `register_mark()`, `mark()`, `marks()`, `marks_probe_text()` and `marks_rows()`. Use `Glyph(..., group='emoji')`, `Glyphs.register(..., group='emoji')`, `Glyphs.get()`, and `Glyphs.glyphs_in_group('emoji')`.
+- **`Glyph.group` must be one of `GLYPH_GROUPS`.** New registrations join `'application'`; `'emoji'` selects the two-cell contract. The former one-cell `'marks'` family is now `'status'`.
+- **`catalog_entries()`, `catalog_items()` and `catalog_rows()` take `include_emoji=`** instead of `include_marks=`.
+- **Lookups accept the visual:** `Glyphs.get()`, `unicode_of()`, `lookup()` and `group_of()` take a registered name or the Unicode character. When several names draw the same character, the first registered wins.
+
+3.1.0 also carries the changes planned for 3.0.1, which is not a separate release: `ConsoleWindowOpts(taken_nav_keys=...)` takes an ordered list of key codes (the `{key_code: label}` mapping is deprecated and only its keys are used), and a taken key is pruned from the generated navigation help instead of being repeated in a second `App:` block. `Screen.add_fancy_header()` documents its string markup form on its own terms; the markup string is recommended whenever it is unambiguous, the explicit `HeaderLine`/`Span` form when the text must stay literal, and no existing call needs to move.
+
 ### 3.0.0 Breakages
 
-`3.0.0` is the first release after the 2.x line, so every deliberate break from 2.x is collected here, each with its replacement.  Later 3.x releases are intended to remain upward compatible with this one.
+`3.0.0` is the first release after the 2.x line, so every deliberate break from 2.x is collected here, each with its replacement.  3.1.0 consolidates the glyph and mark families; its breaks are listed above.
 
 **The Screen owns content.** Content and the pick/scroll state moved from `ConsoleWindow` onto `Screen`, which removes one of the two drawing models:
 
@@ -314,7 +325,7 @@ Deprecated APIs remain supported **indefinitely**. A deprecation is a request to
 - **The hollow shapes are the heavier pair.** `◯` replaces `○`, and `◻`/`◼` replace `□`/`■`. The hollow triangles `△▽◁▷` keep their light form: Unicode has no heavy outline triangle.
 - **Old spellings are upgraded in both modes.** `⮞`, `←`, `→`, `↑`, `↓`, `○`, `□` and `■` are rewritten to `➤`, `⬅`, `➡`, `⬆`, `⬇`, `◯`, `◻` and `◼` before the text is measured, in Unicode mode as well as ASCII. An unmodified application therefore picks up the font-safe shapes; registering one of the old code points (`register('choice', '⮞', '>')`) keeps it instead.
 
-**The font check is built into the first help page.** `BasicHelpScreen` has a Fonts section that shows the whole one-cell catalog, every approved mark and the two font families to install when the terminal does not draw them. The rows are fixed-width blocks: five ten-cell blocks plus five `|` markers per row, with partial blocks padded with `.`, so a box, a blank or a shifted column breaks the alignment visibly. The symbols and the marks each start on their own row and fill out the last row of their section, so the two groups stay visibly separate. The section appears on the first help page of a run by default and later help pages do not mention it. Choose how often it appears with `ConsoleWindowOpts(help_fonts='once' | 'always' | 'never')` (a bool is accepted), or override it per screen with `BasicHelpScreen.font_section`.
+**The font check is built into the first help page.** `BasicHelpScreen` has a Fonts section that shows the whole one-cell catalog, every emoji and the two font families to install when the terminal does not draw them. The rows are fixed-width blocks: five ten-cell blocks plus five `|` markers per row, with partial blocks padded with `.`, so a box, a blank or a shifted column breaks the alignment visibly. The symbols and the emoji each start on their own row and fill out the last row of their section, so the two families stay visibly separate. The section appears on the first help page of a run by default and later help pages do not mention it. Choose how often it appears with `ConsoleWindowOpts(help_fonts='once' | 'always' | 'never')` (a bool is accepted), or override it per screen with `BasicHelpScreen.font_section`.
 
 ---
 

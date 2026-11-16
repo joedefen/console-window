@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
-"""Q — Marks that stay two cells.
+"""Q — The two-cell emoji family.
 
-Owns: safe-marks, mark-fallback, mark-detector, mark-catalog
+Owns: emoji-glyphs, mark-fallback, mark-detector, mark-catalog
 Base: k-glyphs
 Run:  ./demos/run-demo q-marks --ascii
 
-The marks family exists for the places where a one-cell symbol is too quiet: a
-status column, a prompt badge, a row that has to be seen.  The contract is width,
-not beauty.  Every approved mark is a single ``EAW=W`` code point, so it is two
-cells here and in the terminal, and a variation selector cannot change that; the
-ASCII spelling is two cells as well, so ``a`` (or ``--ascii``) leaves the columns
-where they were.
+The ``'emoji'`` group exists for the places where a one-cell symbol is too
+quiet: a status column, a prompt badge, a row that has to be seen.  Its contract
+is width.  Every entry is a single ``EAW=W`` code point, so it is two cells here
+and in the terminal, and a variation selector cannot change that; the ASCII
+spelling is two cells as well, so ``a`` (or ``--ascii``) leaves the columns where
+they were.
 
-The verdicts at the bottom are ``find_issues()`` over five samples: an approved
-mark, a VS16-promoted base, an East-Asian Ambiguous shape, an unapproved emoji
-and a plain one-cell check.  Only the first and the last are quiet.
+Choosing a family is a layout decision, not a preference for text over emoji:
+use the emoji when the row needs emphasis and can spare two cells, and the
+one-cell status symbols when it cannot.  The verdicts at the bottom are
+``find_issues()`` over five samples: an approved emoji, a VS16-promoted base, an
+East-Asian Ambiguous shape, an unapproved emoji and a plain one-cell check.
+Only the first and the last are quiet.
 """
 
 from __future__ import annotations
@@ -24,7 +27,7 @@ import curses as cs
 from demo_kit import DemoApp, DemoScreen, run_main
 
 from console_window import Glyphs
-from console_window.glyphs import find_issues, marks, set_ascii
+from console_window.glyphs import find_issues, glyphs_in_group, set_ascii
 from console_window.textwidth import ljust, string_width
 
 NAME_WIDTH = 11
@@ -53,19 +56,19 @@ class MarkScreen(DemoScreen):
         self.add_fancy_header(
             f'Q-marks  [a]:ascii={"ON" if ascii_on else "off"}  [?]:help  [q]uit',
             mode='Underline', line_attr=cs.A_DIM)
-        # The status marks an app would reach for, in the active spelling.  (Not
-        # a font check: the window transliterates header text, so in ASCII mode
+        # The emoji an app would reach for, in the active spelling.  (Not a
+        # font check: the window transliterates header text, so in ASCII mode
         # this line is the fallbacks, which is the point of the `a` key.)
         self.add_header('status: ' + '  '.join(
-            Glyphs.mark(name) for name in ('ok', 'fail', 'attention', 'siren')))
+            Glyphs.get(name) for name in ('ok', 'fail', 'attention', 'siren')))
         self.add_header(
             f'{"mark":<4} {"name":<{NAME_WIDTH}}  {"ascii":<{ASCII_WIDTH}}  w',
             attr=cs.A_BOLD,
         )
-        for spec in marks():
-            shown = Glyphs.mark(spec.name)
+        for name, spec in glyphs_in_group('emoji'):
+            shown = Glyphs.get(name)
             self.add_body(
-                f'{shown}   {spec.name:<{NAME_WIDTH}}  '
+                f'{shown}   {name:<{NAME_WIDTH}}  '
                 f'{ljust(spec.ascii, ASCII_WIDTH)}  {string_width(shown)}')
         self.add_body('')
         width = self.win.get_pad_width()
@@ -86,19 +89,22 @@ class MarkApp(DemoApp):
     title = 'Q-marks'
     screen_class = MarkScreen
     help_paragraphs = (
-        'Approval is a width test, not a taste test. Every mark in the table is '
+        'Approval is a width test, not a taste test. Every emoji in the group is '
         'one code point with East-Asian Width W, so it measures two cells in '
         'this library and in the terminal, and appending a variation selector '
         'cannot change that. The ASCII column is two cells too, which is why '
         '`a` (or --ascii) keeps the table aligned instead of moving it.',
-        'find_issues() names the four ways a mark is unsafe: VS16-promoted (one '
-        'or two cells depending on the terminal), a zero-width joiner, East-Asian '
-        'Ambiguous (one cell here, two in a CJK-width terminal), and an '
-        'unapproved two-cell emoji with no fallback. Running it over the strings '
-        'an app draws is the quickest way to catch a mark before it shifts a row.',
+        'find_issues() names the four ways a two-cell mark is unsafe: '
+        'VS16-promoted (one or two cells depending on the terminal), a '
+        'zero-width joiner, East-Asian Ambiguous (one cell here, two in a '
+        'CJK-width terminal), and an unapproved two-cell emoji with no fallback. '
+        'Running it over the strings an app draws is the quickest way to catch a '
+        'mark before it shifts a row.',
         'A mark is decoration, never the only signal: pair it with A_BOLD or '
-        'A_REVERSE, which every terminal draws. If the font lacks the emoji the '
-        'cell is a box -- still two cells wide, still aligned.',
+        'A_REVERSE, which every terminal draws. When the chosen emoji cannot be '
+        'drawn, switch to the two-cell text fallback; if the row can spare only '
+        'one cell, use a one-cell status symbol instead. Either choice keeps the '
+        'presentation and the width the row was measured for.',
     )
 
     def build_spinner(self):

@@ -33,7 +33,7 @@ import curses as cs
 from demo_kit import DemoApp, DemoScreen, run_main
 
 from console_window import textwidth
-from console_window.glyphs import mark
+from console_window.glyphs import get
 
 SAMPLES = (
     ('ascii', 'plain ascii'),
@@ -81,10 +81,11 @@ class WidthScreen(DemoScreen):
         self.add_header(self._column_header(), attr=cs.A_BOLD)
         for label, sample in SAMPLES:
             self.add_body(self._sample_line(label, sample))
-        # Approved marks are the one family the library draws at two cells in
-        # both modes, so they belong in a width table: mark() is the emoji here
+        # The emoji group is the one family the library draws at two cells in
+        # both modes, so it belongs in a width table: get() is the emoji here
         # and the two-cell ASCII fallback under --ascii.
-        self.add_body(self._sample_line('marks', f'{mark("ok")} {mark("attention")}'))
+        self.add_body(self._sample_line(
+            'marks', f'{get("ok")} {get("attention")}'))
 
     def _column_header(self) -> str:
         """The table heading, styled by the current ``c`` value.

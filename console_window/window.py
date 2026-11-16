@@ -44,11 +44,11 @@ logger = logging.getLogger(__name__)
 _CTRL_PAGE_UP, _CTRL_HALF_DOWN, _CTRL_PAGE_DOWN, _CTRL_HALF_UP = 2, 4, 6, 21
 
 # Display labels for the keys that can appear in the navigation help.  Arrow
-# keys are listed too even though the default lines do not use them: an app that
-# takes LEFT/RIGHT gets `⬅`/`➡` on the "App:" line without supplying a label.
-# Control keys use caret notation, the same spelling `_raw_key_label()` uses for
-# them, so the navigation map stays narrow: `^b/^f` costs four columns where
-# `Ctrl-b/Ctrl-f` cost eleven.
+# keys are listed too even though the default lines do not use them: they are
+# reserved for navigation, so an app that takes one has a stable name available
+# if it wants to print it itself.  Control keys use caret notation, the same
+# spelling `_raw_key_label()` uses for them, so the navigation map stays narrow:
+# `^b/^f` costs four columns where `Ctrl-b/Ctrl-f` cost eleven.
 NAV_KEY_LABELS: dict[int, str] = {
     curses.KEY_UP: 'UP',
     curses.KEY_DOWN: 'DOWN',
@@ -105,12 +105,10 @@ NAV_HELP_LINES: tuple[tuple[tuple[str, tuple[int, ...], str], ...], ...] = (
     ),
 )
 
-_NAV_HELP_COLUMN = 38
 _NAV_HELP_PREFIX = 'NavKeys:    '
 # The second line is a bare row, not a continuation of the label, so it gets a
 # single leading space rather than a pad as wide as "NavKeys:".
 _NAV_CONTINUATION = ' '
-_NAV_APP_PREFIX = 'App:         '
 
 
 # Every key curses knows, keyed by its integer code.  Deriving the table from
@@ -155,18 +153,6 @@ def _nav_key_label(key: int) -> str:
     return label if label is not None else _key_label(key)
 
 
-def _pair_nav_entries(entries: list[str], prefix: str) -> list[str]:
-    """Render two entries per line under a fixed-width prefix."""
-    lines = []
-    pad = ' ' * len(prefix)
-    for index in range(0, len(entries), 2):
-        left = entries[index]
-        right = entries[index + 1] if index + 1 < len(entries) else ''
-        head = prefix if index == 0 else pad
-        lines.append(f'{head}{left:<{_NAV_HELP_COLUMN}}{right}'.rstrip())
-    return lines
-
-
 def _nav_row_chunk(action: str, keys: tuple[int, ...],
                    effective: frozenset[int]) -> str | None:
     """One ``action: keys`` chunk, or None when every key in the row was taken.
@@ -174,19 +160,25 @@ def _nav_row_chunk(action: str, keys: tuple[int, ...],
     Slash-joined with no spaces, because every key after the colon is an
     alternative for the same action: ``page: ^b/^f/PPAGE/NPAGE`` reads as "any
     of these pages", not as a key sequence.
+
+    When only some keys were taken, the shorter chunk is padded to the width it
+    has with the full set.  That keeps the chunks after it in the same columns
+    as the default rendering instead of sliding left around the removed keys.
     """
     shown = [_nav_key_label(key) for key in keys if key in effective]
     if not shown:
         return None
-    return f'{action}: {"/".join(shown)}'
+    full = f'{action}: {"/".join(_nav_key_label(key) for key in keys)}'
+    return f'{action}: {"/".join(shown)}'.ljust(len(full))
 
 
-def render_nav_help(effective: Iterable[int],
-                    taken: dict[int, str] | None = None) -> tuple[str, ...]:
+def render_nav_help(effective: Iterable[int]) -> tuple[str, ...]:
     """Render the navigation help for one window's effective key set.
 
-    ``effective`` is the set of key codes still dispatched as navigation;
-    ``taken`` maps the app-owned keys to the label the app wants shown.  The
+    ``effective`` is the set of key codes still dispatched as navigation.  A key
+    removed from it disappears from its ``action: keys`` chunk; a chunk that
+    loses every key is dropped, and a line that loses every chunk is dropped
+    too.  Taking all navigation keys leaves the one-line notice below.  The
     default (no taken keys) output is the public ``NAV_KEY_LINES`` text: two
     aligned rows of ``action: keys`` chunks covering the whole scroll map.
     """
@@ -212,12 +204,6 @@ def render_nav_help(effective: Iterable[int],
             + '(no navigation keys: all are bound by the application)'
         ]
 
-    app_entries = []
-    for key, label in (taken or {}).items():
-        name = _nav_key_label(key)
-        app_entries.append(f'{name}: {label}' if label else name)
-    if app_entries:
-        lines.extend(_pair_nav_entries(app_entries, _NAV_APP_PREFIX))
     return tuple(lines)
 
 
@@ -225,7 +211,7 @@ def render_nav_help(effective: Iterable[int],
 # dedented triple-quoted string: editing the indentation can no longer change
 # what the help screen renders.  ``ConsoleWindow.nav_keys`` remains the joined
 # string for callers that want the whole blurb at once; live windows render
-# through ``nav_help_lines()`` so their own ``taken_nav_keys`` are honored.
+# through ``nav_help_lines()`` so keys taken by the application are omitted.
 NAV_KEY_LINES: tuple[str, ...] = render_nav_help(NAVIGATION_KEYS)
 
 # Editing keys that passthrough mode hands to the application unchanged, in
@@ -1114,7 +1100,7 @@ class ConsoleWindow:
 
     def nav_help_lines(self) -> tuple[str, ...]:
         """Navigation help for *this* window's effective key set."""
-        return render_nav_help(self.opts.nav_keys, self.opts.taken_nav_keys)
+        return render_nav_help(self.opts.nav_keys)
 
     def _set_screen_dims(self) -> bool:
         rows, cols = self.scr.getmaxyx()
@@ -1759,8 +1745,8 @@ class ConsoleWindow:
         """
         if isinstance(line, str):
             if mode == 'Off':
-                # Legacy: no markup processing, add the raw line unchanged
-                # (except for the caller's whole-line attribute).
+                # No markup processing: add the raw line unchanged (except
+                # for the caller's whole-line attribute).
                 self._add(ns, line, attr=line_attr)
                 return
             spans = parse_fancy_header(line)
@@ -1776,7 +1762,7 @@ class ConsoleWindow:
                          line_attr: int | None = None) -> None:
         """Implement ``Screen.add_header_line()``; see it for the public API.
 
-        Spans are emitted exactly as given: no legacy scanning and no
+        Spans are emitted exactly as given: no markup scanning and no
         ``bracket_key()`` delimiter elision (that exists only on the
         ``_add_fancy_header()`` path).  *line_attr* is OR'd into every span's
         resolved attribute, including plain spans, so the whole line can carry

@@ -36,14 +36,15 @@ FONT_ADVICE = (
 
 #: What the section says in ASCII mode, where no font can fail to draw a symbol.
 FONT_ASCII = (
-    'Plain ASCII is in use, so every symbol is covered. Restart with '
-    '--glyphs unicode to check the full set.'
+    'Plain ASCII compatibility spellings are in use, so every symbol is '
+    'covered. Restart with --glyphs unicode to check the one-cell symbols and '
+    'the two-cell emoji.'
 )
 
 #: What the section says when the body is too narrow for the sample rows.
 FONT_NARROW = (
-    'Widen the terminal to see the full symbol check; install DejaVu Sans Mono '
-    'and Noto Color Emoji if any symbol is a box.'
+    'Widen the terminal to see the full symbol and emoji check; install DejaVu '
+    'Sans Mono and Noto Color Emoji if any symbol is a box.'
 )
 
 

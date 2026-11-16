@@ -657,9 +657,11 @@ class IncrementalSearchBar:
         """
         if self._active:
             # Show cursor position with cursor_char (block by default for visibility).
-            # The space after the prefix keeps the indicator readable; it also kept
-            # the string safe from add_fancy_header's parser.  New code should use
-            # as_header_line() (explicit SEARCH spans) and not rely on that.
+            # The space after the prefix keeps the indicator readable.  It also
+            # keeps the returned string from reading as markup if it is handed to
+            # add_fancy_header(): without the space the leading prefix would begin
+            # a SEARCH span.  Use as_header_line() when the prefix should be
+            # styled as a search role and the pattern kept literal.
             if cursor_char is None:
                 cursor_char = glyphs.get('cursor_block')
             before = self._text[:self._cursor_pos]

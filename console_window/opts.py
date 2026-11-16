@@ -3,6 +3,7 @@ from __future__ import annotations
 import curses
 import difflib
 import logging
+import warnings
 from collections.abc import Iterable, Mapping
 from typing import Any, Callable
 
@@ -91,36 +92,49 @@ def _normalize_glyphs_probe(raw: object) -> tuple[str, ...]:
     return names
 
 
-def _normalize_taken_nav_keys(raw: object) -> dict[int, str]:
-    """Normalize ``taken_nav_keys`` to ``{key_code: app_label}``.
+def _normalize_taken_nav_keys(raw: object) -> list[int]:
+    """Normalize ``taken_nav_keys`` to an ordered list of integer key codes.
 
-    A mapping gives the help screen an app-facing label per key; a bare
-    iterable of key codes is accepted too and normalizes to an empty label.
-    Non-integer entries are rejected (they cannot be dispatched), and duplicate
-    entries collapse to one binding (the last label wins).  Keys that are not in
+    A plain iterable is the supported form.  Non-integer entries are rejected
+    (they cannot be dispatched) and duplicate codes collapse to their first
+    occurrence, so the help order is stable.  Keys that are not in
     ``NAVIGATION_KEYS`` are kept but warned about: they subtract nothing, so
     silently accepting them would hide a typo.
+
+    A mapping is still accepted for 3.0.0 compatibility, but only its keys are
+    used: the values were help-screen labels, and the navigation help already
+    withdraws a taken key instead of documenting it a second time.  The mapping
+    form is deprecated and emits ``DeprecationWarning``.
     """
     if raw is None:
-        return {}
+        return []
     if isinstance(raw, Mapping):
-        items: Iterable[tuple[object, object]] = raw.items()
+        warnings.warn(
+            'taken_nav_keys as a mapping is deprecated; pass a list of key '
+            'codes instead. The mapping values were help labels and are now '
+            'ignored: a taken key is removed from the navigation help rather '
+            'than documented there again.',
+            DeprecationWarning,
+            stacklevel=3,
+        )
+        candidates: Iterable[object] = raw.keys()
     elif isinstance(raw, Iterable) and not isinstance(raw, (str, bytes)):
-        items = ((key, '') for key in raw)
+        candidates = raw
     else:
         raise TypeError(
-            'taken_nav_keys must be a mapping of {key_code: label} or an '
-            f'iterable of key codes, got {type(raw).__name__}'
+            'taken_nav_keys must be an iterable of key codes, got '
+            f'{type(raw).__name__}'
         )
 
-    normalized: dict[int, str] = {}
-    for key, label in items:
+    normalized: list[int] = []
+    for key in candidates:
         # bool is an int subclass; a True/False key code is always a mistake.
         if isinstance(key, bool) or not isinstance(key, int):
             raise ValueError(
                 f'taken_nav_keys entries must be integer key codes, got {key!r}'
             )
-        normalized[key] = '' if label is None else str(label)
+        if key not in normalized:
+            normalized.append(key)
 
     unknown = sorted(set(normalized) - NAVIGATION_KEYS)
     if unknown:
@@ -183,8 +197,9 @@ class ConsoleWindowOpts:
     # Effective navigation set for this window: ``NAVIGATION_KEYS`` minus the
     # keys the application took.  Computed, never passed in.
     nav_keys: frozenset[int]
-    # App-owned navigation keys: {key_code: label shown on the help screen}.
-    taken_nav_keys: dict[int, str]
+    # App-owned navigation keys, in declaration order.  They are withdrawn from
+    # this window's navigation dispatch and from its generated navigation help.
+    taken_nav_keys: list[int]
     pick_attr: int
     pick_mode: bool
     pick_range: list[int] | None
@@ -217,7 +232,7 @@ class ConsoleWindowOpts:
         if 'nav_keys' in kwargs:
             raise TypeError(
                 'ConsoleWindowOpts() computes nav_keys from taken_nav_keys; '
-                'pass taken_nav_keys={key: label} instead of nav_keys.'
+                'pass taken_nav_keys=[key, ...] instead of nav_keys.'
             )
         self.taken_nav_keys = _normalize_taken_nav_keys(kwargs.get('taken_nav_keys'))
         self.nav_keys = frozenset(NAVIGATION_KEYS - set(self.taken_nav_keys))

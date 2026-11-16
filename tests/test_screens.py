@@ -179,7 +179,8 @@ def test_the_help_page_shows_every_symbol_and_the_font_advice():
         assert rows[0] == '---------- Fonts ----------'
         page = '\n'.join(rows)
         assert all(item in page for item in glyphs.catalog_items())
-        assert all(spec.emoji in page for spec in glyphs.marks())
+        assert all(spec.unicode in page
+                   for _name, spec in glyphs.glyphs_in_group('emoji'))
         assert 'DejaVu Sans Mono' in page
         assert 'Noto Color Emoji' in page
     finally:
@@ -265,7 +266,7 @@ def test_font_check_rows_are_fixed_width_blocks():
 
 def test_font_check_starts_the_marks_on_a_new_row():
     rows = glyphs.font_check_rows()
-    first_mark = glyphs.marks()[0].emoji
+    first_mark = glyphs.glyphs_in_group('emoji')[0][1].unicode
     mark_rows = [index for index, row in enumerate(rows)
                  if first_mark in row]
     assert mark_rows == [2]
@@ -304,7 +305,7 @@ def test_ascii_mode_shows_one_sentence_instead_of_the_rows():
     win, _screen, rows = _draw_fonts_help(help_fonts='always', ascii=True)
     try:
         page = '\n'.join(rows)
-        assert 'Plain ASCII is in use' in page
+        assert 'Plain ASCII compatibility spellings are in use' in page
         assert '\u2705' not in page
     finally:
         win.stop_curses()

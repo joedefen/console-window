@@ -1,20 +1,30 @@
-"""Decorative glyphs, and how to live without them.
+"""Decorative glyphs in one registry, in two width families.
 
 Every symbol a TUI uses for *meaning* rather than words needs two spellings:
-the one the design is built around, and one that a terminal which cannot draw
-it (or a font that lacks it) can still show.  A symbol that fails to draw does
-not fail loudly -- the terminal paints a box, or nothing -- and the row silently
-loses its meaning.  Keeping the symbols in one table matters because the
-failure is invisible.
+the one the design is built around, and one that a terminal which cannot draw it
+(or a font that lacks it) can still show.  A symbol that fails to draw does not
+fail loudly -- the terminal paints a box, or nothing -- and the row silently
+loses its meaning.  Keeping the symbols in one table matters because the failure
+is invisible.
 
-The table an application draws from is :data:`BUILTIN_GLYPHS`: about eighty
-symbols grouped by family, every one of them a single cell wide and covered by
-the default monospace font on Debian, Ubuntu and Fedora.  :func:`catalog_items`
-and :func:`catalog_rows` are how a screen lists the characters;
-:func:`font_check_rows` is the fixed-block form the help page uses.
-:func:`catalog_entries` keeps each name and its family, which is what a
-grouped table wants, and :func:`group_of` answers the same question for one
-name.
+:data:`BUILTIN_GLYPHS` is that table: about eighty one-cell symbols plus the
+two-cell emoji family, each with its ASCII spelling and its catalog family.
+:data:`GLYPH_GROUPS` fixes the family names, so a group is always one of a known
+set.  :func:`catalog_items` and :func:`catalog_rows` are how a screen lists the
+one-cell characters; :func:`font_check_rows` is the fixed-block form the help
+page uses.  :func:`catalog_entries` keeps each name and its family, which is what
+a grouped table wants, :func:`group_of` answers the same question for one name,
+and :func:`glyphs_in_group` lists one family.
+
+The two families differ in what they promise
+--------------------------------------------
+One-cell glyphs are text symbols from the default monospace font, one cell wide
+in Unicode, with a plain-ASCII spelling that may be wider (``->``, ``[x]``).
+The ``'emoji'`` group is the two-cell family: every entry is a single code point
+whose East-Asian Width is ``W``, so it measures two cells in this library and in
+the terminal, appending a variation selector cannot change that, and the ASCII
+spelling is two cells as well.  Pick a family by the cell budget and the
+emphasis the row needs, not by an abstract preference for text over emoji.
 
 What can and cannot be checked
 ------------------------------
@@ -24,23 +34,13 @@ is not observable from inside the process.  So detection is split three ways:
 
 * :func:`terminal_report` reports what is detectable and sets
   ``ascii_required`` only when UTF-8 output is impossible;
-* the built-in Fonts section of every help page draws the real glyphs and marks,
-  so the user can look at them and judge;
-* :func:`set_ascii` forces the fallback for everything else, including a font
-  the check cannot see.
-
-Marks are the other family
---------------------------
-Some symbols are worth two cells: a status badge, a coloured dot, a mark that is
-seen at a glance in a mono theme.  :data:`BUILTIN_MARKS` is that family, and its
-contract is different from the one-cell catalog's.  Every entry is an emoji whose
-East-Asian Width is ``W``, so it measures two cells in this library's model *and*
-in the terminal, and appending a variation selector cannot change that.  The
-ASCII spelling is two cells as well, so ``--ascii`` (or a terminal with no emoji
-font) never moves the columns around a mark.  :func:`mark` is the accessor and
-:func:`find_issues` is the development-time check that reports VS16-promoted,
-Ambiguous and unapproved marks in a string, including why the bold-looking text
-symbols are the unsafe ones.
+* the built-in Fonts section of every help page draws the real one-cell symbols
+  and emoji, so the user can look at them and judge;
+* :func:`set_ascii` switches to the fallback for everything else, including a
+  font the check cannot see.  It is a compatibility mode, not the preferred
+  look: when a chosen symbol cannot be drawn, the best answer is the spelling
+  that keeps the intended width and presentation -- a two-cell text fallback
+  for an emoji, or a one-cell symbol where the layout can spare only one cell.
 
 Degrading for free
 ------------------
@@ -76,15 +76,15 @@ logger = logging.getLogger(__name__)
 __all__ = [
     'AUDIT_ENV',
     'BUILTIN_GLYPHS',
-    'BUILTIN_MARKS',
+    'BUILTIN_PROBE',
     'DEPRECATED_GLYPHS',
+    'EMOJI_GROUP',
     'GLYPHS_ENV',
-    'MARK_GROUP',
+    'GLYPH_GROUPS',
     'CatalogEntry',
     'Glyph',
     'Glyphs',
     'Issue',
-    'SafeMark',
     'TerminalReport',
     'apply_policy',
     'catalog_entries',
@@ -95,24 +95,19 @@ __all__ = [
     'font_check_rows',
     'font_missing',
     'get',
+    'glyphs_in_group',
     'group_of',
     'is_ascii',
     'lookup',
-    'mark',
-    'marks',
-    'marks_probe_text',
-    'marks_rows',
     'probe',
     'probe_text',
     'register',
     'register_many',
-    'register_mark',
     'reset',
     'set_ascii',
     'terminal_report',
     'transliterate',
     'unicode_of',
-    'validate_mark',
 ]
 
 #: Environment variable that pins the glyph mode for apps without argparse
@@ -122,7 +117,7 @@ GLYPHS_ENV = 'CONSOLE_WINDOW_GLYPHS'
 
 #: Environment variable that turns on the decoration audit.  In both glyph
 #: modes, VS16-promoted, joiner-sequenced, East-Asian Ambiguous and unapproved
-#: marks get a verdict and a suggestion in the log, once per code point; symbols
+#: emoji get a verdict and a suggestion in the log, once per code point; symbols
 #: registered nowhere keep the older "has no ASCII fallback" message.
 AUDIT_ENV = 'CONSOLE_WINDOW_GLYPH_AUDIT'
 
@@ -142,17 +137,61 @@ _MODE_VALUES = ('auto', 'ascii', 'unicode')
 _VARIATION_SELECTORS = ('\ufe0f', '\ufe0e')
 
 
+#: The fixed catalog families, in catalog order.  A glyph's ``group`` is always
+#: one of these; there is no application-defined family.  A new registration
+#: joins ``'application'``, and ``'emoji'`` is the two-cell family.
+GLYPH_GROUPS: tuple[str, ...] = (
+    'ui', 'frames', 'arrows', 'triangles', 'shapes', 'blocks', 'status',
+    'math', 'currency', 'typography', 'emoji', 'application',
+)
+
+#: The group whose members are two-cell emoji rather than one-cell text symbols.
+EMOJI_GROUP = 'emoji'
+
+
+def _validate_emoji(unicode_text: str, ascii_text: str) -> None:
+    """Raise unless an ``'emoji'`` glyph keeps two cells in both spellings."""
+    if len(unicode_text) != 1:
+        raise ValueError(
+            f'emoji glyph {unicode_text!r}: the visual must be one code point')
+    if unicode_text in _VARIATION_SELECTORS or unicode_text == '\u200d':
+        raise ValueError(
+            f'emoji glyph {unicode_text!r}: a variation selector or joiner is '
+            'not a mark; use the base code point')
+    eaw = unicodedata.east_asian_width(unicode_text)
+    if eaw != 'W':
+        raise ValueError(
+            f'emoji glyph {unicode_text!r}: East-Asian {eaw}, not W; its cell '
+            'count is terminal-dependent')
+    width = string_width(unicode_text)
+    if width != 2:
+        raise ValueError(
+            f'emoji glyph {unicode_text!r} measures {width} cells, not 2')
+    promoted = string_width(unicode_text + _VARIATION_SELECTORS[0])
+    if promoted != width:
+        raise ValueError(
+            f'emoji glyph {unicode_text!r}: a variation selector changes it '
+            f'from {width} to {promoted} cells')
+    ascii_width = string_width(ascii_text)
+    if ascii_width != width:
+        raise ValueError(
+            f'emoji glyph {unicode_text!r}: the fallback {ascii_text!r} '
+            f'measures {ascii_width} cells, not {width}; it would shift the '
+            'column it replaces')
+
+
 @dataclass(frozen=True)
 class Glyph:
     """One decorative symbol in both spellings, with its catalog family.
 
-    ``ascii`` may be empty: that spells "delete the decoration", which is the
-    right answer for a marker whose meaning is already carried by its column.
+    ``unicode`` is the visual spelling the design is built around.  ``ascii``
+    may be empty: that spells "delete the decoration", which is the right answer
+    for a marker whose meaning is already carried by its column.
 
-    ``group`` is the family the listing uses (``'math'``, ``'frames'``,
-    ``'application'``, ...).  A catalog can therefore start a divider when the
-    group changes, and a lockup can ask which family a name belongs to, without
-    a second name-to-group table to keep in step.
+    ``group`` is one of :data:`GLYPH_GROUPS`; a new registration joins
+    ``'application'``.  A glyph in the :data:`EMOJI_GROUP` family is a *wide*
+    mark and must keep its two-cell width in both spellings, which the
+    constructor enforces so a column cannot shift when the mode changes.
     """
 
     unicode: str
@@ -170,334 +209,185 @@ class Glyph:
             )
         if not isinstance(self.group, str) or not self.group:
             raise TypeError(f'Glyph.group must be a non-empty str, got {self.group!r}')
+        if self.group not in GLYPH_GROUPS:
+            raise ValueError(
+                f'Glyph.group must be one of {", ".join(GLYPH_GROUPS)}, '
+                f'got {self.group!r}'
+            )
+        if self.group == EMOJI_GROUP:
+            _validate_emoji(self.unicode, self.ascii)
 
 
 #: Glyphs this library draws itself, and the catalog an application draws from.
 #:
-#: The catalog is the answer to "what may I use?": every entry is one cell wide
-#: in both spellings and has a plain ASCII fallback, and the set is confined to
-#: characters that the default monospace font on Debian, Ubuntu and Fedora
-#: (DejaVu Sans Mono) actually covers -- no emoji, nothing from a patched font.
-#: A code point has exactly one fallback even when two names draw it
-#: (``cursor_block`` and ``swatch`` are the same block); an application that
-#: registers a code point itself takes it over (see :func:`_compile_tables`).
+#: Each row is the visual, its plain-ASCII spelling, and the family it belongs
+#: to.  The codepoint comment is the searchable name of the character; the glyph
+#: itself is written literally so the table reads as the UI it describes.  The
+#: one-cell families promise a single cell in Unicode; their fallback may be
+#: wider (``->``, ``[x]``).  The ``'emoji'`` rows are the two-cell family and
+#: keep two cells in both spellings.  A code point has exactly one fallback even
+#: when two names draw it (``cursor_block`` and ``swatch`` are the same block);
+#: an application that registers a code point itself takes it over (see
+#: :func:`_compile_tables`).
 BUILTIN_GLYPHS: dict[str, Glyph] = {
-    # --- the library's own UI marks -----------------------------------------
-    'cursor': Glyph('\u2502', '|'),          # narrow text cursor in widgets
-    'cursor_block': Glyph('\u2588', '#'),    # block cursor / caret
+    # --- ui: the library's own marks ----------------------------------------
+    'cursor': Glyph('│', '|', group='ui'),          # U+2502 narrow text cursor
+    'cursor_block': Glyph('█', '#', group='ui'),    # U+2588 block cursor
     # One cell in both spellings: the choice list indents the other rows by one
     # cell plus a space, so a two-character marker would knock the column out
     # of alignment exactly where the terminal is already struggling.
     # U+27A4, not the equilateral U+2B9E this used to be: DejaVu Sans Mono has
     # no glyph for U+2B9E, so the marker came from a fallback font that can be
     # wider than one cell.  Both spellings stay one cell wide.
-    'choice': Glyph('\u27a4', '>'),          # "this choice is the current value"
-    'scroll_prev': Glyph('\u25c0', '<'),     # dialog horizontal scroll, left
-    'scroll_next': Glyph('\u25b6', '>'),     # dialog horizontal scroll, right
-    'alert_up': Glyph('\u25b2', '^'),        # alert "more above"
-    'alert_down': Glyph('\u25bc', 'v'),      # alert "more below"
+    'choice': Glyph('➤', '>', group='ui'),          # U+27A4 resolved choice
+    'scroll_prev': Glyph('◀', '<', group='ui'),     # U+25C0 scroll left
+    'scroll_next': Glyph('▶', '>', group='ui'),     # U+25B6 scroll right
+    'alert_up': Glyph('▲', '^', group='ui'),        # U+25B2 "more above"
+    'alert_down': Glyph('▼', 'v', group='ui'),      # U+25BC "more below"
     # The heavy (black) arrows: the light `←`/`→` look anaemic beside the solid
     # triangles the same UI uses, and these are in the same font.
-    'nav_prev': Glyph('\u2b05', '<-'),       # help legend, "left arrow"
-    'nav_next': Glyph('\u27a1', '->'),       # help legend, "right arrow"
-    'bullet': Glyph('\u00b7', '.'),          # help-list bullet
-    'swatch': Glyph('\u2588', '#'),          # theme color swatch
+    'nav_prev': Glyph('⬅', '<-', group='ui'),       # U+2B05 help legend, left
+    'nav_next': Glyph('➡', '->', group='ui'),       # U+27A1 help legend, right
+    'bullet': Glyph('·', '.', group='ui'),          # U+00B7 help-list bullet
+    'swatch': Glyph('█', '#', group='ui'),          # U+2588 theme color swatch
 
     # --- frames -------------------------------------------------------------
     # The message-box frame.  `curses.textpad.rectangle()` already draws with
     # ACS line art, but a message box painted by hand needs its own fallback;
     # registering the corners keeps the ASCII mode invariant ("every painted
     # cell is ASCII") true for dialogs too.
-    'box_tl': Glyph('\u250c', '+'),
-    'box_h': Glyph('\u2500', '-'),
-    'box_tr': Glyph('\u2510', '+'),
-    'box_v': Glyph('\u2502', '|'),           # also reused by widgets' cursor
-    'box_bl': Glyph('\u2514', '+'),
-    'box_br': Glyph('\u2518', '+'),
-    'frame_rounded_tl': Glyph('\u256d', '+'),
-    'frame_rounded_tr': Glyph('\u256e', '+'),
-    'frame_rounded_bl': Glyph('\u2570', '+'),
-    'frame_rounded_br': Glyph('\u256f', '+'),
-    'frame_h_double': Glyph('\u2550', '='),
-    'frame_v_double': Glyph('\u2551', '|'),
+    'box_tl': Glyph('┌', '+', group='frames'),      # U+250C
+    'box_h': Glyph('─', '-', group='frames'),       # U+2500
+    'box_tr': Glyph('┐', '+', group='frames'),      # U+2510
+    'box_v': Glyph('│', '|', group='frames'),       # U+2502 also a cursor
+    'box_bl': Glyph('└', '+', group='frames'),      # U+2514
+    'box_br': Glyph('┘', '+', group='frames'),      # U+2518
+    'frame_rounded_tl': Glyph('╭', '+', group='frames'),  # U+256D
+    'frame_rounded_tr': Glyph('╮', '+', group='frames'),  # U+256E
+    'frame_rounded_bl': Glyph('╰', '+', group='frames'),  # U+2570
+    'frame_rounded_br': Glyph('╯', '+', group='frames'),  # U+256F
+    'frame_h_double': Glyph('═', '=', group='frames'),    # U+2550
+    'frame_v_double': Glyph('║', '|', group='frames'),    # U+2551
 
     # --- arrows -------------------------------------------------------------
-    'arrow_up': Glyph('\u2b06', '^'),
-    'arrow_down': Glyph('\u2b07', 'v'),
-    'arrow_double_left': Glyph('\u21d0', '<='),
-    'arrow_double_right': Glyph('\u21d2', '=>'),
-    'arrow_double_up': Glyph('\u21d1', '^^'),
-    'arrow_double_down': Glyph('\u21d3', 'vv'),
+    'arrow_up': Glyph('⬆', '^', group='arrows'),            # U+2B06
+    'arrow_down': Glyph('⬇', 'v', group='arrows'),          # U+2B07
+    'arrow_double_left': Glyph('⇐', '<=', group='arrows'),  # U+21D0
+    'arrow_double_right': Glyph('⇒', '=>', group='arrows'),  # U+21D2
+    'arrow_double_up': Glyph('⇑', '^^', group='arrows'),    # U+21D1
+    'arrow_double_down': Glyph('⇓', 'vv', group='arrows'),  # U+21D3
 
     # --- triangles: hollow and small, in both horizontal directions ---------
-    'tri_right_hollow': Glyph('\u25b7', '>'),
-    'tri_left_hollow': Glyph('\u25c1', '<'),
-    'tri_up_hollow': Glyph('\u25b3', '^'),
-    'tri_down_hollow': Glyph('\u25bd', 'v'),
-    'tri_right_small': Glyph('\u25b8', '>'),
-    'tri_left_small': Glyph('\u25c2', '<'),
+    'tri_right_hollow': Glyph('▷', '>', group='triangles'),  # U+25B7
+    'tri_left_hollow': Glyph('◁', '<', group='triangles'),   # U+25C1
+    'tri_up_hollow': Glyph('△', '^', group='triangles'),     # U+25B3
+    'tri_down_hollow': Glyph('▽', 'v', group='triangles'),   # U+25BD
+    'tri_right_small': Glyph('▸', '>', group='triangles'),   # U+25B8
+    'tri_left_small': Glyph('◂', '<', group='triangles'),    # U+25C2
 
     # --- shapes: filled and hollow pairs ------------------------------------
-    'circle_filled': Glyph('\u25cf', '@'),
-    'circle_hollow': Glyph('\u25ef', 'o'),   # large circle: reads heavier
-    'diamond_filled': Glyph('\u25c6', '#'),
-    'diamond_hollow': Glyph('\u25c7', '<>'),
-    'square_filled': Glyph('\u25fc', '#'),   # medium pair: a matched weight
-    'square_hollow': Glyph('\u25fb', '[]'),
-    'star_filled': Glyph('\u2605', '*'),
-    'star_hollow': Glyph('\u2606', '+'),
+    'circle_filled': Glyph('●', '@', group='shapes'),        # U+25CF
+    'circle_hollow': Glyph('◯', 'o', group='shapes'),        # U+25EF heavier
+    'diamond_filled': Glyph('◆', '#', group='shapes'),       # U+25C6
+    'diamond_hollow': Glyph('◇', '<>', group='shapes'),      # U+25C7
+    'square_filled': Glyph('◼', '#', group='shapes'),        # U+25FC
+    'square_hollow': Glyph('◻', '[]', group='shapes'),       # U+25FB
+    'star_filled': Glyph('★', '*', group='shapes'),          # U+2605
+    'star_hollow': Glyph('☆', '+', group='shapes'),          # U+2606
 
     # --- blocks and bars: textures, half blocks, sparkline columns ----------
-    'block_light': Glyph('\u2591', '.'),
-    'block_medium': Glyph('\u2592', ':'),
-    'block_dark': Glyph('\u2593', '#'),
-    'block_upper': Glyph('\u2580', '"'),
-    'block_left': Glyph('\u258c', '['),
-    'block_right': Glyph('\u2590', ']'),
-    'block_quadrant': Glyph('\u259a', '%'),
-    'bar_1': Glyph('\u2581', '1'),
-    'bar_2': Glyph('\u2582', '2'),
-    'bar_3': Glyph('\u2583', '3'),
-    'bar_4': Glyph('\u2584', '4'),
-    'bar_5': Glyph('\u2585', '5'),
-    'bar_6': Glyph('\u2586', '6'),
-    'bar_7': Glyph('\u2587', '7'),
+    'block_light': Glyph('░', '.', group='blocks'),          # U+2591
+    'block_medium': Glyph('▒', ':', group='blocks'),         # U+2592
+    'block_dark': Glyph('▓', '#', group='blocks'),           # U+2593
+    'block_upper': Glyph('▀', '"', group='blocks'),          # U+2580
+    'block_left': Glyph('▌', '[', group='blocks'),           # U+258C
+    'block_right': Glyph('▐', ']', group='blocks'),          # U+2590
+    'block_quadrant': Glyph('▚', '%', group='blocks'),       # U+259A
+    'bar_1': Glyph('▁', '1', group='blocks'),                # U+2581
+    'bar_2': Glyph('▂', '2', group='blocks'),                # U+2582
+    'bar_3': Glyph('▃', '3', group='blocks'),                # U+2583
+    'bar_4': Glyph('▄', '4', group='blocks'),                # U+2584
+    'bar_5': Glyph('▅', '5', group='blocks'),                # U+2585
+    'bar_6': Glyph('▆', '6', group='blocks'),                # U+2586
+    'bar_7': Glyph('▇', '7', group='blocks'),                # U+2587
 
-    # --- marks and status symbols -------------------------------------------
-    'check': Glyph('\u2713', 'v'),
-    'check_heavy': Glyph('\u2714', 'v'),
-    'cross': Glyph('\u2717', 'x'),
-    'cross_heavy': Glyph('\u2718', 'x'),
-    'ballot_box': Glyph('\u2610', '[ ]'),
-    'ballot_check': Glyph('\u2611', '[v]'),
-    'ballot_cross': Glyph('\u2612', '[x]'),
-    'warn': Glyph('\u26a0', '!'),
-    'sun': Glyph('\u2600', '*'),
-    'cloud': Glyph('\u2601', '~'),
+    # --- status: one-cell check, cross and ballot symbols -------------------
+    'check': Glyph('✓', 'v', group='status'),                # U+2713
+    'check_heavy': Glyph('✔', 'v', group='status'),          # U+2714
+    'cross': Glyph('✗', 'x', group='status'),                # U+2717
+    'cross_heavy': Glyph('✘', 'x', group='status'),          # U+2718
+    'ballot_box': Glyph('☐', '[ ]', group='status'),         # U+2610
+    'ballot_check': Glyph('☑', '[v]', group='status'),       # U+2611
+    'ballot_cross': Glyph('☒', '[x]', group='status'),       # U+2612
+    'warn': Glyph('⚠', '!', group='status'),                 # U+26A0
+    'sun': Glyph('☀', '*', group='status'),                  # U+2600
+    'cloud': Glyph('☁', '~', group='status'),                # U+2601
 
     # --- math ---------------------------------------------------------------
-    'plus_minus': Glyph('\u00b1', '+-'),
-    'times': Glyph('\u00d7', 'x'),
-    'not_equal': Glyph('\u2260', '!='),
-    'less_equal': Glyph('\u2264', '<='),
-    'greater_equal': Glyph('\u2265', '>='),
-    'approx': Glyph('\u2248', '~'),
-    'infinity': Glyph('\u221e', 'inf'),
+    'plus_minus': Glyph('±', '+-', group='math'),            # U+00B1
+    'times': Glyph('×', 'x', group='math'),  # U+00D7  # noqa: RUF001
+    'not_equal': Glyph('≠', '!=', group='math'),             # U+2260
+    'less_equal': Glyph('≤', '<=', group='math'),            # U+2264
+    'greater_equal': Glyph('≥', '>=', group='math'),         # U+2265
+    'approx': Glyph('≈', '~', group='math'),                 # U+2248
+    'infinity': Glyph('∞', 'inf', group='math'),             # U+221E
 
     # --- currency -----------------------------------------------------------
-    'euro': Glyph('\u20ac', 'E'),
-    'pound': Glyph('\u00a3', 'L'),
-    'yen': Glyph('\u00a5', 'Y'),
+    'euro': Glyph('€', 'E', group='currency'),               # U+20AC
+    'pound': Glyph('£', 'L', group='currency'),              # U+00A3
+    'yen': Glyph('¥', 'Y', group='currency'),                # U+00A5
 
     # --- typography ---------------------------------------------------------
-    'en_dash': Glyph('\u2013', '-'),
-    'em_dash': Glyph('\u2014', '--'),
-    'ellipsis': Glyph('\u2026', '...'),
+    'en_dash': Glyph('–', '-', group='typography'),  # U+2013  # noqa: RUF001
+    'em_dash': Glyph('—', '--', group='typography'),         # U+2014
+    'ellipsis': Glyph('…', '...', group='typography'),       # U+2026
+
+    # --- emoji: the two-cell family -----------------------------------------
+    # Every entry is one EAW=W code point and both spellings are exactly two
+    # cells, so a column never moves when the mode changes.  Pick this family
+    # when the row needs to be seen; the one-cell families above stay quieter.
+    'ok': Glyph('✅', 'v ', group='emoji'),                  # U+2705
+    'fail': Glyph('❌', 'x ', group='emoji'),                # U+274C
+    'attention': Glyph('❗', '! ', group='emoji'),           # U+2757
+    'ask': Glyph('❓', '? ', group='emoji'),                 # U+2753
+    'stop': Glyph('🛑', '- ', group='emoji'),                # U+1F6D1
+    'ban': Glyph('⛔', '# ', group='emoji'),                 # U+26D4
+    'denied': Glyph('🚫', 'X ', group='emoji'),              # U+1F6AB
+    'siren': Glyph('🚨', '!!', group='emoji'),               # U+1F6A8
+    'boom': Glyph('💥', '* ', group='emoji'),                # U+1F4A5
+    'idea': Glyph('💡', 'i ', group='emoji'),                # U+1F4A1
+    'build': Glyph('🚧', 'C ', group='emoji'),               # U+1F6A7
+    'dot_green': Glyph('🟢', 'G ', group='emoji'),           # U+1F7E2
+    'dot_yellow': Glyph('🟡', 'Y ', group='emoji'),          # U+1F7E1
+    'dot_red': Glyph('🔴', 'R ', group='emoji'),             # U+1F534
+    'dot_blue': Glyph('🔵', 'B ', group='emoji'),            # U+1F535
+    'dot_black': Glyph('⚫', 'K ', group='emoji'),           # U+26AB
+    'dot_white': Glyph('⚪', 'W ', group='emoji'),           # U+26AA
+    'radio': Glyph('🔘', 'r ', group='emoji'),               # U+1F518
+    'star': Glyph('⭐', 's ', group='emoji'),                # U+2B50
+    'star_glow': Glyph('🌟', 'S ', group='emoji'),           # U+1F31F
+    'circle_heavy': Glyph('⭕', '0 ', group='emoji'),        # U+2B55
+    'diamond_orange': Glyph('🔶', 'O ', group='emoji'),      # U+1F536
+    'diamond_blue': Glyph('🔷', 'D ', group='emoji'),        # U+1F537
+    'diamond_dot': Glyph('💠', '. ', group='emoji'),         # U+1F4A0
+    'folder': Glyph('📁', '[ ', group='emoji'),              # U+1F4C1
+    'file': Glyph('📄', 'f ', group='emoji'),                # U+1F4C4
+    'chart': Glyph('📊', '| ', group='emoji'),               # U+1F4CA
+    'find': Glyph('🔍', 'o ', group='emoji'),                # U+1F50D
+    'lock': Glyph('🔒', 'L ', group='emoji'),                # U+1F512
+    'key': Glyph('🔑', 'k ', group='emoji'),                 # U+1F511
+    'link': Glyph('🔗', '> ', group='emoji'),                # U+1F517
+    'magnet': Glyph('🧲', 'M ', group='emoji'),              # U+1F9F2
+    'mail': Glyph('📧', '@ ', group='emoji'),                # U+1F4E7
+    'bell': Glyph('🔔', 'n ', group='emoji'),                # U+1F514
+    'chat': Glyph('💬', 'm ', group='emoji'),                # U+1F4AC
+    'globe': Glyph('🌍', 'g ', group='emoji'),               # U+1F30D
+    'net': Glyph('🌐', 'N ', group='emoji'),                 # U+1F310
+    'package': Glyph('📦', 'p ', group='emoji'),             # U+1F4E6
+    'wait': Glyph('⏳', 'w ', group='emoji'),                # U+23F3
 }
 
-#: The catalog family of each built-in symbol, in catalog order.  The table
-#: above groups its entries with comments; this is the same grouping as data,
-#: because a screen cannot read a comment.  Names not listed here are
-#: application registrations and land in the ``'application'`` group.
-BUILTIN_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ('ui', (
-        'cursor', 'cursor_block', 'choice', 'scroll_prev', 'scroll_next',
-        'alert_up', 'alert_down', 'nav_prev', 'nav_next', 'bullet', 'swatch',
-    )),
-    ('frames', (
-        'box_tl', 'box_h', 'box_tr', 'box_v', 'box_bl', 'box_br',
-        'frame_rounded_tl', 'frame_rounded_tr', 'frame_rounded_bl',
-        'frame_rounded_br', 'frame_h_double', 'frame_v_double',
-    )),
-    ('arrows', (
-        'arrow_up', 'arrow_down', 'arrow_double_left', 'arrow_double_right',
-        'arrow_double_up', 'arrow_double_down',
-    )),
-    ('triangles', (
-        'tri_right_hollow', 'tri_left_hollow', 'tri_up_hollow',
-        'tri_down_hollow', 'tri_right_small', 'tri_left_small',
-    )),
-    ('shapes', (
-        'circle_filled', 'circle_hollow', 'diamond_filled', 'diamond_hollow',
-        'square_filled', 'square_hollow', 'star_filled', 'star_hollow',
-    )),
-    ('blocks', (
-        'block_light', 'block_medium', 'block_dark', 'block_upper',
-        'block_left', 'block_right', 'block_quadrant', 'bar_1', 'bar_2',
-        'bar_3', 'bar_4', 'bar_5', 'bar_6', 'bar_7',
-    )),
-    ('marks', (
-        'check', 'check_heavy', 'cross', 'cross_heavy', 'ballot_box',
-        'ballot_check', 'ballot_cross', 'warn', 'sun', 'cloud',
-    )),
-    ('math', (
-        'plus_minus', 'times', 'not_equal', 'less_equal', 'greater_equal',
-        'approx', 'infinity',
-    )),
-    ('currency', ('euro', 'pound', 'yen')),
-    ('typography', ('en_dash', 'em_dash', 'ellipsis')),
-)
 
-# Attach the family to each built-in without disturbing the readable table
-# above.  A missing name is a table/grouping bug, so the lookup is deliberately
-# unguarded and fails at import.
-for _group_name, _group_members in BUILTIN_GROUPS:
-    for _member in _group_members:
-        BUILTIN_GLYPHS[_member] = replace(
-            BUILTIN_GLYPHS[_member], group=_group_name)
-del _group_name, _group_members, _member
-
-#: The catalog family of the two-cell marks.  A glyph in this family is listed by
-#: :func:`marks`, not by :func:`catalog_items`, because the one-cell catalog
-#: promises something these cannot ("no emoji, one cell, DejaVu Sans Mono").
-#: Not ``'marks'``: that family already exists in :data:`BUILTIN_GROUPS` for the
-#: one-cell check, cross and ballot symbols, and the two must not be confused.
-MARK_GROUP = 'badges'
-
-
-def validate_mark(spec: SafeMark) -> None:
-    """Raise unless *spec* is a width-safe mark.
-
-    The rules: a single ``EAW=W`` code point, two cells in this model, two cells
-    with a variation selector appended, and a plain-ASCII fallback that is also
-    two cells.  They are checked because
-    a violation is invisible -- the terminal draws something, at a width the row
-    was not measured for.
-    """
-    for field, value in (('name', spec.name), ('emoji', spec.emoji),
-                         ('ascii', spec.ascii), ('group', spec.group)):
-        if not isinstance(value, str) or not value:
-            raise TypeError(
-                f'SafeMark.{field} must be a non-empty str, got {value!r}')
-    if len(spec.emoji) != 1:
-        raise ValueError(
-            f'mark {spec.name!r}: the emoji must be one code point, '
-            f'got {spec.emoji!r}')
-    if spec.emoji in _VARIATION_SELECTORS or spec.emoji == '\u200d':
-        raise ValueError(
-            f'mark {spec.name!r}: a variation selector or joiner is not a mark; '
-            'use the base code point')
-    eaw = unicodedata.east_asian_width(spec.emoji)
-    if eaw != 'W':
-        raise ValueError(
-            f'mark {spec.name!r}: {spec.emoji!r} is East-Asian {eaw}, not W; its '
-            'cell count is terminal-dependent')
-    width = string_width(spec.emoji)
-    if width != 2:
-        raise ValueError(
-            f'mark {spec.name!r}: {spec.emoji!r} measures {width} cells, not 2')
-    promoted = string_width(spec.emoji + _VARIATION_SELECTORS[0])
-    if promoted != width:
-        raise ValueError(
-            f'mark {spec.name!r}: a variation selector changes {spec.emoji!r} '
-            f'from {width} to {promoted} cells')
-    if not spec.ascii.isascii():
-        raise ValueError(
-            f'mark {spec.name!r}: the fallback must be plain ASCII, '
-            f'got {spec.ascii!r}')
-    ascii_width = string_width(spec.ascii)
-    if ascii_width != width:
-        raise ValueError(
-            f'mark {spec.name!r}: the fallback {spec.ascii!r} measures '
-            f'{ascii_width} cells, not {width}; it would shift the column it '
-            'replaces')
-
-
-@dataclass(frozen=True)
-class SafeMark:
-    """One approved two-cell mark, in both spellings.
-
-    The contract is width, not beauty: the emoji is a single code point whose
-    East-Asian Width is ``W``, so it is two cells here and in the terminal, and a
-    variation selector cannot change that.  The ASCII spelling is two cells too,
-    so switching to ``--ascii`` leaves the columns where they were.
-    """
-
-    name: str
-    emoji: str
-    ascii: str
-    group: str = MARK_GROUP
-
-    def __post_init__(self) -> None:
-        validate_mark(self)
-
-
-#: The approved two-cell marks.  Small on purpose: status, dots, shapes, data,
-#: comms and waiting cover an ordinary application, and every entry costs two
-#: cells wherever it is drawn.  Names do not reuse the one-cell catalog's names
-#: (both families share one registry, so `warn` is already U+26A0).  A code point
-#: appears once, so a list that also names the bell and the speech balloon adds
-#: nothing: those are `bell` and `chat` already.
-BUILTIN_MARKS: dict[str, SafeMark] = {
-    # --- status: the marks that have to be seen ------------------------------
-    'ok': SafeMark('ok', '\u2705', 'v '),               # white heavy check mark
-    'fail': SafeMark('fail', '\u274c', 'x '),           # cross mark
-    'attention': SafeMark('attention', '\u2757', '! '),  # heavy exclamation
-    'ask': SafeMark('ask', '\u2753', '? '),             # question ornament
-    'stop': SafeMark('stop', '\U0001f6d1', '- '),       # octagonal sign
-    'ban': SafeMark('ban', '\u26d4', '# '),             # no-entry octagon
-    'denied': SafeMark('denied', '\U0001f6ab', 'X '),   # no-entry circle
-    'siren': SafeMark('siren', '\U0001f6a8', '!!'),     # revolving light
-    'boom': SafeMark('boom', '\U0001f4a5', '* '),       # collision symbol
-    'idea': SafeMark('idea', '\U0001f4a1', 'i '),       # electric light bulb
-    'build': SafeMark('build', '\U0001f6a7', 'C '),     # construction sign
-    # --- dots: two cells of status colour ------------------------------------
-    'dot_green': SafeMark('dot_green', '\U0001f7e2', 'G '),
-    'dot_yellow': SafeMark('dot_yellow', '\U0001f7e1', 'Y '),
-    'dot_red': SafeMark('dot_red', '\U0001f534', 'R '),
-    'dot_blue': SafeMark('dot_blue', '\U0001f535', 'B '),
-    'dot_black': SafeMark('dot_black', '\u26ab', 'K '),
-    'dot_white': SafeMark('dot_white', '\u26aa', 'W '),
-    'radio': SafeMark('radio', '\U0001f518', 'r '),     # a dot in a ring
-    # --- shapes: emphatic geometry for a bullet column -----------------------
-    # Two stars, a heavy ring and three diamonds.  The fallback keeps the
-    # distinction the shape makes, so an ASCII row still reads as a column.
-    'star': SafeMark('star', '\u2b50', 's '),
-    'star_glow': SafeMark('star_glow', '\U0001f31f', 'S '),
-    'circle_heavy': SafeMark('circle_heavy', '\u2b55', '0 '),
-    'diamond_orange': SafeMark('diamond_orange', '\U0001f536', 'O '),
-    'diamond_blue': SafeMark('diamond_blue', '\U0001f537', 'D '),
-    'diamond_dot': SafeMark('diamond_dot', '\U0001f4a0', '. '),
-    # --- data: the objects an app lists --------------------------------------
-    'folder': SafeMark('folder', '\U0001f4c1', '[ '),
-    'file': SafeMark('file', '\U0001f4c4', 'f '),
-    'chart': SafeMark('chart', '\U0001f4ca', '| '),
-    'find': SafeMark('find', '\U0001f50d', 'o '),
-    'lock': SafeMark('lock', '\U0001f512', 'L '),
-    'key': SafeMark('key', '\U0001f511', 'k '),
-    'link': SafeMark('link', '\U0001f517', '> '),
-    'magnet': SafeMark('magnet', '\U0001f9f2', 'M '),
-    # --- comms: the events an app reports ------------------------------------
-    'mail': SafeMark('mail', '\U0001f4e7', '@ '),
-    'bell': SafeMark('bell', '\U0001f514', 'n '),
-    'chat': SafeMark('chat', '\U0001f4ac', 'm '),
-    'globe': SafeMark('globe', '\U0001f30d', 'g '),
-    'net': SafeMark('net', '\U0001f310', 'N '),
-    'package': SafeMark('package', '\U0001f4e6', 'p '),
-    # --- waiting -------------------------------------------------------------
-    'wait': SafeMark('wait', '\u23f3', 'w '),           # hourglass with sand
-}
-
-# Marks share the registry with the one-cell glyphs, so transliterate() rewrites
-# them in ASCII mode with no second pass.  Check the two table-level invariants
-# here: a name that collides with a one-cell glyph, and two names drawing the
-# same character (a catalog cannot tell them apart).
-for _mark_name, _mark_spec in BUILTIN_MARKS.items():
-    if _mark_name in BUILTIN_GLYPHS:
-        raise ValueError(
-            f'mark {_mark_name!r} reuses the name of a one-cell glyph')
-_mark_drawn: dict[str, str] = {}
-for _mark_name, _mark_spec in BUILTIN_MARKS.items():
-    if _mark_spec.emoji in _mark_drawn:
-        raise ValueError(
-            f'marks {_mark_drawn[_mark_spec.emoji]!r} and {_mark_name!r} draw '
-            f'the same character {_mark_spec.emoji!r}')
-    _mark_drawn[_mark_spec.emoji] = _mark_name
-del _mark_name, _mark_spec, _mark_drawn
-
-#: Marks the font check prints, in reading order.  One per status, because a
-#: missing emoji font is most visible on the marks an app uses for status.
-MARKS_PROBE: tuple[str, ...] = ('ok', 'fail', 'attention', 'siren')
 
 #: Glyph names the font check prints, in reading order, when an app registers
 #: none of its own.  These are the built-ins a user is most likely to notice.
@@ -512,7 +402,7 @@ BUILTIN_PROBE: tuple[str, ...] = (
 CATALOG_PER_ROW = 27
 
 #: Cells in one block of the help page's font check.  One-cell symbols pack ten
-#: to a block; the two-cell marks pack five, which is why both end up ten cells
+#: to a block; the two-cell emoji pack five, which is why both end up ten cells
 #: wide.  Every block ends with a ``|`` so a font that shifts a column is
 #: immediately visible.
 FONT_CHECK_BLOCK_CELLS = 10
@@ -533,14 +423,14 @@ FONT_CHECK_ROW_WIDTH = FONT_CHECK_BLOCK_CELLS * FONT_CHECK_BLOCKS + FONT_CHECK_B
 #: :func:`_compile_tables`), which is the escape hatch for an app that liked the
 #: old shape.
 DEPRECATED_GLYPHS: dict[str, str] = {
-    '\u2b9e': '\u27a4',   # choice: U+2B9E is not in DejaVu Sans Mono
-    '\u2190': '\u2b05',   # nav_prev
-    '\u2192': '\u27a1',   # nav_next
-    '\u2191': '\u2b06',   # arrow_up
-    '\u2193': '\u2b07',   # arrow_down
-    '\u25cb': '\u25ef',   # circle_hollow
-    '\u25a1': '\u25fb',   # square_hollow
-    '\u25a0': '\u25fc',   # square_filled
+    '⮞': '➤',   # choice: U+2B9E is not in DejaVu Sans Mono
+    '←': '⬅',   # nav_prev
+    '→': '➡',   # nav_next
+    '↑': '⬆',   # arrow_up
+    '↓': '⬇',   # arrow_down
+    '○': '◯',   # circle_hollow
+    '□': '◻',   # square_hollow
+    '■': '◼',   # square_filled
 }
 
 _registry: dict[str, Glyph] = {}
@@ -570,12 +460,6 @@ def _reset_state() -> None:
     global _ascii_mode, _decided, _table, _upgrade_table  # pylint: disable=global-statement
     _registry.clear()
     _registry.update(BUILTIN_GLYPHS)
-    # The marks are Glyphs too -- one registry, one substitution pass -- but they
-    # stay out of the one-cell catalog (see catalog_entries()).
-    _registry.update({
-        name: Glyph(spec.emoji, spec.ascii, group=MARK_GROUP)
-        for name, spec in BUILTIN_MARKS.items()
-    })
     _probe.clear()
     _probe.extend(BUILTIN_PROBE)
     _ascii_mode = False
@@ -602,10 +486,10 @@ def register(
     *ascii_text* must be plain ASCII (it may be empty).  ``probe=True`` adds the
     glyph to the font check, where the user sees the real Unicode form.
 
-    *group* is the catalog family (``'math'``, ``'widgets'``, ...).  ``None``
-    keeps the family of an already-registered name, so overriding a built-in's
-    spelling does not silently move it into the application group; a new name
-    with no group joins ``'application'``.
+    *group* is one of :data:`GLYPH_GROUPS`.  ``None`` keeps the family of an
+    already-registered name, so overriding a built-in's spelling does not
+    silently move it into the application group; a new name with no group joins
+    ``'application'``.  ``group='emoji'`` applies the two-cell width contract.
     """
     if not isinstance(name, str) or not name:
         raise TypeError(f'glyph name must be a non-empty str, got {name!r}')
@@ -613,14 +497,21 @@ def register(
     resolved_group = group
     if resolved_group is None:
         resolved_group = existing.group if existing is not None else 'application'
+    if resolved_group == EMOJI_GROUP:
+        for other_name, other in _registry.items():
+            if (other_name != name and other.group == EMOJI_GROUP
+                    and other.unicode == unicode_text):
+                raise ValueError(
+                    f'emoji glyph {other_name!r} already draws '
+                    f'{unicode_text!r}')
     _registry[name] = Glyph(unicode_text, ascii_text, group=resolved_group)
     if probe:
         _add_probe(name)
-    if resolved_group != MARK_GROUP:
-        # Advisory only.  The blessed table is covered by a test, and a machine
-        # without the reference font is not a bug: console_window.fonts answers
-        # None then and records nothing.
-        fonts.check_registration('glyph', name, unicode_text)
+    # Advisory only.  The blessed table is covered by a test, and a machine
+    # without the reference font is not a bug: console_window.fonts answers
+    # None then and records nothing.
+    kind = 'mark' if resolved_group == EMOJI_GROUP else 'glyph'
+    fonts.check_registration(kind, name, unicode_text)
     _invalidate()
 
 
@@ -634,10 +525,10 @@ def register_many(
 
     Values may be :class:`Glyph` instances or two-item ``(unicode, ascii)``
     sequences.  *probe* names the entries the font check should print, in order.
-    *group* applies to the pair values, and overrides a ``Glyph``'s declared
-    family when given.  A ``Glyph`` left at the default ``'application'`` family
-    keeps an existing name's family, so overriding a built-in's spelling does
-    not move it out of the family it is cataloged under.
+    *group* applies to the pair values and to a ``Glyph`` left at the default
+    ``'application'`` family; it must be one of :data:`GLYPH_GROUPS`.  A
+    ``Glyph`` with an explicit family keeps it, and overriding a built-in's
+    spelling keeps the family it is cataloged under.
     """
     for name, spec in mapping.items():
         if isinstance(spec, Glyph):
@@ -678,124 +569,75 @@ def reset() -> None:
     _reset_state()
 
 
-def get(name: str) -> str:
-    """Return glyph *name* in the active set."""
-    try:
-        glyph = _registry[name]
-    except KeyError as exc:
-        raise KeyError(f'unknown glyph {name!r}') from exc
+def _active(glyph: Glyph) -> str:
+    """The spelling to draw for the current glyph mode."""
     return glyph.ascii if _ascii_mode else glyph.unicode
 
 
-def unicode_of(name: str) -> str:
-    """Return glyph *name* in its Unicode form, whatever the active mode is."""
-    try:
-        return _registry[name].unicode
-    except KeyError as exc:
-        raise KeyError(f'unknown glyph {name!r}') from exc
+def _resolve_name(key: str) -> str:
+    """Return the registered name for a name or a registered Unicode visual."""
+    if not isinstance(key, str):
+        raise TypeError(f'glyph key must be a str, got {type(key).__name__}')
+    if key in _registry:
+        return key
+    for name, glyph in _registry.items():
+        if glyph.unicode == key:
+            return name
+    raise KeyError(f'unknown glyph {key!r}')
 
 
-def lookup(name: str) -> Glyph:
-    """Return the :class:`Glyph` registered as *name*.
+def get(key: str) -> str:
+    """Return glyph *key* in the active set.
+
+    *key* may be a registered name or the glyph's Unicode visual, so an
+    application can write ``Glyphs.get('│')`` without looking up the name.  When
+    several names draw the same character, the first registered wins.
+    """
+    return _active(_registry[_resolve_name(key)])
+
+
+def unicode_of(key: str) -> str:
+    """Return glyph *key* in its Unicode form, whatever the active mode is."""
+    return _registry[_resolve_name(key)].unicode
+
+
+def lookup(key: str) -> Glyph:
+    """Return the :class:`Glyph` registered as *key* (a name or a visual).
 
     Unlike :func:`get`, this exposes both spellings and the group, which is what
     a catalog listing or a lookup table needs.
     """
-    try:
-        return _registry[name]
-    except KeyError as exc:
-        raise KeyError(f'unknown glyph {name!r}') from exc
+    return _registry[_resolve_name(key)]
 
 
-def group_of(name: str) -> str:
-    """Return the catalog family (``'math'``, ``'ui'``, ...) of *name*."""
-    return lookup(name).group
+def group_of(key: str) -> str:
+    """Return the catalog family (``'math'``, ``'ui'``, ...) of *key*."""
+    return lookup(key).group
 
 
-def register_mark(name: str, emoji: str, ascii_text: str) -> None:
-    """Teach the library one approved two-cell mark.
+def glyphs_in_group(group: str) -> list[tuple[str, Glyph]]:
+    """Every registered glyph in *group*, in registration order.
 
-    Validation is the built-in table's (:func:`validate_mark`): a single
-    ``EAW=W`` code point, two cells in both spellings, and a variation selector
-    that changes neither.  Registration puts the mark in the same substitution
-    table as the one-cell glyphs, so ``transliterate()`` rewrites it in ASCII
-    mode and the audit knows the fallback exists.
+    Returns ``(name, glyph)`` pairs.  *group* must be one of
+    :data:`GLYPH_GROUPS`; an unknown group raises ``ValueError``.
     """
-    spec = SafeMark(name, emoji, ascii_text)
-    for existing in marks():
-        if existing.emoji == spec.emoji and existing.name != name:
-            raise ValueError(f'mark {existing.name!r} already draws {spec.emoji!r}')
-    register(name, spec.emoji, spec.ascii, group=MARK_GROUP)
-    fonts.check_registration('mark', name, spec.emoji)
-
-
-def mark(name: str) -> str:
-    """Return approved mark *name* in the active spelling.
-
-    Always two cells: the emoji in Unicode mode, the plain-ASCII fallback in
-    ASCII mode.  A name that is not an approved mark raises ``KeyError``, which
-    is the development-time check -- it fires in an application's tests rather
-    than halfway through a draw.
-    """
-    glyph = lookup(name)
-    if glyph.group != MARK_GROUP:
-        raise KeyError(f'{name!r} is not an approved mark')
-    return glyph.ascii if _ascii_mode else glyph.unicode
-
-
-def marks() -> list[SafeMark]:
-    """Every approved mark, in registration order, as :class:`SafeMark` records."""
+    if group not in GLYPH_GROUPS:
+        raise ValueError(
+            f'unknown glyph group {group!r}; choose from '
+            f'{", ".join(GLYPH_GROUPS)}')
     return [
-        SafeMark(name, glyph.unicode, glyph.ascii)
+        (name, glyph)
         for name, glyph in _registry.items()
-        if glyph.group == MARK_GROUP
+        if glyph.group == group
     ]
-
-
-def marks_probe_text() -> str:
-    """The real Unicode marks a user should look at (never the ASCII set).
-
-    The font check has to print the mark that might be missing; printing the
-    fallback would check nothing.
-    """
-    shown: list[str] = []
-    for name in MARKS_PROBE:
-        glyph = _registry.get(name)
-        if glyph is None or glyph.unicode in shown:
-            continue
-        shown.append(glyph.unicode)
-    return ' '.join(shown)
-
-
-def marks_rows(width: int, per_row: int = CATALOG_PER_ROW) -> list[str]:
-    """Pack the approved marks into space-separated rows no wider than *width*.
-
-    The two-cell counterpart of :func:`catalog_rows`, for the built-in Fonts
-    section: the marks are always the Unicode ones, because the section exists
-    to show what the emoji font will have to draw.
-    """
-    rows: list[str] = []
-    row: list[str] = []
-    used = 0
-    for spec in marks():
-        item_width = string_width(spec.emoji)
-        needed = item_width if not row else item_width + 1
-        if row and (len(row) >= per_row or used + needed > width):
-            rows.append(' '.join(row))
-            row, used, needed = [], 0, item_width
-        row.append(spec.emoji)
-        used += needed
-    if row:
-        rows.append(' '.join(row))
-    return rows
 
 
 def font_missing() -> tuple[fonts.Missing, ...]:
     """Registrations the reference font family cannot draw, in order.
 
-    Populated only when an application registers a glyph or a mark and the
-    expected family is installed (see :mod:`console_window.fonts`).  A help page
-    reads it; nothing on a draw path queries fonts.
+    Populated only when an application registers a glyph and the expected family
+    is installed (see :mod:`console_window.fonts`).  A help page reads it;
+    nothing on a draw path queries fonts.
     """
     return fonts.registered_missing()
 
@@ -830,7 +672,9 @@ def _in_mark_ranges(ch: str) -> bool:
 
 
 #: What to say about a mark that is one cell when it was meant to be two.
-_SINGLE_CELL_HINT = 'use mark() for two cells, or a one-cell EAW=N mark like \u2713'
+_SINGLE_CELL_HINT = (
+    'use an emoji glyph for two cells, or a one-cell EAW=N symbol like \u2713'
+)
 
 
 def _sequence_offsets(text: str) -> set[int]:
@@ -860,7 +704,7 @@ def find_issues(text: str) -> list[Issue]:
     One issue per offending code point: a base that is followed by a selector is
     reported once, at the selector (which carries the base in its text), and the
     code points of a joiner sequence are not also reported individually.
-    Approved marks and ordinary text produce nothing: ``Grüße``, ``—`` and ``±``
+    Approved emoji and ordinary text produce nothing: ``Grüße``, ``—`` and ``±``
     are content, not decoration, and are outside the ranges the check looks at.
     A bare one-cell symbol is not a hazard either -- ``✓`` is rung 3 of the
     ladder, and whether a terminal forces emoji presentation for it cannot be
@@ -869,7 +713,8 @@ def find_issues(text: str) -> list[Issue]:
     if not text or text.isascii():
         return []
     approved = {
-        glyph.unicode for glyph in _registry.values() if glyph.group == MARK_GROUP
+        glyph.unicode for glyph in _registry.values()
+        if glyph.group == EMOJI_GROUP
     }
     joined = _sequence_offsets(text)
     issues: list[Issue] = []
@@ -877,8 +722,8 @@ def find_issues(text: str) -> list[Issue]:
         if ch in _VARIATION_SELECTORS:
             base = text[offset - 1] if offset else ''
             if base in approved:
-                # An approved mark is VS16-immune by construction (validate_mark
-                # checks it), so a stray selector next to one is harmless.
+                # An emoji glyph is VS16-immune by construction (Glyph checks
+                # it), so a stray selector next to one is harmless.
                 continue
             issues.append(Issue(
                 'vs16', base + ch, offset - 1 if base else offset,
@@ -904,13 +749,15 @@ def find_issues(text: str) -> list[Issue]:
             issues.append(Issue(
                 'ambiguous', ch, offset,
                 f'{ch} ({code}) is East-Asian Ambiguous: {width} cell(s) here, '
-                '2 in a CJK-width terminal; use mark() or a one-cell EAW=N mark'))
+                '2 in a CJK-width terminal; use an emoji glyph for two cells, '
+                'or a one-cell EAW=N symbol'))
             continue
         if eaw == 'W':
             issues.append(Issue(
                 'unapproved', ch, offset,
                 f'{ch} ({code}) is a two-cell mark with no approved fallback; '
-                'add it with Glyphs.register_mark() or use mark()'))
+                "add it with Glyphs.register(..., group='emoji') or use an "
+                'approved emoji glyph'))
     return issues
 
 
@@ -966,7 +813,7 @@ class CatalogEntry:
 
 
 def catalog_entries(unique: bool = False,
-                    include_marks: bool = False) -> list[CatalogEntry]:
+                    include_emoji: bool = False) -> list[CatalogEntry]:
     """Every registered glyph with its name and family, in catalog order.
 
     The built-ins come first, grouped by family, and the application's own
@@ -975,15 +822,15 @@ def catalog_entries(unique: bool = False,
     they draw the same character.  ``unique=True`` keeps only the first name for
     each character, which is the flat sample list :func:`catalog_items` returns.
 
-    The two-cell marks are left out unless ``include_marks=True``: the one-cell
-    catalog promises "no emoji, one cell, in the default monospace font", and a
-    :data:`BUILTIN_MARKS` entry cannot keep that promise.  A page that wants both
-    families passes ``include_marks=True`` and splits on ``group``.
+    The two-cell ``'emoji'`` family is left out unless ``include_emoji=True``:
+    the one-cell catalog promises a single cell in the default monospace font,
+    and an emoji entry cannot keep that promise.  A page that wants both families
+    passes ``include_emoji=True`` and splits on ``group``.
     """
     entries: list[CatalogEntry] = []
     seen: set[str] = set()
     for name, glyph in _registry.items():
-        if glyph.group == MARK_GROUP and not include_marks:
+        if glyph.group == EMOJI_GROUP and not include_emoji:
             continue
         if unique:
             if glyph.unicode in seen:
@@ -993,7 +840,7 @@ def catalog_entries(unique: bool = False,
     return entries
 
 
-def catalog_items(include_marks: bool = False) -> list[str]:
+def catalog_items(include_emoji: bool = False) -> list[str]:
     """Every registered glyph, once, in registration order, in the active set.
 
     This is the list an application consults when it needs a symbol: the
@@ -1004,12 +851,12 @@ def catalog_items(include_marks: bool = False) -> list[str]:
     """
     return [
         entry.active
-        for entry in catalog_entries(unique=True, include_marks=include_marks)
+        for entry in catalog_entries(unique=True, include_emoji=include_emoji)
     ]
 
 
 def catalog_rows(width: int, per_row: int = CATALOG_PER_ROW,
-                 include_marks: bool = False) -> list[str]:
+                 include_emoji: bool = False) -> list[str]:
     """Pack the catalog into space-separated rows no wider than *width* cells.
 
     A fallback can be more than one cell (``->``, ``[x]``, ``...``), so rows are
@@ -1020,7 +867,7 @@ def catalog_rows(width: int, per_row: int = CATALOG_PER_ROW,
     rows: list[str] = []
     row: list[str] = []
     used = 0
-    for item in catalog_items(include_marks=include_marks):
+    for item in catalog_items(include_emoji=include_emoji):
         item_width = string_width(item)
         needed = item_width if not row else item_width + 1
         if row and (len(row) >= per_row or used + needed > width):
@@ -1045,7 +892,7 @@ def _check_block(parts: list[str]) -> str:
 def _check_blocks(items: Iterable[str]) -> list[str]:
     """Pack *items* into ten-cell blocks, each ending with ``|``.
 
-    One-cell symbols therefore fill ten to a block; two-cell marks fill five.
+    One-cell symbols therefore fill ten to a block; two-cell emoji fill five.
     A block that runs out of items is completed with ``.`` so the ``|`` stays in
     the same column on every row.
     """
@@ -1073,22 +920,23 @@ def _pad_to_rows(blocks: list[str]) -> list[str]:
 
 
 def font_check_rows() -> list[str]:
-    """Return the fixed-width symbol and mark rows for the help page.
+    """Return the fixed-width symbol and emoji rows for the help page.
 
     Each row is exactly :data:`FONT_CHECK_ROW_WIDTH` cells: five ten-cell blocks,
     each followed by ``|``.  One-cell catalog symbols come first, ten per block;
-    the two-cell marks follow, five per block and on a fresh row.  A block with
+    the two-cell emoji follow, five per block and on a fresh row.  A block with
     more room than items is padded with ``.``, and the last row of each section
     is completed with ``.`` blocks, so every ``|`` must line up when the font and
     terminal are set up correctly.  A box, a blank or a shifted column breaks
     that alignment and makes the problem obvious.
 
-    The marks are always the Unicode ones, because the section exists to show
+    The emoji are always the Unicode ones, because the section exists to show
     what the emoji font will have to draw.
     """
     symbol_blocks = _pad_to_rows(_check_blocks(catalog_items()))
-    mark_blocks = _pad_to_rows(_check_blocks(spec.emoji for spec in marks()))
-    blocks = symbol_blocks + mark_blocks
+    emoji_blocks = _pad_to_rows(_check_blocks(
+        glyph.unicode for _name, glyph in glyphs_in_group(EMOJI_GROUP)))
+    blocks = symbol_blocks + emoji_blocks
     if not blocks:
         return []
     return [
@@ -1186,7 +1034,7 @@ def _audit(text: str) -> None:
 
     The first pass reports what :func:`find_issues` classifies -- a VS16-promoted
     base, a zero-width joiner, an East-Asian Ambiguous shape, an unapproved
-    two-cell mark -- and says what to use instead.  The second pass keeps the
+    two-cell emoji -- and says what to use instead.  The second pass keeps the
     original behaviour for one-cell symbols that are registered nowhere, which is
     how an application learns the :func:`register` call for its own vocabulary.
     """
@@ -1413,17 +1261,13 @@ class Glyphs:
 
     register = staticmethod(register)
     register_many = staticmethod(register_many)
-    register_mark = staticmethod(register_mark)
     probe = staticmethod(probe)
     reset = staticmethod(reset)
     get = staticmethod(get)
     unicode_of = staticmethod(unicode_of)
     lookup = staticmethod(lookup)
     group_of = staticmethod(group_of)
-    mark = staticmethod(mark)
-    marks = staticmethod(marks)
-    marks_probe_text = staticmethod(marks_probe_text)
-    marks_rows = staticmethod(marks_rows)
+    glyphs_in_group = staticmethod(glyphs_in_group)
     font_missing = staticmethod(font_missing)
     find_issues = staticmethod(find_issues)
     is_ascii = staticmethod(is_ascii)

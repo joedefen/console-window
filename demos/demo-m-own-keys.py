@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 """M — Own the navigation keys.
 
-Owns: taken-nav-keys, spinner-nav-keys, paged-navigation, help-labels
+Owns: taken-nav-keys, spinner-nav-keys, paged-navigation, nav-help-pruning
 Base: c-options
 Run:  ./demos/run-demo m-own-keys
 
 LEFT and RIGHT are navigation keys by default, so the spinner would normally
-reject them.  ``ConsoleWindowOpts(taken_nav_keys={...})`` withdraws them from
-this window's navigation dispatch and gives them labels; the window's
-``opts.nav_keys`` (the reduced set) is what the spinner validates against.
+reject them.  ``ConsoleWindowOpts(taken_nav_keys=[...])`` withdraws them from
+this window's navigation dispatch; the window's ``opts.nav_keys`` (the reduced
+set) is what the spinner validates against.
 
-The help legend is generated from the same bindings: it shows the
-application's labels for LEFT/RIGHT instead of the reserved arrow names.
+The help legend is generated from the same bindings: a taken key is removed
+from the navigation map instead of being documented a second time.  LEFT/RIGHT
+are only reserved (never printed), so this window's legend is unchanged.
 Dialogs still edit with the arrow keys, because their key loop is separate from
 the paged navigation.
 """
@@ -92,10 +93,7 @@ class OwnKeysApp(DemoApp):
     #: Five pages of one hundred ranks, so LEFT/RIGHT have somewhere to go.
     row_range = (1, 500)
     win_options: ClassVar[dict[str, object]] = {
-        'taken_nav_keys': {
-            cs.KEY_LEFT: 'prev page',
-            cs.KEY_RIGHT: 'next page',
-        },
+        'taken_nav_keys': [cs.KEY_LEFT, cs.KEY_RIGHT],
     }
 
     def build_screens(self):

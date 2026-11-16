@@ -27,7 +27,7 @@ class Span(NamedTuple):
 
 
 class HeaderLine:
-    """Builder for the explicit (newer, unparsed) header form.
+    """Builder for the explicit, unparsed header form.
 
     Each method appends one :class:`Span` and returns ``self``, so calls
     chain.  Declare roles with the method, not with punctuation: ``key('x')``
@@ -109,8 +109,8 @@ def strip_key_brackets(spans: Iterable[Span]) -> list[Span]:
 
     :meth:`HeaderLine.bracket_key` emits ``'[', Span(key, KEY), ']'`` so that
     the explicit-token API can show the brackets verbatim.  The fancy header
-    path treats those delimiters as markup instead, matching the legacy string
-    parser's ``[x]`` rule while preserving the caller's declared span roles.
+    path treats those delimiters as markup instead, matching the markup form's
+    ``[x]`` rule while preserving the caller's declared span roles.
     """
     pending = list(spans)
     result: list[Span] = []
@@ -154,7 +154,7 @@ def _re_match_pattern(s: str) -> str | None:
 
 
 def parse_fancy_header(line: str) -> list[Span]:
-    """Scan *line* with the legacy header grammar and return its spans.
+    """Scan *line* with the header markup grammar and return its spans.
 
     The grammar is deliberately small:
 
@@ -170,7 +170,7 @@ def parse_fancy_header(line: str) -> list[Span]:
     * everything else is ``PLAIN`` text.
 
     This is pure lexing: no attributes and no mode.  ``mode='Off'`` skips
-    this function entirely, which is how the legacy string form keeps its
+    this function entirely, which is how the markup string form keeps its
     literal brackets.
     """
     result: list[Span] = []

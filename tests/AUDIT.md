@@ -37,7 +37,7 @@ There is no data-loss or security defect, and the interactive core is well cover
 | [`screens.py`](console_window/screens.py:1) | 248 | 161 | 83% | `Screen` base, `ScreenStack` router, `HOME_ST`, `BasicHelpScreen` |
 | [`theme.py`](console_window/theme.py:1) | 303 | 100 | 98% | 7 palettes, `set()`/`set_active()`, picker-screen factory |
 | [`textwidth.py`](console_window/textwidth.py:1) | 236 | 167 | 95% | Display-cell arithmetic: width, truncate, justify, wrap, wrap positions |
-| [`header.py`](console_window/header.py:1) | 162 | 110 | 97% | `Span`/`HeaderLine` token API + legacy `[x]`/`KEY:` string parser |
+| [`header.py`](console_window/header.py:1) | 162 | 110 | 97% | `Span`/`HeaderLine` token API + markup `[x]`/`KEY:` string parser |
 | [`backend.py`](console_window/backend.py:1) | 282 | 128 | 88% | `Surface`/`RenderBackend` protocols, `CursesBackend`, `HeadlessBackend` |
 | [`geometry.py`](console_window/geometry.py:1) | 82 | 61 | 100% | Pure abut/indicator/pickable-row math |
 | [`opts.py`](console_window/opts.py:1) | 88 | 63 | 100% | `ConsoleWindowOpts` (`__slots__` + kwargs) |

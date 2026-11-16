@@ -3,6 +3,69 @@
 All notable changes to `console-window` are documented here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [3.1.0]
+
+A minor release that consolidates the glyph and mark APIs into one `Glyph`
+type and carries the changes originally planned for 3.0.1; that release was
+folded into this one.  It contains deliberate breaks from 3.0.0; the README's
+"3.1.0 Breakages" section lists each replacement.
+
+### Added
+
+- `GLYPH_GROUPS`, the fixed set of catalog families, and `EMOJI_GROUP`.
+- `glyphs_in_group(group)` returns `(name, Glyph)` pairs in registration order.
+- `Glyphs.get()`, `unicode_of()`, `lookup()` and `group_of()` accept the glyph's
+  Unicode visual as well as its name.
+
+### Changed
+
+- `BUILTIN_GLYPHS` carries the family in every row and writes the visual
+  literally, so the table reads as the UI it describes.
+- All 39 emoji joined `BUILTIN_GLYPHS` with `group='emoji'`; an emoji is a
+  `Glyph` whose constructor enforces the two-cell width contract.
+- The one-cell `'marks'` family is now `'status'`.
+- `catalog_entries()`, `catalog_items()` and `catalog_rows()` use
+  `include_emoji=` instead of `include_marks=`.
+- `ConsoleWindowOpts(taken_nav_keys=...)` now takes an ordered list of key
+  codes.  `.taken_nav_keys` stores that list; duplicate codes collapse to their
+  first occurrence.  The old `{key_code: label}` mapping is deprecated and only
+  its keys are used.
+- A taken key is no longer re-documented in a separate `App:` block.  It is
+  removed from its `action: keys` chunk in the generated navigation help; a
+  chunk whose keys are all taken is dropped, and a partially reduced chunk is
+  space-padded to its full-set width so later chunks keep their columns.
+  `render_nav_help()` accordingly takes only the effective key set.
+- Documentation now presents the one-cell and two-cell families as a layout
+  choice, and recommends a width-preserving emoji or text symbol instead of
+  living without emoji.
+
+### Documentation
+
+- `Screen.add_fancy_header()` now describes its string markup form on its own
+  terms rather than as a legacy path.  The markup string is the recommended
+  spelling whenever it is unambiguous (a title word, `[x]` keys, `KEY:`
+  actions); the explicit `HeaderLine`/`Span` form is recommended when the text
+  must stay literal or a role cannot be spelled unambiguously.  No API or
+  behavior changed, and no existing call needs to move between the two forms.
+
+### Removed
+
+- `BUILTIN_GROUPS`, `BUILTIN_MARKS`, `MARK_GROUP`, `SafeMark`, `validate_mark()`,
+  `register_mark()`, `mark()`, `marks()`, `marks_probe_text()` and
+  `marks_rows()`.  Use `Glyph(..., group='emoji')`,
+  `Glyphs.register(..., group='emoji')`, `Glyphs.get()` and
+  `Glyphs.glyphs_in_group('emoji')`.
+
+### Notes
+
+- `Glyph.group` is validated against `GLYPH_GROUPS`; application-defined group
+  names are rejected.  New registrations default to `'application'`.
+- `opts.nav_keys` is unchanged: a `frozenset` of `NAVIGATION_KEYS` minus the
+  taken keys.
+- Demo M (`m-own-keys`) exercises the list form and the pruned navigation help;
+  Demo Q (`q-marks`) exercises the emoji group through `glyphs_in_group()`;
+  Demo K (`k-glyphs`) shows the one-cell catalog.
+
 ## [3.0.0]
 
 A major release: content and pick/scroll state move onto `Screen`, `draw()` is

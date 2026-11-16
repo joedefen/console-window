@@ -4,14 +4,16 @@ import pytest
 
 from console_window.glyphs import (
     BUILTIN_GLYPHS,
-    BUILTIN_GROUPS,
     DEPRECATED_GLYPHS,
+    EMOJI_GROUP,
+    GLYPH_GROUPS,
     Glyph,
     Glyphs,
     catalog_entries,
     catalog_items,
     catalog_rows,
     get,
+    glyphs_in_group,
     group_of,
     is_ascii,
     lookup,
@@ -132,14 +134,19 @@ def test_facade_delegates_to_the_module_functions():
     assert Glyphs.get('bullet') == '\u00b7'
 
 
-def test_the_builtin_catalog_is_eighty_glyphs():
-    assert len(BUILTIN_GLYPHS) == 80
+def test_the_builtin_table_has_eighty_one_cell_glyphs_and_thirty_nine_emoji():
+    one_cell = [glyph for glyph in BUILTIN_GLYPHS.values()
+                if glyph.group != EMOJI_GROUP]
+    assert len(one_cell) == 80
+    assert len(glyphs_in_group(EMOJI_GROUP)) == 39
 
 
-def test_every_builtin_is_one_cell_wide():
+def test_every_one_cell_builtin_is_one_cell_wide():
     # A two-cell symbol would push the rest of its row out of alignment on the
     # very terminal that is already struggling to draw it.
     for name, glyph in BUILTIN_GLYPHS.items():
+        if glyph.group == EMOJI_GROUP:
+            continue
         assert string_width(glyph.unicode) == 1, name
 
 
@@ -200,16 +207,14 @@ def test_every_deprecated_spelling_maps_to_a_registered_replacement():
         assert old not in registered, old
 
 
-def test_every_builtin_has_one_group_and_the_groups_are_contiguous():
-    grouped = {}
-    for group, names in BUILTIN_GROUPS:
-        for name in names:
-            assert name not in grouped, name
-            grouped[name] = group
-    assert set(grouped) == set(BUILTIN_GLYPHS)
-    for name, glyph in BUILTIN_GLYPHS.items():
-        assert glyph.group == grouped[name], name
-    groups = [group for group, _names in BUILTIN_GROUPS]
+def test_every_builtin_group_is_known_and_the_table_is_contiguous():
+    groups = []
+    for glyph in BUILTIN_GLYPHS.values():
+        assert glyph.group in GLYPH_GROUPS
+        if not groups or groups[-1] != glyph.group:
+            groups.append(glyph.group)
+    assert groups[0] == 'ui'
+    assert groups[-1] == EMOJI_GROUP
     assert len(groups) == len(set(groups))
 
 
@@ -221,6 +226,36 @@ def test_group_of_and_lookup_expose_the_family():
         group_of('no-such-glyph')
     with pytest.raises(KeyError, match='no-such-glyph'):
         lookup('no-such-glyph')
+
+
+def test_lookups_accept_the_unicode_visual():
+    assert get('\u2502') == '\u2502'
+    assert unicode_of('\u2502') == '\u2502'
+    assert lookup('\u2502').unicode == '\u2502'
+    assert group_of('\u2502') == 'ui'
+    set_ascii(True)
+    assert get('\u2502') == '|'
+    # The two-cell family works the same way.
+    assert get('\u2705') == 'v '
+    assert group_of('\u2705') == EMOJI_GROUP
+
+
+def test_the_first_registered_name_for_a_shared_visual_wins():
+    # cursor and box_v draw the same character; cursor is registered first.
+    assert lookup('\u2502').group == 'ui'
+    assert get('\u2502') == BUILTIN_GLYPHS['cursor'].unicode
+    # cursor_block and swatch are the same block; cursor_block wins.
+    assert get('\u2588') == BUILTIN_GLYPHS['cursor_block'].unicode
+
+
+def test_a_glyph_group_must_be_one_of_the_known_families():
+    with pytest.raises(ValueError, match=r'Glyph\.group'):
+        Glyph('\u2691', '!', group='app-defined')
+
+
+def test_glyphs_in_group_rejects_an_unknown_group():
+    with pytest.raises(ValueError, match='unknown glyph group'):
+        glyphs_in_group('app-defined')
 
 
 def test_a_new_app_glyph_joins_the_application_group():
@@ -238,14 +273,15 @@ def test_register_many_does_not_move_an_overridden_builtin():
     assert group_of('cursor') == 'ui'
 
 
-def test_register_many_can_declare_a_family_explicitly():
+def test_register_many_can_declare_a_known_family():
     register_many({'tick': Glyph('\u2713', 'OK', group='status')})
     assert group_of('tick') == 'status'
 
 
 def test_catalog_entries_list_every_name_and_family_in_catalog_order():
     entries = catalog_entries()
-    assert len(entries) == len(BUILTIN_GLYPHS)
+    assert len(entries) == sum(
+        1 for glyph in BUILTIN_GLYPHS.values() if glyph.group != EMOJI_GROUP)
     assert entries[0].name == 'cursor'
     assert entries[0].group == 'ui'
     # Names that draw the same character stay separate entries; the flat sample

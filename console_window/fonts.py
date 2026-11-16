@@ -13,9 +13,9 @@ Three rules keep the check cheap and quiet:
 * fontconfig is the only source of truth, so a missing ``fc-list`` degrades to
   "unknown" instead of an exception.
 
-The one-cell catalog and the two-cell marks share this module because they share
-the shape of the question: ``kind`` picks the expected family, nothing else
-differs.
+The one-cell catalog and the two-cell emoji group share this module because they
+share the shape of the question: ``kind`` picks the expected family, nothing
+else differs.
 """
 
 from __future__ import annotations

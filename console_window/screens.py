@@ -115,15 +115,21 @@ class Screen(_ViewState):
     def add_fancy_header(self, line: str | HeaderLine, mode: str = 'Underline',
                          search_pattern_attr: int | None = None,
                          line_attr: int | None = None) -> None:
-        """Append a header row, optionally scanning the legacy text markup.
+        """Append a header row from a markup string or explicit spans.
 
-        *line* is either of the two accepted header forms:
+        *line* is either of the two accepted header forms.  Both are fully
+        supported; pick the one that says what you mean with the least fuss:
 
-        ``str`` -- the legacy (or "simple") form.  Its text is scanned for the
-        markup described below.  This is what older applications wrote, and it
-        is still the shortest spelling for a one-off legend.
+        ``str`` -- the markup form.  Its text is scanned by the rules below.
+        This is the shortest spelling for a one-off legend, and it is the
+        preferred form whenever the text is unambiguous: a leading title word,
+        ``[x]`` keys and ``KEY:`` actions read well as written and need no
+        builder.  Reach for the explicit form instead only when the text must
+        stay literal (brackets a user should see, a ``KEY:`` spelling that is
+        prose, a ``/pattern`` that is not a search) or when a role cannot be
+        spelled unambiguously in markup.
 
-        :class:`HeaderLine` (or any iterable of :class:`Span`) -- the newer
+        :class:`HeaderLine` (or any iterable of :class:`Span`) -- the explicit
         form.  Roles are declared by the builder (``text()``, ``key()``,
         ``bracket_key()``, ``label()``, ``search()``) and are never re-guessed
         from the text.  The one markup rule that still applies is
@@ -149,7 +155,7 @@ class Screen(_ViewState):
         still styles the line's own spans, so an "off" line can still be
         dimmed.
 
-        Legacy string markup (``str`` input, and never in ``'Off'`` mode):
+        String markup (``str`` input, and never in ``'Off'`` mode):
 
         * the first word, if it is a word of letters/digits/underscores and
           hyphens (``^[\\w-]+$``), is the title and is styled as ``LABEL``
@@ -183,7 +189,7 @@ class Screen(_ViewState):
                         line_attr: int | None = None) -> None:
         """Append a header row from explicit spans, with no parsing at all.
 
-        This is the newer, less parsed form: every span's ``text`` and ``role``
+        This is the explicit, unparsed form: every span's ``text`` and ``role``
         is emitted exactly as given.  In particular, ``HeaderLine``'s
         ``bracket_key()`` keeps its literal ``[``/``]`` here, whereas
         :meth:`add_fancy_header` treats those delimiters as markup and removes
@@ -202,8 +208,10 @@ class Screen(_ViewState):
         spans, so the whole row can be dimmed without losing the role styling.
 
         Use this method when the text must stay literal (paths, sample markup,
-        or brackets a user should see) or when the roles are already known and
-        re-parsing would be lossy.
+        or brackets a user should see) or when a role cannot be spelled
+        unambiguously in markup.  For an ordinary legend whose markup is
+        unambiguous, :meth:`add_fancy_header` with a ``str`` is usually shorter
+        and clearer.
         """
         self.win._add_header_line(self.head, header_line, mode,
                                   search_pattern_attr, line_attr)

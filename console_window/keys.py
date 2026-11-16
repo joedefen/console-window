@@ -10,8 +10,9 @@ import curses
 #
 # The set is a plain ``set`` for 2.0 compatibility, but the library never
 # mutates it.  Per-window ownership lives in ``ConsoleWindowOpts``: pass
-# ``taken_nav_keys`` to withdraw a key from *that* window's navigation
-# dispatch, and read ``opts.nav_keys`` for the effective (immutable) set.
+# ``taken_nav_keys=[key, ...]`` to withdraw keys from *that* window's
+# navigation dispatch, and read ``opts.nav_keys`` for the effective
+# (immutable) set.
 # Never monkeypatch this module global; two windows with different bindings
 # would contaminate each other.
 NAVIGATION_KEYS: set[int] = {
