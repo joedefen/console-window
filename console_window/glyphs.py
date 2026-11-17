@@ -294,6 +294,8 @@ BUILTIN_GLYPHS: dict[str, Glyph] = {
     'square_hollow': Glyph('◻', '[]', group='shapes'),       # U+25FB
     'star_filled': Glyph('★', '*', group='shapes'),          # U+2605
     'star_hollow': Glyph('☆', '+', group='shapes'),          # U+2606
+    'asterisk_heavy': Glyph('✱', '*', group='shapes'),       # U+2731
+    'asterisk_eight_spoked': Glyph('✳', '*', group='shapes'),  # U+2733
 
     # --- blocks and bars: textures, half blocks, sparkline columns ----------
     'block_light': Glyph('░', '.', group='blocks'),          # U+2591

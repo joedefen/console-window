@@ -134,11 +134,21 @@ def test_facade_delegates_to_the_module_functions():
     assert Glyphs.get('bullet') == '\u00b7'
 
 
-def test_the_builtin_table_has_eighty_one_cell_glyphs_and_thirty_nine_emoji():
+def test_the_builtin_table_has_eighty_two_one_cell_glyphs_and_thirty_nine_emoji():
     one_cell = [glyph for glyph in BUILTIN_GLYPHS.values()
                 if glyph.group != EMOJI_GROUP]
-    assert len(one_cell) == 80
+    assert len(one_cell) == 82
     assert len(glyphs_in_group(EMOJI_GROUP)) == 39
+
+
+def test_the_two_standard_asterisks_are_registered():
+    assert get('asterisk_heavy') == '\u2731'
+    assert get('asterisk_eight_spoked') == '\u2733'
+    assert group_of('asterisk_heavy') == 'shapes'
+    assert group_of('asterisk_eight_spoked') == 'shapes'
+    set_ascii(True)
+    assert get('asterisk_heavy') == '*'
+    assert get('asterisk_eight_spoked') == '*'
 
 
 def test_every_one_cell_builtin_is_one_cell_wide():
@@ -160,8 +170,8 @@ def test_one_codepoint_has_one_fallback():
 
 def test_the_catalog_lists_each_character_once():
     items = catalog_items()
-    assert len(items) == 78
-    assert len(set(items)) == 78
+    assert len(items) == 80
+    assert len(set(items)) == 80
 
 
 def test_the_catalog_follows_the_active_spelling():
