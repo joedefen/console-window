@@ -1,0 +1,31 @@
+[build-system]
+requires = ["flit_core >=3.2,<5"]
+build-backend = "flit_core.buildapi"
+
+[tool.flit.module]
+name = "console_window"
+
+[project]
+name = "console-window"
+dynamic = ["version"]
+description = "A robust curses wrapper for creating Text User Interfaces (TUIs)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {file = "LICENSE"}
+
+authors = [
+    {name = "Joe Defen", email = "joedef@duck.com"},
+]
+
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: Terminals",
+    "Topic :: Software Development :: User Interfaces",
+]
+
+
+[project.urls]
+Homepage = "https://github.com/joedefen/console-window"

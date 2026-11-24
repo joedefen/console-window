@@ -1,0 +1,27 @@
+#!/usr/bin/env python3
+"""Run the demo menu from this checkout.
+
+`rungs` reads `demos/demos.ini` and each entry runs `./run-demo <name>`
+from inside `demos/`, so the menu exercises the library in the working tree
+rather than an installed copy.
+
+The gate byte-compiles and lints `runner`, so it has to be Python even
+though it carries no `.py` suffix; run it as `./runner` (or pass `-n`
+to preview the commands without running them).
+"""
+
+import os
+import sys
+
+DEMOS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'demos')
+MENU = 'demos.ini'
+
+
+def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    os.chdir(DEMOS_DIR)
+    os.execvp('rungs', ['rungs', *argv, MENU])
+
+
+if __name__ == '__main__':
+    main()
